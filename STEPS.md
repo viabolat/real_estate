@@ -11,7 +11,7 @@ For photo sourcing and resolution rules, see `IDEA.md`. For project rules, `CLAU
 |---|---|---|
 | `photos/` | **yes** | Numbered in tour order: `01_exterior.jpg`, `02_entry.webp`, ... The prefix **is** the order. Every run prints the resolved order first — read it. |
 | `music.mp3` | no | A **licensed** track. Skip with `--no-music`. |
-| `lower_third.png` | no | Agent + listing info. Full-frame 1920x1080 plate, or a small strip. |
+| `lower_third.png` | no | Agent + listing info. Full-frame 1920x1080 plate, or a small strip. **Absent, one is drawn** from `address` / `agent_name` / `agent_phone` in `config.json`. |
 | `logo.png` | no | Brokerage mark, top-left. Transparent padding trimmed automatically. |
 | `viabolat.png` | no | Proofing watermark, centered. **`sample_` cuts only.** Wants >= 864px. |
 | `config.json` | no | Per-listing overrides: timing, pacing, asset paths. See §4. |
@@ -27,9 +27,9 @@ directory. The one exception: an asset path that does not resolve there is retri
 beside `make_tour.py`, which is what lets `viabolat.png` and the shared
 `global_assets/` library work from any listing folder without being copied in.
 
-`streamlit run dashboard.py` (from the project root) does all of this through a UI
+`python3 tour.py` (from the project root) does all of this through one wizard
 — see §2. It is a front end, not a separate pipeline: it writes `config.json` and
-runs the exact command shown in each scenario below.
+runs the exact commands shown in the scenarios below.
 
 ---
 
@@ -43,8 +43,8 @@ runs the exact command shown in each scenario below.
 | `--720p` | 1280x720. Requires photos >= 1433px wide. |
 | `--allow-lowres` | Bypass the resolution gate. **Preview only** — see §5. |
 | `--no-music` | Silent build. Outputs still carry a silent audio track. |
-| `--keep-work` | Keep `clips/` and `work_silent.mp4` so `--finish-only` can reuse them. |
-| `--finish-only` | Reuse `work_silent.mp4`, redo music + branding only. Implies `--keep-work`. |
+| `--keep-work` | Keep `clips/`, `work_silent.mp4` and `work_branded.mp4` so `--finish-only` can reuse them. |
+| `--finish-only` | Reuse the stitches, redo music + branding only. Implies `--keep-work`. Restitches `work_branded.mp4` from the kept clips if it is gone; falls back to a full build if the clips are gone too. |
 
 Flags combine freely: `python3 make_tour.py --720p --no-music --keep-work`
 
@@ -55,41 +55,59 @@ is a preview, and that is what the flag is for. Its intermediates are named apar
 *draft's* stitch and can never touch `work_silent.mp4`.
 
 **One build per folder.** The script takes `.build.lock` with `O_EXCL` on startup
-and releases it on any exit, clean or not. A second run — CLI or dashboard —
+and releases it on any exit, clean or not. A second run — CLI or `tour.py` —
 refuses immediately and names the pid holding it.
 
 ---
 
 ## 2. Scenarios
 
-### Build from the dashboard
+### The whole job, one command
 ```bash
-pip install -r requirements.txt     # once
-streamlit run dashboard.py
+python3 tour.py
 ```
-Pick brand → listing. The Build tab is three buttons — **Check order**, **Draft**,
-**Build delivery** — matching the three rungs below. Logo and music are inherited
-from `agents/<brand>/brand.json` and shown as text, not dropdowns; the output preset
-is derived from what the photos can actually feed and the delivery button is
-disabled when neither preset clears the gate. The lower third is the one per-listing
-control left on the main view. Pacing, timing, per-listing asset overrides, a manual
-preset, `--no-music` and `--allow-lowres` are under **Advanced**.
+Pick brand → listing (or create either on the spot). If `photos/` is empty it asks
+for a source folder and copies them in; if the filenames carry no numeric prefix it
+offers to add `010_`, `020_` … in the current alphabetical order — the prefix is
+the order, and there is no manifest anywhere.
 
-It writes `<listing>/config.json`, runs the script with cwd set to that listing, and
-streams the log. It picks the build mode for you: `--finish-only` when only
-branding, music or timing changed since the last build of that rung, a full
-`--keep-work` build when the photos, the pacing, or the output preset changed.
-Draft and delivery keep separate records in `.last_build.json`, so a draft can never
-authorise a `--finish-only` delivery build.
+Then, **before anything encodes**, it prints the preflight: the resolved photo
+order, which preset the photos actually clear, which assets resolved and which are
+missing, and whether `.build.lock` is held. Anything absent is named here rather
+than found five minutes into a render.
 
-The **Brand** tab edits `brand.json`. `make_tour.py` never reads that file — the
-dashboard resolves `DEFAULTS → brand.json → listing config.json` and writes the
-result into the listing, so `config.json` stays the single record of what produced a
-delivered video. New listings inherit at creation; existing ones only change when
-you use **Re-apply brand defaults**.
+The question set is short, and everything with the same answer on every listing is
+inherited from `agents/<brand>/brand.json` rather than asked: address, agent name,
+phone, brokerage; the card (outro / intro+outro / intro / none) and its length;
+whether the lower third stays up or clears after the opening seconds; the track;
+seconds per photo. Answer once, and it offers to save the name, phone and brokerage
+as brand defaults so the next listing only asks for the address.
 
-The lock belongs to the script, not the dashboard. The dashboard only reads
-`.build.lock` to report it, and offers **Clear stale lock** for a killed run.
+Then the three rungs, confirming between each — contact sheet, draft, delivery —
+with the delivery **refused** when the photos do not clear 720p. It picks the build
+mode for you: `--finish-only` when only branding, music or timing changed since the
+last build of that rung, a full `--keep-work` build when the photos, the pacing, the
+card or the output preset changed. Draft and delivery keep separate records in
+`.last_build.json`, so a draft can never authorise a `--finish-only` delivery build.
+
+`make_tour.py` never reads `brand.json` — `tour.py` resolves
+`DEFAULTS → brand.json → listing config.json` and writes the result into the
+listing, so `config.json` stays the single record of what produced a delivered
+video. Changing a brand default does not retroactively alter existing listings.
+
+The lock belongs to the script. `tour.py` only reads `.build.lock` to report it, and
+never writes it — doing so would lock the build out of its own folder.
+
+### Have Claude read the contact sheet (optional)
+```bash
+python3 tour.py --check-photos
+```
+Builds the contact sheet, then asks Claude to name the room in each numbered cell,
+say whether the filename agrees, and flag a running order that opens or closes on a
+bathroom. It proposes renames and **renames nothing** — the prefix is the order, so
+you rename the files yourself. It uses the Claude Code login already on this
+machine: no key, nothing to install. If `claude` is not on PATH it says so and
+tells you to read the sheet yourself, which is the check that actually matters.
 
 ### Check the order before building anything
 ```bash
@@ -114,7 +132,8 @@ build the six real cuts once at the end.
 `draft.mp4` never enters `out/` and is never a deliverable — see §3.
 
 ### Change when the lower third appears
-Dashboard: untick **Persistent**, set the two sliders, build. By hand:
+`tour.py` asks this every run ("Keep the lower third up for the whole tour?"). By
+hand:
 ```bash
 # in the listing folder, config.json:
 #   {"brand_persistent": false, "brand_in": 2.0, "brand_out": 8.5}
@@ -123,7 +142,41 @@ python3 ../../../make_tour.py --finish-only
 `brand_out` must be greater than `brand_in` or the build refuses to start — an
 inverted window is a valid filtergraph in which the overlay simply never appears.
 A `brand_out` past the end of the video warns and leaves the lower third up to the
-last frame.
+last frame. With an **intro** card the window is measured from the end of the card,
+so `brand_in: 0.8` still means 0.8s into the photos, and the lower third never
+appears over a card in either position.
+
+### Change the intro / outro card
+```bash
+# in the listing folder, config.json:
+#   {"card": "both", "card_seconds": 5.0}
+python3 ../../../make_tour.py --keep-work    # full rebuild required
+```
+`card` is `none`, `intro`, `outro` or `both`; `outro` is what `tour.py` writes on a
+new listing. The card is drawn by ffmpeg from `address`, `agent_name`,
+`agent_phone`, `brokerage` and the logo — nothing is exported from Canva. Its layout
+picks itself: a logo that resolves gets the logo design, no logo gets the type-only
+design with the brokerage name in its place, and a card with nothing to say is not
+built at all (the run says so). `card_style` forces either layout, `card_theme`
+forces the dark or light ground, `accent` and `font` restyle both the card and the
+lower third.
+
+The card rides in `work_branded.mp4`, **not** `work_silent.mp4` — that is what keeps
+it off the MLS cut. Changing `card` or `card_seconds` therefore invalidates that
+stitch, so it needs a full build, not `--finish-only`. The branded cuts come out
+longer than the unbranded ones by the card(s) they carry; the run prints both
+lengths.
+
+### Swap the lower third text
+```bash
+# in the listing folder, config.json:
+#   {"address": "46 Beacon St, Unit 5", "agent_name": "...", "agent_phone": "..."}
+python3 ../../../make_tour.py --finish-only
+```
+No Canva export, no PNG. The lower third is drawn from those three fields, and any
+of them may be blank — blanks are dropped and the rest close up. A
+`lower_third.png` that exists still wins, so a hand-authored plate stays available
+for a listing that earns it.
 
 ### Build from scratch
 ```bash
@@ -135,12 +188,13 @@ Runtime scales with photo count — 17 photos takes a few minutes.
 `--keep-work` is worth adding by default. Without it the intermediates are deleted
 on success and any later branding tweak forces a full rebuild.
 
-### Swap the lower third (agent name, price, phone)
+### Swap a hand-made lower third plate
 ```bash
 # replace lower_third.png, then:
 python3 make_tour.py --finish-only
 ```
-No code change. The file is re-read every build. ~1 minute instead of a full rebuild.
+No code change. The file is re-read every build, and it takes precedence over the
+drawn one. ~1 minute instead of a full rebuild.
 
 ### Swap the logo
 ```bash
@@ -214,7 +268,8 @@ A workable default running order, adapt per property:
     → bedrooms → baths → outdoor space last
 
 The run prints `WARNING: N of M filenames do not start with a number` when this is
-the situation, and the dashboard raises the same warning above the photo list.
+the situation, and `tour.py` says the same in its preflight — and offers to add the
+prefixes for you in the current alphabetical order.
 
 ### Add, remove, or replace a photo
 ```bash
@@ -260,8 +315,8 @@ Six files land in `out/`, overwritten on every run. Two families, same edit.
 
 | File | Contents | Use |
 |---|---|---|
-| `tour_branded.mp4` | Lower third + logo + music | Social, your site, your channels |
-| `tour_unbranded.mp4` | Music only, no branding | **MLS / IDX** — required to be clean |
+| `tour_branded.mp4` | Card(s) + lower third + logo + music | Social, your site, your channels |
+| `tour_unbranded.mp4` | Music only — no branding, **no card** | **MLS / IDX** — required to be clean |
 | `tour_vertical.mp4` | 9:16 portrait, branded centre, clean blurred bands | Reels, TikTok, Shorts |
 
 ### Sample — `sample_*`, watermarked. Send **for review**.
@@ -282,11 +337,35 @@ obscuring the room is the point, so an unapproved cut is not usable as-is.
 The watermark is **not** gated on branding — `sample_unbranded.mp4` carries it too,
 otherwise the MLS-safe cut would be an unwatermarked free copy.
 
-Runtime = `photos x 4s - (photos - 1) x 0.5s`. 17 photos = 60.0s.
+Runtime = `photos x 4s - (photos - 1) x 0.5s`. 17 photos = 60.0s. A card adds
+`card_seconds - 0.5s` to the **branded** cuts only, so with a 5s outro that same
+listing delivers 60.0s unbranded and 64.5s branded. Both lengths are printed.
+
+### The card, and the two stitches
+
+The intro/outro card is branding, so it rides in a second stitch:
+
+| Stitch | Contents | Feeds |
+|---|---|---|
+| `work_silent.mp4` | photos only | `tour_unbranded`, `sample_unbranded` |
+| `work_branded.mp4` | `[intro] + photos + [outro]` | `tour_branded`, `sample_branded`, `draft.mp4` |
+
+That separation is what makes the MLS cut structurally card-free, rather than
+card-free by a flag someone can flip. With `card: none` the second stitch is skipped
+and every cut reads `work_silent.mp4`, so a no-card build is byte-identical to one
+made before cards existed.
+
+While a card is on screen the lower third and the top-left logo are held off — the
+card already carries the address, the agent and the mark at full size, and running
+both prints everything twice. The **watermark is exempt**: an unwatermarked outro
+card is exactly the frame an unapproved sample would be screenshot from.
 
 Note: each vertical cut is built from *two* sources — the blurred band from the
 unbranded sibling, the centered frame from the branded one. So the band is clean and
-the centre still carries the lower third and logo.
+the centre still carries the lower third and logo. The branded source is the longer
+of the two when a card is configured, so the band is clone-padded and the output
+pinned to the branded length — the last blurred room frame holds behind the card
+rather than the band running out early.
 
 ### Draft — `draft.mp4`, listing root. Never leaves this machine.
 
@@ -307,26 +386,41 @@ touching the script. The rest are code edits that apply to every listing.
 
 | Line | Constant | cfg key | Default | Effect |
 |---|---|---|---|---|
-| 146 | `CLIP_SECONDS` | `clip_seconds` | `4.0` | Seconds per photo |
-| 147 | `XFADE_SECONDS` | `xfade_seconds` | `0.5` | Crossfade length |
-| 149 | `ZOOM_MAX` | — | `1.12` | Ken Burns push. Above ~1.20 looks cheap. |
-| 150 | `MUSIC_VOLUME` | — | `0.55` | Soundtrack level |
-| 153 | `BRAND_PERSISTENT` | `brand_persistent` | `True` | `False` = lower third only during a window |
-| 154-155 | `BRAND_IN` / `BRAND_OUT` | `brand_in` / `brand_out` | `0.8` / `6.5` | That window, when `BRAND_PERSISTENT` is `False` |
-| 156 | `LOGO_PERSISTENT` | — | `True` | Same, for the logo — but see the note below |
-| 157 | `LOGO_BOX_W, LOGO_BOX_H` | — | `360, 200` | Logo size box, 1080p-relative (~19% frame width) |
-| 160-162 | `LOWER_THIRD` / `LOGO` / `MUSIC` | `lower_third` / `logo` / `music` | the plain filenames | Which files the build uses |
-| 165 | `SAMPLE_WATERMARK` | `watermark` | `"viabolat.png"` | Which file the sample cuts watermark with |
-| 169 | `SAMPLE_WM_FRAC` | — | `0.45` | Watermark size, fraction of the frame |
-| 170 | `SAMPLE_WM_OPACITY` | — | `0.35` | Watermark opacity, 0-1 |
-| 184-185 | `CRF` / `X264_PRESET` | — | `18` / `medium` | Delivery encode quality. `--draft` swaps these to `20` / `veryfast`. |
-| 186 | `VERTICAL_CRF` | — | `20` | Portrait cut, which re-encodes an already-encoded source |
-| 210 | `MARGIN` | — | `70 * SCALE` | Overlay inset from the frame edge |
-| 571 | `CELL_W, CELL_H` | — | `480, 270` | Contact sheet cell. 4 across = a 1920px sheet. |
+| 177 | `CLIP_SECONDS` | `clip_seconds` | `4.0` | Seconds per photo |
+| 178 | `XFADE_SECONDS` | `xfade_seconds` | `0.5` | Crossfade length |
+| 180 | `ZOOM_MAX` | — | `1.12` | Ken Burns push. Above ~1.20 looks cheap. |
+| 181 | `MUSIC_VOLUME` | — | `0.55` | Soundtrack level |
+| 184 | `BRAND_PERSISTENT` | `brand_persistent` | `True` | `False` = lower third only during a window |
+| 185-186 | `BRAND_IN` / `BRAND_OUT` | `brand_in` / `brand_out` | `0.8` / `6.5` | That window, when `BRAND_PERSISTENT` is `False`. Measured from the end of an intro card. |
+| 187 | `LOGO_PERSISTENT` | — | `True` | Same, for the logo — but see the note below |
+| 188 | `LOGO_BOX_W, LOGO_BOX_H` | — | `360, 200` | Logo size box, 1080p-relative (~19% frame width) |
+| 191-193 | `LOWER_THIRD` / `LOGO` / `MUSIC` | `lower_third` / `logo` / `music` | the plain filenames | Which files the build uses |
+| 196 | `SAMPLE_WATERMARK` | `watermark` | `"viabolat.png"` | Which file the sample cuts watermark with |
+| 204-207 | `AGENT_NAME` / `AGENT_PHONE` / `ADDRESS` / `BROKERAGE` | `agent_name` / `agent_phone` / `address` / `brokerage` | `""` | The text on the drawn lower third and card. Any may be blank. |
+| 212 | `CARD` | `card` | `"none"` | `none` / `intro` / `outro` / `both`. `tour.py` writes `outro` on a new listing. |
+| 213 | `CARD_SECONDS` | `card_seconds` | `5.0` | Seconds per card |
+| 214 | `CARD_STYLE` | `card_style` | `"auto"` | `auto` / `logo` / `type`. `auto` = logo layout if a logo resolves. |
+| 215 | `CARD_THEME` | `card_theme` | `"auto"` | `auto` / `dark` / `light`. `auto` reads the logo's contrast. |
+| 219 | `ACCENT` | `accent` | `"#C8A24A"` | Accent rule on both plates. On a light card an unset accent darkens. |
+| 230 | `FONT` | `font` | `"Liberation Sans"` | A fontconfig **family name**, never a path |
+| 231 | `SCRIM` | `scrim` | `"black@0.55"` | The panel behind the drawn lower third |
+| 235 | `SAMPLE_WM_FRAC` | — | `0.45` | Watermark size, fraction of the frame |
+| 236 | `SAMPLE_WM_OPACITY` | — | `0.35` | Watermark opacity, 0-1 |
+| 250-251 | `CRF` / `X264_PRESET` | — | `18` / `medium` | Delivery encode quality. `--draft` swaps these to `20` / `veryfast`. |
+| 252 | `VERTICAL_CRF` | — | `20` | Portrait cut, which re-encodes an already-encoded source |
+| 282 | `MARGIN` | — | `70 * SCALE` | Overlay inset from the frame edge |
+| 297-299 | `PLATE_W, PLATE_H` / `PLATE_MARGIN` / `CARD_LOGO_W, CARD_LOGO_H` | — | `1920, 1080` / `70` / `760, 300` | Plates are always authored at 1080p and scaled down, so 720p is not a second layout |
+| 1025 | `CELL_W, CELL_H` | — | `480, 270` | Contact sheet cell. 4 across = a 1920px sheet. |
 
-Branding, watermark and music changes need only `--finish-only`. Changing
-`CLIP_SECONDS`, `XFADE_SECONDS` or `ZOOM_MAX` requires a full rebuild — they
-reshape the clips themselves, and `--finish-only` reuses the stitched cut.
+Branding, watermark, music and lower-third **text** changes need only
+`--finish-only`. Changing `CLIP_SECONDS`, `XFADE_SECONDS`, `ZOOM_MAX`, `card` or
+`card_seconds` requires a full rebuild — the first three reshape the clips and the
+last two reshape `work_branded.mp4`, and `--finish-only` reuses both stitches.
+
+The text fields feed both plates: the drawn lower third takes the address, agent
+name and phone; the card takes those plus the brokerage, which stands in for a
+missing logo on the type-only layout. A `lower_third.png` that resolves always wins
+over the drawn one.
 
 Setting `LOGO_PERSISTENT = False` makes the logo reuse `BRAND_IN`/`BRAND_OUT` —
 the enable window in `finish()` is shared by every non-persistent layer. Give the
@@ -335,7 +429,7 @@ logo its own window before relying on that.
 Raising `ZOOM_MAX` also raises the resolution requirement — the gate is
 `OUT_W x ZOOM_MAX`.
 
-`WORK_W` (line 205) is **not** a tuning knob. The comment above it records measured
+`WORK_W` (line 277) is **not** a tuning knob. The comment above it records measured
 frame-to-frame judder against supersample factor; `7680` is the knee for both
 presets. Lowering it to "speed up 720p" reintroduces the judder it exists to remove.
 
@@ -393,10 +487,17 @@ back end. See `IDEA.md` §2.
 | `WARNING: --finish-only reuses that earlier stitch` | Photos may have changed since `work_silent.mp4` was made | If they did, drop the flag. If they did not, ignore it. |
 | Photo change didn't appear | Used `--finish-only` | Full rebuild — see §2 |
 | Files vanished after a run | Successful builds clean up | Use `--keep-work` |
-| `A build is already running here (pid N)` | Another build holds `.build.lock` | Wait for it. If that pid is gone, delete `.build.lock` — or use the dashboard's **Clear stale lock** |
+| `A build is already running here (pid N)` | Another build holds `.build.lock` | Wait for it. If that pid is gone, delete `.build.lock` |
 | Delivered video looks soft | Shipped `draft.mp4`, or a `--draft` cut renamed | Drafts are 720p at a fast preset. Rebuild without `--draft`; deliverables come out of `out/` |
 | `draft.mp4` didn't pick up a photo change | Used `--draft --finish-only` | Same rule as delivery — anything that changes `photos/` needs a full run |
 | Contact sheet disagrees with the video | Sheet regenerated after a rename, video built before it | The sheet is always current; rebuild fully with `--keep-work` |
+| `no text for the card -- skipping it` | `address`, `agent_name`, `agent_phone` and `brokerage` are all blank | Fill at least one in `config.json`, or leave `card: none` and ignore it |
+| Card appeared on the MLS cut | Cannot happen — the card lives in `work_branded.mp4` | If you see it, something wrote a card into `work_silent.mp4`. Delete both and rebuild |
+| Branded cut is longer than the unbranded one | Expected — it carries the card(s) | The run prints both lengths. `tour_unbranded.mp4` is the clean, card-free one |
+| Card or lower third text is clipped at the edge | Address longer than the plate | Shorten it, or drop the font size in `CARD_SIZES` / the lower-third rows |
+| Card text renders as boxes or the wrong face | `font` names a family fontconfig cannot resolve | `fc-list \| grep -i <family>`. Unset `font` to fall back to the default family |
+| Card ground is dark when you wanted light | The ground is picked from the logo's contrast | Set `card_theme` to `light` or `dark` to force it |
+| Card carries a logo you wanted left off | A logo resolved, so the logo layout won | Set `card_style` to `type` |
 
 **A failed build keeps its intermediates on purpose** so you can inspect them. Only a
 successful run cleans up.
@@ -404,6 +505,7 @@ successful run cleans up.
 **Locking.** The script takes `.build.lock` with `O_EXCL` at startup and releases it
 on any exit, clean or not, so two builds in one folder can no longer delete each
 other's intermediates — whichever starts second refuses and names the pid holding
-the lock. This covers the CLI and the dashboard equally, since the dashboard builds
-by running the script. If a run was killed hard enough to leave the file behind,
-delete `.build.lock` or use the dashboard's **Clear stale lock** button.
+the lock. `tour.py` builds by running the script, so it is covered by the same lock —
+it only ever *reads* the file to report who holds it, never writes it, or the build it
+launched would be locked out of its own folder. If a run was killed hard enough to
+leave the file behind, delete `.build.lock`.

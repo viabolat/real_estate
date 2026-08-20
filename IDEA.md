@@ -109,6 +109,15 @@ construction — you cannot accidentally ship a soft tour.
 
 ## 5. THE ACTUAL WORKFLOW
 
+`python3 tour.py` from the project root walks every step below in order: it picks or
+creates the listing, copies the photos in, offers the prefixes, prints the preflight
+(order, which presets the photos clear, which assets and text fields are missing)
+**before** anything encodes, asks the handful of questions that actually vary, and
+then walks the three rungs. It refuses to build a delivery from photos that fail the
+gate rather than offering a checkbox that bypasses it. It writes the answers into
+`config.json` and runs the exact commands spelled out below — the steps are what it
+does, not an alternative to it.
+
 1. Get originals from the photographer or the MLS back end (§2.1 / §2.2).
 2. Drop them in the listing's `photos/` — `agents/<brand>/<listing>/photos/` — using
    the existing ordering convention:
@@ -117,8 +126,9 @@ construction — you cannot accidentally ship a soft tour.
    **Rename CDN or camera filenames before anything else.** Files straight off a
    listing CDN (`adr5o9req9xnxs3mopdy.png`) carry no prefix, so the tour plays in
    whatever order the hashes sort into — the build still succeeds, it just ships a
-   shuffled walkthrough. Both the CLI and the dashboard warn, but the warning is
-   only useful if you read it.
+   shuffled walkthrough. The CLI warns and `tour.py` says the same in its preflight
+   — and offers to add the prefixes in the current alphabetical order — but a
+   warning is only useful if you read it.
    Supported extensions: `.jpg .jpeg .png .webp .tif .tiff .bmp .heic`
 3. **Check the order before spending anything on an encode.**
    ```bash
@@ -127,26 +137,29 @@ construction — you cannot accidentally ship a soft tour.
    ~1s, no encoding. Writes `contact_sheet.png` — every photo in a numbered grid, in
    the exact order the tour will play. It runs *before* the resolution gate on
    purpose: "are these in the right order" is worth answering on photos that are not
-   yet good enough to build with. Dashboard: **Check order**.
+   yet good enough to build with. `tour.py` runs this rung first and stops for you
+   to look. `python3 tour.py --check-photos` will additionally hand the sheet to
+   Claude to name the rooms and flag filenames that disagree with the image — it
+   proposes renames and renames nothing, and it is off unless you ask for it.
 4. Settle the edit on a draft, not on deliverables:
    ```bash
    python3 ../../../make_tour.py --draft
    ```
    ~1min, one 720p cut at `draft.mp4` — branded and watermarked, so pacing, timing
    and every branding choice show at once. Iterate here. `draft.mp4` is never a
-   deliverable and never enters `out/`. Dashboard: **Draft**.
+   deliverable and never enters `out/`.
 5. Run without `--allow-lowres`, from the listing folder:
    ```bash
    python3 ../../../make_tour.py
    ```
-   Or `streamlit run dashboard.py` from the project root and leave the
-   bypass-the-gate checkbox alone — the dashboard derives the preset from what the
-   photos can actually feed and disables **Build delivery** when neither clears.
+   Or let `tour.py` do it — it derives the preset from what the photos can actually
+   feed and refuses delivery outright when neither clears, rather than offering a
+   bypass.
 6. If it exits with the resolution table, go back to step 1. Do not reach for the flag.
 
-The gate is a property of the photos, not of the interface. The dashboard runs the
-same script and hits the same wall — it just makes the flag easier to reach for,
-which is why it renders that checkbox as a warning.
+The gate is a property of the photos, not of the interface. `tour.py` runs the same
+script and hits the same wall; it has no control that turns the gate off, because
+there is no answer to "these photos are too small" that lives in an interface.
 
 ---
 
@@ -181,8 +194,9 @@ Three guards exist now, and all three should stay:
 
 - Every build prints the resolved order as a numbered list before encoding, and warns
   when filenames carry no numeric prefix.
-- The dashboard shows the same list per listing and raises a warning banner, expanded
-  by default, when any photo is unprefixed.
+- `tour.py` prints the same list in its preflight, says so when any photo is
+  unprefixed, and offers to add the prefixes in the current alphabetical order — a
+  rename on disk, which is where the order lives, never a sidecar.
 - `--contact-sheet` renders the order as an image in about a second, so checking it
   costs nothing. A numbered list catches a missing prefix; only the sheet catches
   "the entry hall is third." Look at it before the first real build.
@@ -192,20 +206,22 @@ A sensible default running order, adapt per property:
     01 exterior / entry → 02-04 main living spaces → 05-06 dining → 07 kitchen
     → bedrooms → baths → outdoor space last
 
-Renaming to reorder invalidates `work_silent.mp4`. Rebuild fully — a `--finish-only`
-run reuses the earlier stitch and reships the old order.
+Renaming to reorder invalidates both stitches, `work_silent.mp4` and
+`work_branded.mp4`. Rebuild fully — a `--finish-only` run reuses them and reships the
+old order.
 
 ---
 
-## 8. PROPOSED, NOT BUILT — review later
+## 8. BRANDING / OUTPUT BACKLOG
 
 > **Scope note:** §1-7 above are the photo sourcing standard. This section is a
 > branding/output backlog and is *not* part of that standard. It lives here only as
-> the agreed parking spot for proposals. Nothing below is implemented; nothing below
-> is approved.
+> the agreed parking spot for proposals.
 
 Both items were proposed on 2026-08-19 while adding the logo overlay and the
-`sample_` cuts. Both were deferred, not rejected.
+`sample_` cuts. Both were deferred, not rejected. **8.1 is still parked. 8.2 was
+built on 2026-08-20** — its entry below is kept as the record of what was decided
+and why, because the reasoning is what makes the default defensible later.
 
 ### 8.1 Programmatic drop shadow on the logo
 
@@ -232,30 +248,47 @@ logo. Needs a `pad` first or the blur clips at the layer edge.
 **Risk.** The filtergraph is more brittle than the current one — `gblur` behaviour on
 the alpha plane needs verifying per ffmpeg build. Test before trusting.
 
-### 8.2 Brand card on the outro
+**Blocked on.** Not worth building against 384px photos. Revisit once real source
+photos land (§2).
+
+### 8.2 Brand card on the outro — **BUILT 2026-08-20**
 
 **Problem.** A corner watermark provides *presence*; it cannot provide *identity*.
 Trying to get identity out of it is what pushes toward a bigger, more centered mark —
 which competes with the room. A dedicated card sidesteps that tradeoff entirely.
 
-**Recommendation: tail only. Do not add a head card.** On Reels/TikTok/Shorts the
-first 1-2 seconds decide whether anyone keeps watching. Opening on a brokerage logo
-instead of the property loses that audience. A 2.5-3s card at the tail, where the
-video is already fading, costs nothing and is where contact info actually gets read.
+**Recommendation as written: tail only. Do not add a head card.** On
+Reels/TikTok/Shorts the first 1-2 seconds decide whether anyone keeps watching.
+Opening on a brokerage logo instead of the property loses that audience. A 2.5-3s
+card at the tail, where the video is already fading, costs nothing and is where
+contact info actually gets read.
 
-**Sketch.** Generate a card segment (logo + agent + contact, on a solid or blurred
-ground) and concat it after the tour inside `finish()`, before the fades are applied
-— or as a separate segment with its own short fade.
+**What shipped, and where it differs.** The operator asked for an intro option as
+well, so the recommendation became the **default** rather than a prohibition: `card`
+is `none` for a bare CLI run, `tour.py` writes `outro` on a new listing, and `intro`
+or `both` is an explicit opt-in you have to choose. The retention argument above is
+the reason the default is what it is — read it before switching a listing to `both`.
 
-**Open questions.**
-- Reuse `lower_third.png` artwork, or a separate `outro.png`?
-- Does the card appear on `tour_unbranded.mp4`? Almost certainly **no** — it is
-  branding, and that cut must stay MLS/IDX-clean.
-- Does the `sample_` family get it? Probably yes, so the client reviews the real edit.
-- Music: does the tail fade need re-timing to land on the card instead of the last
-  photo? Likely yes — `finish()` currently pins the audio fade to `dur`.
-- Vertical cut: the card must be legible at 9:16, which a 16:9 card letterboxed into
-  portrait may not be.
+**How it was answered.**
 
-**Blocked on.** Neither is worth building against 384px photos. Revisit once real
-source photos land (§2).
+| Question | Answer as built |
+|---|---|
+| Reuse `lower_third.png`, or a separate `outro.png`? | Neither. Both plates are **drawn by ffmpeg `drawtext`** from `address` / `agent_name` / `agent_phone` / `brokerage` in `config.json`. No Canva round trip, one text source, and a listing cannot be shipped carrying another listing's plate. A hand-made `lower_third.png` still wins if one exists. |
+| Does the card appear on `tour_unbranded.mp4`? | **No**, and not by a flag — by construction. The card rides in a second stitch, `work_branded.mp4`; the unbranded cuts read `work_silent.mp4`, which is photos only. |
+| Does the `sample_` family get it? | Yes — same edit, so the client reviews the real thing. The centered watermark is deliberately **not** held off over the card: an unwatermarked outro card is exactly the frame an unapproved sample would be screenshot from. |
+| Music re-timed to land on the card? | Yes. The audio fade is pinned to the branded duration, which now includes the card. |
+| Legible at 9:16? | Verified. The vertical band is clone-padded and the output pinned to the branded length, so the last blurred room frame holds behind the card instead of the band ending early. |
+
+Two things the sketch did not anticipate, both found by building it:
+
+- `stitch()` computed each crossfade offset as `i * (CLIP_SECONDS - XFADE_SECONDS)`.
+  A card of a different length desyncs every transition after it, and the build still
+  succeeds — the same silent-failure shape as the shuffled photo order. Offsets now
+  accumulate real durations.
+- The lower third and the top-left logo ran *over* the card, printing the address and
+  the mark twice. Branding is now held off for the card's span.
+
+**Layout.** It picks itself: a logo that resolves gets the logo layout, no logo gets
+type-only with the brokerage in its place, and a card with no text at all is not
+built — the run says so rather than shipping an empty frame. `card_style`,
+`card_theme`, `accent` and `font` override. See `STEPS.md` §3-4.

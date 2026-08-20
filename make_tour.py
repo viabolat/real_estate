@@ -42,7 +42,9 @@ Expects, in the working directory:
                      prefix -- that order is alphabetical, not authored.
     music.mp3        a LICENSED track, longer than the finished video
     lower_third.png  optional RGBA branding: either a full-frame
-                     1920x1080 plate or a small lower-third strip
+                     1920x1080 plate or a small lower-third strip. ABSENT, one is
+                     drawn from the address, agent name and phone in config.json,
+                     so a listing needs no hand-made plate at all.
     logo.png         optional RGBA brokerage logo, pinned top-left. Transparent
                      padding is trimmed automatically, then the art is fitted
                      into a 360x200 box (1080p-relative), aspect preserved.
@@ -69,17 +71,44 @@ config.json -- every key optional, every default is the constant in the source:
     music             "music.mp3"
     watermark         "viabolat.png"
 
+    address           ""     the three lines of the lower third, and the body of
+    agent_name        ""     the card. Any of them may be blank; blanks are
+    agent_phone       ""     dropped and the rest close up.
+    brokerage         ""     card only, and only when there is no logo
+    card              "none" none | intro | outro | both
+    card_seconds      5.0    length of the card clip
+    card_style        "auto" auto | logo | type -- auto picks logo when one
+                             resolves, type-only when none does
+    card_theme        "auto" auto | dark | light -- auto measures the logo's
+                             contrast against both grounds and takes the higher
+    accent            "#C8A24A"  rule, phone line and lower-third bar
+    font              "Liberation Sans"  any installed family name
+    scrim             "black@0.55"       the panel behind the lower third
+
 Photo order is NOT a config key and never will be -- it lives in the filename
 prefix and nowhere else. Changing clip_seconds or xfade_seconds invalidates
 work_silent.mp4, so those changes need a full build, not --finish-only. So does
 renaming photos to reorder them: --finish-only reuses the earlier stitch and
 would reship the old order, which is why that path warns.
 
-dashboard.py is a local Streamlit front end over all of the above: it manages the
-shared asset library, writes config.json, and runs this script per listing. It
-also keeps per-brand defaults in agents/<brand>/brand.json, which THIS script
-never reads -- the dashboard resolves them into each listing's config.json, so
-config.json stays the single record of what produced a delivered video.
+The card is the intro and/or outro plate: logo (or brokerage type when there is
+no logo) over address, agent and phone, drawn by ffmpeg from the same config.json.
+It is branding, so it must not reach the MLS cut -- which is why a build with a
+card stitches TWICE. work_silent.mp4 holds the photos alone and feeds the
+unbranded cuts; work_branded.mp4 holds [intro] + photos + [outro] and feeds the
+branded cuts and the draft. With no card configured the second stitch is skipped
+and both read the same file, so a no-card build is byte-identical to one from
+before cards existed. Wherever a card is on screen the lower third and the logo
+are held off: the card already says those lines, at full size, in the middle of
+the frame. The proofing watermark is NOT held off -- an unwatermarked outro card
+is exactly the frame an unapproved sample would be screenshot from.
+
+tour.py is the only interface over all of the above: it picks the listing, imports
+and numbers the photos, reports what is missing before anything encodes, asks the
+short question set, and runs this script for each of the three rungs. It also
+keeps per-brand defaults in agents/<brand>/brand.json, which THIS script never
+reads -- tour.py resolves them into each listing's config.json, so config.json
+stays the single record of what produced a delivered video.
 
 Outputs -- six cuts, two families:
 
@@ -165,8 +194,43 @@ MUSIC = _asset(_cfg.get("music", "music.mp3"))
 # Sample cuts: a centered proofing watermark. Obscuring the room is the POINT here
 # -- these go to the client for approval, the tour_ cuts are the delivery.
 SAMPLE_WATERMARK = _asset(_cfg.get("watermark", "viabolat.png"))   # [cfg]
+
+# ---- scripted branding ------------------------------------------------------
+# reason: lower_third.png used to be a per-listing Canva export -- the one part of
+# the workflow that could not be automated, and the one place two listings could
+# get swapped. These fields let the script draw the same information itself. A
+# lower_third.png that DOES exist still wins, so a hand-authored plate stays an
+# option; the text is the routine, the PNG is the exception.
+AGENT_NAME = _cfg.get("agent_name", "")      # [cfg]
+AGENT_PHONE = _cfg.get("agent_phone", "")    # [cfg]
+ADDRESS = _cfg.get("address", "")            # [cfg]
+BROKERAGE = _cfg.get("brokerage", "")        # [cfg]
+
+# reason: default "none", not "outro". A bare CLI run in a folder that predates
+# cards must produce exactly the video it always did. tour.py writes "outro" into
+# config.json for new listings, which is where the preference belongs.
+CARD = str(_cfg.get("card", "none")).lower()          # [cfg] none|intro|outro|both
+CARD_SECONDS = float(_cfg.get("card_seconds", 5.0))   # [cfg]
+CARD_STYLE = str(_cfg.get("card_style", "auto")).lower()  # [cfg] auto|logo|type
+CARD_THEME = str(_cfg.get("card_theme", "auto")).lower()  # [cfg] auto|dark|light
+# reason: one accent, used by both plates. On a light card the default darkens,
+# because #C8A24A on off-white is barely a phone number; an accent set by hand is
+# taken at face value on either ground.
+ACCENT = _cfg.get("accent", "#C8A24A")       # [cfg]
+LIGHT_ACCENT = ACCENT if "accent" in _cfg else "#8A6D1F"
+# (background, type, accent) per theme. The lower third is always dark-on-scrim.
+# reason: the light ground is pure white, not a designer off-white. Brokerage
+# logos routinely ship with an opaque near-white plate baked behind the art, and
+# on #F4F2ED that plate showed as a faint rectangle around the mark.
+CARD_THEMES = {"dark": ("#101216", "#FFFFFF", ACCENT),
+               "light": ("#FFFFFF", "#16181C", LIGHT_ACCENT)}
+LT_FG = "#FFFFFF"
+# reason: a family name, resolved through fontconfig, not a path -- no font file
+# ships with this repo and a hardcoded /usr/share path breaks on the next machine.
+FONT = _cfg.get("font", "Liberation Sans")   # [cfg]
+SCRIM = _cfg.get("scrim", "black@0.55")      # [cfg] lower third box behind type
 # reason: Zillow and most CDNs serve .webp now; globbing only jpg/png made a full
-# folder of photos look empty. Module level so dashboard.py shares one list.
+# folder of photos look empty. Module level so tour.py shares one list.
 PHOTO_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".tif", ".tiff", ".bmp", ".heic"}
 SAMPLE_WM_FRAC = 0.45            # fraction of the frame it may occupy
 SAMPLE_WM_OPACITY = 0.35         # 0-1. Readable, still see-through.
@@ -191,6 +255,12 @@ VERTICAL_CRF = 20                # portrait cut re-encodes an already-encoded so
 # stale intermediate silently reused is exactly how the wrong photo order shipped.
 # Separate filenames are what keep the two families from ever touching.
 SILENT_WORK = "work_draft.mp4" if DRAFT else "work_silent.mp4"
+# reason: an intro/outro card is branding, and work_silent.mp4 feeds ALL six cuts
+# including the MLS-safe tour_unbranded.mp4. Baking a card into that one stitch
+# would put the agent's name on the MLS cut. So the branded family gets its own
+# stitch. A build with no card skips it entirely and both families read
+# work_silent.mp4, exactly as they always have.
+BRANDED_WORK = "work_branded.mp4"
 DRAFT_OUT = "draft.mp4"          # listing root, NOT out/ -- out/ holds real cuts only
 CLIPS_DIR = "clips_draft" if DRAFT else "clips"
 SHEET_OUT = "contact_sheet.png"
@@ -218,6 +288,15 @@ LOGO_H = round(LOGO_BOX_H * SCALE)
 WM_W = round(OUT_W * SAMPLE_WM_FRAC)    # watermark fit box, both presets
 WM_H = round(OUT_H * SAMPLE_WM_FRAC)
 BLUR_SIGMA = round(28 * SCALE, 1)       # portrait backdrop blur
+
+# Scripted plates are drawn on a nominal 1920x1080 canvas whichever preset is
+# active, then resampled by the same full-frame path a Canva export takes.
+# reason: sizing the canvas to OUT_W would make a 720p plate 1280 wide, which
+# finish()'s `bw >= 0.9 * 1920` full-frame test reads as a small strip -- the
+# plate would be inset by MARGIN and rendered at a third of its size.
+PLATE_W, PLATE_H = 1920, 1080
+PLATE_MARGIN = 70                       # matches MARGIN at 1080p
+CARD_LOGO_W, CARD_LOGO_H = 760, 300     # fit box for a logo on the card
 
 FRAMES = int(CLIP_SECONDS * FPS)
 PREP = (f"scale={WORK_W}:{WORK_H}:force_original_aspect_ratio=increase,"
@@ -269,9 +348,22 @@ def build_clips(photos):
     return paths
 
 
-def stitch(clips, out=None):
+def stitch(clips, out=None, durs=None):
+    """Chain xfade transitions. offset_i = sum(durs[:i]) - i * XFADE.
+
+    reason: this used to read `offset = i * (CLIP_SECONDS - XFADE_SECONDS)`,
+    which is only right while every clip is the same length. A 5s card in a 4s
+    chain would have slid every transition after it by a second, and nothing
+    would have failed -- ffmpeg builds a perfectly valid graph from wrong
+    offsets, so the only symptom is a video that cuts in the wrong places. Same
+    silent-failure shape as the shuffled photo order.
+
+    durs are the lengths asked of the encoder, not probed back off disk: an
+    encoder rounds 4.0s to whole frames, and probing would drift the offsets off
+    the values every delivered build to date was cut with.
+    """
     out = SILENT_WORK if out is None else out
-    """Chain xfade transitions. offset_i = i * (CLIP - XFADE)."""
+    durs = [CLIP_SECONDS] * len(clips) if durs is None else durs
     if len(clips) == 1:
         run(["ffmpeg", "-y", "-loglevel", "error", "-i", clips[0],
              "-c", "copy", out])
@@ -279,8 +371,9 @@ def stitch(clips, out=None):
     inputs, filt, prev = [], [], "0:v"
     for c in clips:
         inputs += ["-i", c]
+    offset = 0.0
     for i in range(1, len(clips)):
-        offset = i * (CLIP_SECONDS - XFADE_SECONDS)
+        offset += durs[i - 1] - XFADE_SECONDS
         label = f"v{i}"
         filt.append(f"[{prev}][{i}:v]xfade=transition=fade:"
                     f"duration={XFADE_SECONDS}:offset={offset:.2f}[{label}]")
@@ -307,10 +400,10 @@ def dimensions(path):
 def gate_failures(photos, out_w=None, out_h=None):
     """[(path, "WxH", upscale_factor)] for photos too small to fill the frame.
 
-    reason: separated from check_resolution so the dashboard can ask the same
-    question -- "which photos block which preset?" -- without printing or exiting,
-    and answer it on page load instead of after a five-minute render. One
-    implementation of the rule, two callers.
+    reason: separated from check_resolution so tour.py can ask the same question --
+    "which photos block which preset?" -- without printing or exiting, and answer it
+    in the preflight instead of after a five-minute render. One implementation of
+    the rule, two callers.
     """
     out_w = OUT_W if out_w is None else out_w
     out_h = OUT_H if out_h is None else out_h
@@ -446,14 +539,348 @@ def trim_filter(path):
     return "", (lw, lh)
 
 
-def finish(silent, music, brand, out, branded=True, logo=None, watermark=None):
+# Brightness of the two card grounds, for the contrast measurement below.
+THEME_LUMA = {"dark": 18, "light": 255}
+
+
+def art_contrast(path, samples=64):
+    """{theme: mean contrast of the logo art against that card ground}, or None.
+
+    reason: a card picks its own background, so a logo that disappears into it is
+    a silent failure -- corcoran.png is near-black artwork drawn for white
+    stationery and rendered as a hole in the dark card. Measure the art against
+    both candidate grounds and use the one it separates from, the same way
+    alpha_bbox() measures the art instead of trusting the canvas.
+
+    Crops to the alpha bbox first: a wordmark filling 8% of its canvas averages
+    to alpha 2/255 across the whole file, which rounds the answer to noise. Then
+    samples with flags=neighbor, NOT the default area average -- a two-tone mark
+    like a dark wordmark with white detail averages to a mid grey that contrasts
+    with nothing, and the question here is about the real pixels, not their mean.
+    """
+    trim, _ = trim_filter(path)
+    n = samples * samples
+
+    def plane(vf):
+        r = subprocess.run(["ffmpeg", "-v", "error", "-i", path, "-vf", vf,
+                            "-f", "rawvideo", "-pix_fmt", "gray", "-"],
+                           capture_output=True)
+        return r.stdout[:n]
+
+    size = f"scale={samples}:{samples}:flags=neighbor"
+    alpha = plane(f"{trim}alphaextract,{size}")
+    if len(alpha) < n:
+        # no alpha channel: every pixel is ink, and grey is its own luminance
+        grey = plane(f"{trim}format=gray,{size}")
+        ink = [(g, 255) for g in grey] if len(grey) == n else []
+    else:
+        # premultiplied grey divided by alpha recovers each pixel's own luminance
+        grey = plane(f"{trim}format=rgba,premultiply=inplace=1,format=gray,{size}")
+        if len(grey) < n:
+            return None
+        ink = [(g * 255.0 / a, a) for g, a in zip(grey, alpha) if a > 8]
+    if not ink:
+        return None
+    weight = sum(w for _, w in ink)
+    return {t: round(sum(w * abs(l - b) for l, w in ink) / weight)
+            for t, b in THEME_LUMA.items()}
+
+
+def card_theme(logo):
+    """(background, type, accent) for the card.
+
+    Puts the logo on whichever ground it separates from. card_theme in
+    config.json forces one.
+    """
+    if CARD_THEME in CARD_THEMES:
+        return CARD_THEMES[CARD_THEME]
+    score = art_contrast(logo) if (logo and os.path.exists(logo)) else None
+    if score is None:
+        return CARD_THEMES["dark"]       # type-only card: dark reads better
+    # reason: light unless dark wins clearly. A two-tone mark -- dark wordmark,
+    # white detail -- scores the same against both grounds, and brokerage art is
+    # overwhelmingly drawn for white stationery, so the tie goes to light.
+    theme = "dark" if score["dark"] > score["light"] * 1.15 else "light"
+    print(f"    card: logo contrast {score['light']} on light vs "
+          f"{score['dark']} on dark -- using the {theme} card")
+    return CARD_THEMES[theme]
+
+
+# ---- scripted plates --------------------------------------------------------
+# reason: every text value is written to a file and passed as textfile=, never
+# inlined as text=. ffmpeg's filtergraph parser splits on ':' and ',' and does not
+# honour the shell's '\'' idiom for a literal apostrophe -- an address like
+# "5 Beacon St, Unit 2: O'Brien" silently swallowed the rest of the filter and
+# rendered the option list into the frame. A file has no escaping rules at all.
+TEXT_DIR = "work_text"
+_text_seq = [0]
+_font_cache = {}
+
+
+def font_file(weight="regular"):
+    """Concrete font file for FONT at a weight, via fontconfig, or None.
+
+    reason: drawtext's font= takes a family and always renders it regular --
+    "Liberation Sans Bold" does not resolve (fontconfig matches DejaVu instead)
+    and the family:style pattern cannot survive the filter arg parser, which
+    splits on the colon. Resolving to a file here is the only way to get bold,
+    and it keeps the config a portable family name rather than a machine path.
+    """
+    if weight in _font_cache:
+        return _font_cache[weight]
+    face = None
+    try:
+        r = subprocess.run(["fc-match", "-f", "%{file}", f"{FONT}:{weight}"],
+                           capture_output=True, text=True, check=True)
+        if r.stdout.strip() and os.path.exists(r.stdout.strip()):
+            face = r.stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        pass                     # no fc-match: fall back to font= at one weight
+    _font_cache[weight] = face
+    return face
+
+
+def _drawtext(text, size, color, x, y, weight="regular", pad=None):
+    """One drawtext filter, its copy handed over in a file."""
+    os.makedirs(TEXT_DIR, exist_ok=True)
+    path = f"{TEXT_DIR}/{_text_seq[0]:03d}.txt"
+    _text_seq[0] += 1
+    with open(path, "w") as f:
+        f.write(str(text))
+    face = font_file(weight)
+    src = f"fontfile='{face}'" if face else f"font='{FONT}'"
+    # reason: expansion=none stops drawtext reading % and {} in an address as
+    # strftime and expression syntax.
+    filt = (f"drawtext={src}:textfile='{path}':fontsize={size}:fontcolor={color}"
+            f":x={x}:y={y}:expansion=none")
+    if pad is not None:
+        filt += f":box=1:boxcolor={SCRIM}:boxborderw={pad}"
+    return filt
+
+
+def _clear_text():
+    for f in glob.glob(f"{TEXT_DIR}/*.txt"):
+        os.remove(f)
+    if os.path.isdir(TEXT_DIR) and not os.listdir(TEXT_DIR):
+        os.rmdir(TEXT_DIR)
+
+
+def _line_h(size):
+    return round(size * 1.24)
+
+
+def _t(x):
+    """Seconds for a filter argument -- short, and never in exponent notation."""
+    return f"{float(x):.3f}".rstrip("0").rstrip(".") or "0"
+
+
+def render_lower_third(out):
+    """Draw the lower third from config text. Returns the path, or None.
+
+    reason: this is the one asset that changed for every listing, so it was the
+    one asset that had to be re-exported from Canva for every listing -- and the
+    one place two listings could get crossed. Drawing it from the same
+    config.json that drives the build removes both. A lower_third.png that
+    exists still wins in main(): the hand-authored plate stays available for a
+    listing that earns it.
+
+    Drawn on a 1920x1080 canvas whatever the preset, so finish() takes its
+    full-frame branch and resamples it exactly as it does a Canva export.
+    """
+    rows = [(ADDRESS, 58, LT_FG, "bold"),
+            (AGENT_NAME, 38, LT_FG, "regular"),
+            (AGENT_PHONE, 34, ACCENT, "bold")]
+    rows = [r for r in rows if str(r[0]).strip()]
+    if not rows:
+        return None
+    padx, pady, gap, bar = 26, 18, 10, 8
+    heights = [_line_h(size) for _, size, _, _ in rows]
+    total = sum(heights) + gap * (len(rows) - 1)
+    top = PLATE_H - PLATE_MARGIN - pady - total
+    text_x = PLATE_MARGIN + bar + padx
+
+    text = []
+    y = top
+    for (line, size, color, weight), h in zip(rows, heights):
+        text.append(_drawtext(line, size, color, text_x, y, weight))
+        y += h + gap
+
+    def plate(chain, path):
+        run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi",
+             "-i", f"color=c=black@0.0:s={PLATE_W}x{PLATE_H}:d=1,format=rgba",
+             "-filter_complex", ",".join(chain), "-frames:v", "1",
+             "-update", "1", path])
+
+    # reason: drawtext's own box= draws one rectangle per line, so three lines of
+    # different length came out as three ragged plates. One scrim behind the
+    # whole block needs the block's true width, which only the font knows -- so
+    # render the text alone first and measure it with the same alpha_bbox() the
+    # logo fit box uses. One extra ~0.2s plate render, exact either way.
+    probe = "work_lt_probe.png"
+    plate(text, probe)
+    box = alpha_bbox(probe)
+    os.remove(probe)
+    if box:
+        bx, by, bw_, bh_ = box
+        px, py = PLATE_MARGIN, max(0, by - pady)
+        pw, ph = bx + bw_ + padx - px, bh_ + 2 * pady
+    else:                       # nothing measurable: fall back to the nominal box
+        px, py, pw, ph = PLATE_MARGIN, top - pady, 900, total + 2 * pady
+
+    # reason: replace=1 or neither the scrim nor the bar is visible. drawbox
+    # blends its colour into the destination but leaves the destination's alpha
+    # alone, and this canvas starts fully transparent -- the bar came out the
+    # right colour at alpha 0.
+    parts = [f"drawbox=x={px}:y={py}:w={pw}:h={ph}:color={SCRIM}:t=fill:replace=1",
+             f"drawbox=x={px}:y={py}:w={bar}:h={ph}:color={ACCENT}:t=fill:replace=1"]
+    plate(parts + text, out)
+    _clear_text()
+    return out
+
+
+def card_layout(logo):
+    """"logo" or "type" -- which card design this listing gets.
+
+    reason: not every agent has a logo. A logo-centred card with no logo is a
+    hole in the middle of the frame, so the absence picks a different design
+    rather than degrading the same one. card_style forces either.
+    """
+    if CARD_STYLE in ("logo", "type"):
+        return CARD_STYLE
+    return "logo" if (logo and os.path.exists(logo)) else "type"
+
+
+def render_card(out, logo=None):
+    """Draw the intro/outro card. Returns the path, or None if there is nothing
+    to say on it.
+
+    One design serves both ends of the tour -- the card that opens it and the
+    card that closes it carry the same information, and two designs would be two
+    things to keep in step.
+    """
+    layout = card_layout(logo)
+    use_logo = layout == "logo" and logo and os.path.exists(logo)
+    bg, fg, accent = card_theme(logo if use_logo else None)
+
+    rule_w, rule_h, gap = 140, 5, 46
+    blocks, note = [], ""      # blocks: (kind, height, payload)
+    if use_logo:
+        trim, (aw, ah) = trim_filter(logo)
+        fit = min(CARD_LOGO_W / aw, CARD_LOGO_H / ah)
+        blocks.append(("logo", round(ah * fit), (trim, round(aw * fit))))
+        note = (f"    card: logo layout, art {aw}x{ah} -> "
+                f"{round(aw * fit)}x{round(ah * fit)}")
+    else:
+        if str(BROKERAGE).strip():
+            blocks.append(("text", _line_h(44), (BROKERAGE, 44, accent, "bold")))
+        note = ("    card: type-only layout"
+                f"{' (no logo found)' if layout == 'type' else ''}")
+
+    body = [(ADDRESS, 76 if not use_logo else 62, fg, "bold"),
+            (AGENT_NAME, 44, fg, "regular"),
+            (AGENT_PHONE, 38, accent, "bold")]
+    body = [b for b in body if str(b[0]).strip()]
+    # reason: held until here. Announcing the layout and then announcing there is
+    # nothing to put on it reads like two different outcomes for one card.
+    if not blocks and not body:
+        return None
+    print(note)
+    if blocks and body:
+        blocks.append(("rule", rule_h, None))
+    for b in body:
+        blocks.append(("text", _line_h(b[1]), b))
+
+    total = sum(h for _, h, _ in blocks) + gap * (len(blocks) - 1)
+    y = round((PLATE_H - total) / 2)
+
+    inputs = ["-f", "lavfi",
+              "-i", f"color=c={bg}:s={PLATE_W}x{PLATE_H}:d=1"]
+    pre, parts, logo_y, logo_w = [], [], None, None
+    for kind, h, payload in blocks:
+        if kind == "logo":
+            logo_y, logo_w = y, payload[1]
+            pre.append(f"[1:v]{payload[0]}scale=w={CARD_LOGO_W}:h={CARD_LOGO_H}:"
+                       f"force_original_aspect_ratio=decrease[lg];")
+            inputs += ["-i", logo]
+        elif kind == "rule":
+            parts.append(f"drawbox=x={(PLATE_W - rule_w) // 2}:y={y}:"
+                         f"w={rule_w}:h={rule_h}:color={accent}:t=fill:replace=1")
+        else:
+            text, size, color, weight = payload
+            parts.append(_drawtext(text, size, color, "(w-text_w)/2", y, weight))
+        y += h + gap
+
+    chain = ",".join(parts) if parts else "null"
+    if logo_y is None:
+        vf = f"[0:v]{chain}[v]"
+    else:
+        vf = (f"{''.join(pre)}[0:v][lg]overlay=x=(W-w)/2:y={logo_y}[bl];"
+              f"[bl]{chain}[v]")
+    run(["ffmpeg", "-y", "-loglevel", "error"] + inputs +
+        ["-filter_complex", vf, "-map", "[v]", "-frames:v", "1", "-update", "1",
+         out])
+    _clear_text()
+    return out
+
+
+def card_clip(png, seconds, out):
+    """Encode a card plate to a clip that xfades into the photo chain.
+
+    Same codec, crf, preset, fps and frame size as build_clips() -- xfade needs
+    matching formats, and a card encoded differently from the clips beside it
+    would force a re-encode of the whole chain.
+    """
+    run(["ffmpeg", "-y", "-loglevel", "error", "-loop", "1", "-i", png,
+         "-t", str(seconds),
+         "-filter_complex", f"scale={OUT_W}:{OUT_H},setsar=1,format=yuv420p",
+         "-c:v", "libx264", "-crf", str(CRF), "-preset", X264_PRESET,
+         "-r", str(FPS), out])
+    return out
+
+
+def build_cards(logo):
+    """(intro_clip_or_None, outro_clip_or_None) for the configured card mode."""
+    if CARD not in ("intro", "outro", "both"):
+        return None, None
+    os.makedirs(CLIPS_DIR, exist_ok=True)
+    png = f"{CLIPS_DIR}/card.png"
+    if not render_card(png, logo):
+        print("    card: no agent_name, agent_phone, address or brokerage in "
+              f"{CONFIG_FILE} -- nothing to put on it, skipping.")
+        return None, None
+    clip = card_clip(png, CARD_SECONDS, f"{CLIPS_DIR}/card.mp4")
+    intro = clip if CARD in ("intro", "both") else None
+    outro = clip if CARD in ("outro", "both") else None
+    return intro, outro
+
+
+def finish(silent, music, brand, out, branded=True, logo=None, watermark=None,
+           cards=(0.0, 0.0)):
     dur = duration(silent)
-    # reason: a brand_out past the end of the cut is not an ffmpeg error -- the
+    # reason: the card already carries the address, the agent and the phone, at
+    # full size in the middle of the frame. Leaving the lower third and the
+    # top-left logo running over it prints the same three lines twice and the
+    # same mark twice. Branding covers the photos; the card covers itself. When
+    # no card is configured both bounds collapse to the whole cut and nothing is
+    # gated, which is what keeps a no-card build identical to before.
+    intro_s, outro_s = cards
+    has_card = intro_s > 0 or outro_s > 0
+    body_in, body_out = intro_s, dur - outro_s
+
+    def window(persistent):
+        """(start, end) for a branding layer, or None for the whole cut."""
+        if persistent:
+            return (body_in, body_out) if has_card else None
+        if not has_card:
+            return (BRAND_IN, BRAND_OUT)
+        return (body_in + BRAND_IN, min(body_in + BRAND_OUT, body_out))
+
+    # reason: a brand_out past the end of the photos is not an ffmpeg error -- the
     # overlay just stays up to the last frame. Say so rather than let the operator
     # believe a window was applied that never closed.
-    if not BRAND_PERSISTENT and BRAND_OUT > dur:
-        print(f"    WARNING: brand_out {BRAND_OUT}s is past the {dur:.1f}s runtime -- "
-              f"the lower third will stay up to the end.")
+    if not BRAND_PERSISTENT and body_in + BRAND_OUT > body_out:
+        print(f"    WARNING: brand_out {BRAND_OUT}s is past the {body_out:.1f}s mark -- "
+              f"the lower third will stay up to {'the card' if has_card else 'the end'}.")
     use_brand = bool(branded and brand and os.path.exists(brand))
     use_logo = bool(branded and logo and os.path.exists(logo))
     # reason: NOT gated on `branded`. The proofing watermark is the whole reason a
@@ -480,7 +907,7 @@ def finish(silent, music, brand, out, branded=True, logo=None, watermark=None):
         else:
             pre.append(f"[{idx}:v]scale=iw*{SCALE}:-1[bp];")
             pos = f"x={MARGIN}:y=H-h-{MARGIN}"
-        layers.append(("bp", pos, BRAND_PERSISTENT))
+        layers.append(("bp", pos, window(BRAND_PERSISTENT)))
         idx += 1
 
     if use_logo:
@@ -490,7 +917,7 @@ def finish(silent, music, brand, out, branded=True, logo=None, watermark=None):
               f"{round(aw * fit)}x{round(ah * fit)} top-left")
         pre.append(f"[{idx}:v]{trim}scale=w={LOGO_W}:h={LOGO_H}:"
                    f"force_original_aspect_ratio=decrease[lg];")
-        layers.append(("lg", f"x={MARGIN}:y={MARGIN}", LOGO_PERSISTENT))
+        layers.append(("lg", f"x={MARGIN}:y={MARGIN}", window(LOGO_PERSISTENT)))
         idx += 1
 
     if use_wm:
@@ -510,17 +937,19 @@ def finish(silent, music, brand, out, branded=True, logo=None, watermark=None):
                    f"force_original_aspect_ratio=decrease,"
                    f"format=rgba,colorchannelmixer=aa={SAMPLE_WM_OPACITY}[wm];")
         # reason: last = topmost. A proofing mark sits over the lower third so it
-        # cannot be cropped or covered away.
-        layers.append(("wm", "x=(W-w)/2:y=(H-h)/2", True))
+        # cannot be cropped or covered away -- and over the card, with no window
+        # of any kind, because an unwatermarked outro card is exactly the frame
+        # an unapproved sample would be screenshot from.
+        layers.append(("wm", "x=(W-w)/2:y=(H-h)/2", None))
         idx += 1
 
     # reason: overlay is binary, so N layers need N-1 intermediate labels chained
     # in order. The last one flows straight into the fades with no label.
     v = "".join(pre) + "[0:v]"
-    for i, (label, pos, persistent) in enumerate(layers):
+    for i, (label, pos, win) in enumerate(layers):
         v += f"[{label}]overlay={pos}"
-        if not persistent:
-            v += f":enable='between(t,{BRAND_IN},{BRAND_OUT})'"
+        if win:
+            v += f":enable='between(t,{_t(win[0])},{_t(win[1])})'"
         v += "," if i == len(layers) - 1 else f"[ov{i}];[ov{i}]"
     v += f"fade=t=in:st=0:d=1,fade=t=out:st={dur-1.5:.2f}:d=1.5[v]"
 
@@ -570,8 +999,18 @@ def vertical(bg_src, fg_src, out):
     both layers from the unbranded cut would also kill the ghost, by deleting the
     branding, which is not the same fix.
     """
+    fg_dur, bg_dur = duration(fg_src), duration(bg_src)
+    # reason: with an intro/outro card the branded cut is longer than the
+    # unbranded one it takes its band from, and overlay ends when its shorter
+    # input does -- the portrait cut would stop dead at the card. Hold the band's
+    # last frame across the difference instead. That frame is already faded to
+    # black by finish(), so the card plays against black bands, which is what it
+    # wants anyway. Zero difference means no filter and no change to the command.
+    pad = ""
+    if fg_dur - bg_dur > 0.05:
+        pad = f"tpad=stop_mode=clone:stop_duration={fg_dur - bg_dur:.3f},"
     vf = (f"[0:v]scale={VERT_W}:{VERT_H}:force_original_aspect_ratio=increase,"
-          f"crop={VERT_W}:{VERT_H},gblur=sigma={BLUR_SIGMA},"
+          f"crop={VERT_W}:{VERT_H},{pad}gblur=sigma={BLUR_SIGMA},"
           f"eq=brightness=-0.12[bgb];"
           f"[1:v]scale={VERT_W}:-2[fgs];"
           f"[bgb][fgs]overlay=(W-w)/2:(H-h)/2[v]")
@@ -579,7 +1018,8 @@ def vertical(bg_src, fg_src, out):
          "-filter_complex", vf, "-map", "[v]", "-map", "1:a",
          "-c:v", "libx264", "-crf", str(VERTICAL_CRF), "-preset", X264_PRESET,
          "-pix_fmt", "yuv420p", "-c:a", "copy",
-         "-movflags", "+faststart", out])
+         # reason: pin to the branded source, so a padded band cannot run long.
+         "-t", f"{fg_dur:.3f}", "-movflags", "+faststart", out])
 
 
 CELL_W, CELL_H = 480, 270        # contact sheet cell; 4 across = a 1920px sheet
@@ -621,10 +1061,10 @@ def acquire_lock():
     """Refuse to start a second build in the same folder.
 
     reason: cleanup() deletes by glob, so two concurrent runs in one listing remove
-    each other's intermediates mid-encode. The lock lives here rather than in the
-    dashboard because the dashboard builds by running this script -- a CLI run would
-    not see a lock the dashboard held, and a dashboard-held lock would shut this
-    process out of the folder it was launched to build. O_EXCL because
+    each other's intermediates mid-encode. The lock lives here rather than in
+    tour.py because tour.py builds by running this script -- a CLI run would not see
+    a lock tour.py held, and a lock tour.py held would shut this process out of the
+    folder it was launched to build. O_EXCL because
     check-then-create races exactly the two builds this guards.
     """
     try:
@@ -657,19 +1097,28 @@ def cleanup(keep_work=False):
     intermediates for inspection.
     """
     junk = glob.glob("work_music_*.m4a")          # always regenerated
+    junk += glob.glob(f"{TEXT_DIR}/*.txt")        # scripted plate copy
+    # reason: redrawn from config.json on every run in well under a second, and
+    # a stale one would be a plate for the previous listing's address.
+    junk += [f for f in ("work_lower_third.png", "work_lt_probe.png")
+             if os.path.exists(f)]
     if not keep_work:
         junk += glob.glob(f"{CLIPS_DIR}/*.mp4")
-        if os.path.exists(SILENT_WORK):
-            junk += [SILENT_WORK]
+        junk += glob.glob(f"{CLIPS_DIR}/*.png")   # card plate
+        for w in (SILENT_WORK, BRANDED_WORK):
+            if os.path.exists(w):
+                junk += [w]
     for p in junk:
         os.remove(p)
-    if os.path.isdir(CLIPS_DIR) and not os.listdir(CLIPS_DIR):
-        os.rmdir(CLIPS_DIR)
+    for d in (CLIPS_DIR, TEXT_DIR):
+        if os.path.isdir(d) and not os.listdir(d):
+            os.rmdir(d)
     if junk:
         mb = "" if keep_work else " (rerun with --keep-work to keep them)"
         print(f"Cleaned up {len(junk)} intermediate file(s){mb}")
     if keep_work:
-        print(f"  kept {SILENT_WORK} + {CLIPS_DIR}/ for --finish-only")
+        also = f" + {BRANDED_WORK}" if os.path.exists(BRANDED_WORK) else ""
+        print(f"  kept {SILENT_WORK}{also} + {CLIPS_DIR}/ for --finish-only")
 
 
 def tour_order(photos):
@@ -726,15 +1175,57 @@ def main():
     acquire_lock()
     if not DRAFT:
         os.makedirs("out", exist_ok=True)
+
+    # reason: a lower_third.png that exists still wins. Scripting the plate is
+    # the routine because it is the asset that changed per listing; a plate
+    # someone actually designed for this listing is the exception, and the
+    # exception should not need a flag to be honoured.
+    brand_plate = LOWER_THIRD
+    if not os.path.exists(brand_plate):
+        drawn = render_lower_third("work_lower_third.png")
+        if drawn:
+            print(f"  lower third: drawn from {CONFIG_FILE} "
+                  f"({'/'.join(x for x in (ADDRESS, AGENT_NAME, AGENT_PHONE) if x)})")
+            brand_plate = drawn
+
     silent = SILENT_WORK
-    if "--finish-only" in sys.argv and os.path.exists(silent):
+    branded_silent = silent
+    spans = (0.0, 0.0)      # (intro, outro) seconds inside the branded stitch
+    reused = "--finish-only" in sys.argv and os.path.exists(silent)
+    if reused:
         print(f"Reusing {silent} ({duration(silent):.1f}s) - skipping clips.")
         # reason: the order printed above describes photos/ as it stands now, but
         # work_silent.mp4 was stitched by an earlier run. Renaming photos to fix the
         # order and then rebuilding with --finish-only silently reships the old order.
         print("    WARNING: --finish-only reuses that earlier stitch. If photos/ has "
               "changed since, the order above is NOT what renders -- drop the flag.")
-    else:
+        # reason: the branded stitch is the one carrying the card. Without it a
+        # --finish-only pass would quietly drop the card from every branded cut,
+        # so rebuild it from the kept clips, and fall back to a full build when
+        # even those are gone rather than shipping a tour with no card in it.
+        if not DRAFT and CARD != "none":
+            if os.path.exists(BRANDED_WORK):
+                print(f"Reusing {BRANDED_WORK} ({duration(BRANDED_WORK):.1f}s).")
+                branded_silent = BRANDED_WORK
+                spans = (CARD_SECONDS * (CARD in ("intro", "both")),
+                         CARD_SECONDS * (CARD in ("outro", "both")))
+            elif glob.glob(f"{CLIPS_DIR}/[0-9]*.mp4"):
+                print(f"--finish-only: no {BRANDED_WORK}, restitching it "
+                      "from the kept clips.")
+                intro, outro = build_cards(LOGO)
+                kept = sorted(glob.glob(f"{CLIPS_DIR}/[0-9]*.mp4"))
+                branded_silent = stitch(
+                    [c for c in (intro, *kept, outro) if c],
+                    out=BRANDED_WORK,
+                    durs=[CARD_SECONDS] * bool(intro) +
+                         [CLIP_SECONDS] * len(kept) +
+                         [CARD_SECONDS] * bool(outro))
+                spans = (CARD_SECONDS * bool(intro), CARD_SECONDS * bool(outro))
+            else:
+                print(f"--finish-only: no {BRANDED_WORK} and no clips to restitch "
+                      "it from. Building everything.")
+                reused = False
+    if not reused:
         # reason: --finish-only with no work_silent.mp4 (a previous default build
         # cleaned it up) must fall back to a full build, not crash in finish().
         if "--finish-only" in sys.argv:
@@ -742,15 +1233,38 @@ def main():
         print(f"Building {len(photos)} clips...")
         clips = build_clips(photos)
 
+        intro, outro = build_cards(LOGO)
+        spans = (CARD_SECONDS * bool(intro), CARD_SECONDS * bool(outro))
         print("Stitching with crossfades...")
-        silent = stitch(clips)
+        if DRAFT:
+            # reason: a draft builds one branded cut, so its single stitch is the
+            # branded one -- and it is already named apart (work_draft.mp4), so a
+            # card baked into it can never reach a delivery build.
+            silent = branded_silent = stitch(
+                [c for c in (intro, *clips, outro) if c],
+                durs=[CARD_SECONDS] * bool(intro) + [CLIP_SECONDS] * len(clips) +
+                     [CARD_SECONDS] * bool(outro))
+        else:
+            silent = stitch(clips)
+            branded_silent = silent
+            if intro or outro:
+                print("Stitching the branded cut with its card...")
+                branded_silent = stitch(
+                    [c for c in (intro, *clips, outro) if c],
+                    out=BRANDED_WORK,
+                    durs=[CARD_SECONDS] * bool(intro) + [CLIP_SECONDS] * len(clips) +
+                         [CARD_SECONDS] * bool(outro))
 
     print("Adding music and branding..." if music else "Adding branding (silent)...")
     if music:
-        music = prepare_music(music, duration(silent))
+        # reason: with a card the branded cut outruns the unbranded one, and
+        # finish() pins each cut to its own length -- so the track has to cover
+        # the longer of the two or the branded cut ends in silence.
+        music = prepare_music(music, max(duration(silent),
+                                         duration(branded_silent)))
     # reason: every overlay is silently optional, which made a typo'd filename look
     # like a working build with no branding. Say what is actually applied.
-    for name, path in (("lower third", LOWER_THIRD), ("logo", LOGO),
+    for name, path in (("lower third", brand_plate), ("logo", LOGO),
                        ("sample watermark", SAMPLE_WATERMARK)):
         print(f"  {name}: {path if os.path.exists(path) else 'not found - skipped'}")
 
@@ -760,20 +1274,27 @@ def main():
     # to answer those questions is the waste this flag exists to stop.
     if DRAFT:
         print(f"  {DRAFT_OUT} (720p draft, not a deliverable)...")
-        finish(silent, music, LOWER_THIRD, DRAFT_OUT,
-               branded=True, logo=LOGO, watermark=SAMPLE_WATERMARK)
+        finish(branded_silent, music, brand_plate, DRAFT_OUT,
+               branded=True, logo=LOGO, watermark=SAMPLE_WATERMARK, cards=spans)
+        # reason: measure before cleanup(). The runtime line used to be arithmetic
+        # over CLIP_SECONDS; reading it off the stitch instead is correct with a
+        # card in the chain, but the stitch is one of the files cleanup() deletes.
+        runtime = duration(branded_silent)
         cleanup(keep_work=any(f in sys.argv
                               for f in ("--keep-work", "--finish-only")))
-        total = len(photos) * CLIP_SECONDS - (len(photos) - 1) * XFADE_SECONDS
-        print(f"\nDone. Runtime {total:.1f}s")
+        print(f"\nDone. Runtime {runtime:.1f}s")
         print(f"  {DRAFT_OUT}  ({os.path.getsize(DRAFT_OUT)/1e6:.1f} MB)")
         print("  DRAFT -- 720p at a fast preset, for review on this machine only.")
         print("  Nothing here is a deliverable. Rebuild without --draft to ship.")
         return
 
+    # reason: branded cuts read branded_silent, which carries the card; the
+    # unbranded cuts read the photos-only stitch. That split is what keeps an
+    # agent's name and phone number off the MLS/IDX file. With no card the two
+    # are the same object and nothing extra was encoded.
     print("  tour_branded...")
-    finish(silent, music, LOWER_THIRD,
-           "out/tour_branded.mp4", branded=True, logo=LOGO)
+    finish(branded_silent, music, brand_plate,
+           "out/tour_branded.mp4", branded=True, logo=LOGO, cards=spans)
     print("  tour_unbranded...")
     finish(silent, music, None,
            "out/tour_unbranded.mp4", branded=False, logo=None)
@@ -782,8 +1303,8 @@ def main():
     # centered watermark so an unapproved tour cannot be used as-is. The tour_
     # files are the delivery once they sign off.
     print("  sample_branded...")
-    finish(silent, music, LOWER_THIRD, "out/sample_branded.mp4",
-           branded=True, logo=LOGO, watermark=SAMPLE_WATERMARK)
+    finish(branded_silent, music, brand_plate, "out/sample_branded.mp4",
+           branded=True, logo=LOGO, watermark=SAMPLE_WATERMARK, cards=spans)
     print("  sample_unbranded...")
     finish(silent, music, None, "out/sample_unbranded.mp4",
            branded=False, logo=None, watermark=SAMPLE_WATERMARK)
@@ -794,12 +1315,15 @@ def main():
     vertical("out/sample_unbranded.mp4", "out/sample_branded.mp4",
              "out/sample_vertical.mp4")
 
+    # reason: measure before cleanup() deletes the stitches these read from.
+    runtime, plain = duration(branded_silent), duration(silent)
+
     # reason: --finish-only means the user is iterating on music/branding, so the
     # clips are still needed next run. Deleting them would force a full rebuild.
     cleanup(keep_work=any(f in sys.argv for f in ("--keep-work", "--finish-only")))
 
-    total = len(photos) * CLIP_SECONDS - (len(photos) - 1) * XFADE_SECONDS
-    print(f"\nDone. Runtime {total:.1f}s")
+    extra = "" if abs(runtime - plain) < 0.05 else f" ({plain:.1f}s unbranded)"
+    print(f"\nDone. Runtime {runtime:.1f}s{extra}")
     for f in sorted(glob.glob("out/*.mp4")):
         print(f"  {f}  ({os.path.getsize(f)/1e6:.1f} MB)")
 

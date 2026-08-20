@@ -8,15 +8,17 @@ Project-level context. Loaded automatically each session, alongside the global
 `make_tour.py` turns a folder of still listing photos into a branded walkthrough
 video with music. Single script, no dependencies beyond `ffmpeg` / `ffprobe`.
 
-`dashboard.py` is a local Streamlit front end over it. It is an **internal tool** —
-nothing it renders reaches a client except the finished video — so it is shaped
-around the loop the operator actually runs (*is the order right, does the edit feel
-right, ship it*), not around the settings that make it possible. Three tabs: Build,
-Asset library, Brand. The Build tab is one selectbox and three buttons; everything
-with the same answer on every listing is inherited from `brand.json` or derived from
-the photos, and the rest sits under Advanced. It is the only part of the project
-with a third-party dependency (`requirements.txt`); the script itself has none, and
-everything the dashboard does can still be done from the CLI.
+`tour.py` is the interface: one command, a short question set, an mp4. It picks the
+listing, imports and numbers the photos, names what is missing *before* anything
+encodes, asks only what actually varies, and walks the three rungs (*is the order
+right, does the edit feel right, ship it*), running `make_tour.py` for each. It is
+stdlib only — the project has no third-party dependencies — and everything it does
+can still be done from the CLI.
+
+It replaced a Streamlit dashboard, which put thirteen controls on screen and still
+left the operator to remember which of them mattered. The rule that came out of
+that: anything with the same answer on every listing is inherited from `brand.json`
+or derived from the photos, and never becomes a control.
 
 Reads from the **working directory**, which is normally a listing folder:
 
@@ -37,7 +39,7 @@ only `--finish-only`.
 ## Layout
 
 ```
-agents/<brand>/brand.json     per-brand defaults — DASHBOARD ONLY, see below
+agents/<brand>/brand.json     per-brand defaults — tour.py ONLY, see below
 agents/<brand>/<listing>/     photos/, config.json, out/  — cwd for a build
 global_assets/logos/          shared branding, referenced by config.json
 global_assets/music/
@@ -45,7 +47,8 @@ global_assets/lower_thirds/
 ```
 
 `brand.json` holds what is identical across every listing a brokerage owns — logo,
-music, pacing, lower-third timing. **`make_tour.py` never reads it.** The dashboard
+music, pacing, lower-third timing, the agent's own name and phone, the card mode.
+**`make_tour.py` never reads it.** `tour.py`
 resolves `DEFAULTS → brand.json → listing config.json` and writes the effective
 values into the listing's `config.json`, which stays the single source of truth for
 a build. That keeps the script's contract intact — read the working directory, know
@@ -64,11 +67,19 @@ the Brand tab is for.
 | `brand_persistent` | `true` | `false` = lower third only inside the window below |
 | `brand_in` / `brand_out` | `0.8` / `6.5` | only read when not persistent; out > in |
 | `lower_third` / `logo` / `music` / `watermark` | the plain filenames | repo-relative paths into `global_assets/` |
+| `address` / `agent_name` / `agent_phone` | `""` | the lower third's three lines, and the card's body. Any may be blank |
+| `brokerage` | `""` | card only, and only when there is no logo |
+| `card` | `"none"` | `intro` \| `outro` \| `both`. `tour.py` writes `outro` on a new listing; a bare CLI run in an older folder is unchanged |
+| `card_seconds` | `5.0` | forces a full rebuild when changed |
+| `card_style` | `"auto"` | `logo` when one resolves, `type` when none does |
+| `card_theme` | `"auto"` | measures the logo against both grounds, takes the higher contrast |
+| `accent` / `font` / `scrim` | `#C8A24A` / `Liberation Sans` / `black@0.55` | rule and phone line / any installed family / the lower third's panel |
 
 Outputs **six** cuts to `out/`, in two families:
 
 **Delivery** — clean, what the client gets on sign-off:
-- `tour_branded.mp4`   — lower third + top-left logo, for social / your own channels
+- `tour_branded.mp4`   — card + lower third + top-left logo, for social / your own
+  channels. Longer than the unbranded cut by the card(s) it carries
 - `tour_unbranded.mp4` — no branding, MLS/IDX-safe
 - `tour_vertical.mp4`  — 9:16 portrait cut, branded centre, clean blurred side bands
 
@@ -87,6 +98,27 @@ Plus one more, only from `--draft`, and deliberately outside `out/`:
 
 The watermark is deliberately **not** gated on the `branded` flag — it is the entire
 reason a sample cut exists, so it appears on `sample_unbranded.mp4` too.
+
+## The card, and why a build stitches twice
+
+The intro/outro card is drawn by ffmpeg from `config.json` — logo (or brokerage type
+when there is no logo) over address, agent and phone. Nothing is exported from Canva
+any more; the lower third is drawn the same way from the same three fields, and a
+`lower_third.png` that exists still wins, so a hand-authored plate stays available
+for a listing that earns it.
+
+The card is branding, so it must never reach the MLS cut. That is why a build with a
+card stitches twice:
+
+| Stitch | Contents | Feeds |
+|---|---|---|
+| `work_silent.mp4` | photos only | `tour_unbranded`, `sample_unbranded` |
+| `work_branded.mp4` | `[intro]` + photos + `[outro]` | `tour_branded`, `sample_branded`, `draft.mp4` |
+
+With no card configured the second stitch is skipped and both read the same file — a
+no-card build is byte-identical to one from before cards existed, verified against
+`0722f52`. The cost when there *is* a card is one extra stitch, ~26s on a 6-minute
+build.
 
 ## READ FIRST: `IDEA.md`
 
@@ -112,10 +144,23 @@ measurement, not assumption.
   and build state **only**; neither may ever gain a photo order or selection key.
   Because sorting the filenames *is* the ordering mechanism, a folder with no
   numeric prefixes still builds — it just builds in alphabetical order. Every build
-  prints the resolved order first and warns when nothing authored it; the dashboard
-  shows the same list. Keep both. That silent failure shipped once already.
+  prints the resolved order first and warns when nothing authored it; `tour.py`
+  shows the same list and offers to add prefixes. Keep all three. That silent
+  failure shipped once already.
 - **A successful build deletes its own intermediates.** A failed build keeps them
   for inspection. Do not add cleanup that fires before `finish()` and `vertical()`.
+
+- **The card never rides in `work_silent.mp4`.** That stitch feeds the unbranded
+  cuts, which are the MLS/IDX files. A card baked into it puts an agent's name and
+  phone number on the MLS. Two stitches, always, whenever a card exists.
+
+- **Branding is held off wherever the card is on screen, and the watermark is not.**
+  The card already carries the address, the agent and the phone at full size in the
+  middle of the frame; the lower third and the logo over the top of it print the
+  same lines twice. `finish()` takes a `cards=(intro, outro)` span and gates the
+  branding layers to the photo body. The proofing watermark is deliberately exempt —
+  an unwatermarked outro card is exactly the frame an unapproved sample would be
+  screenshot from.
 
 - **Never send a `sample_` file as a deliverable, and never send a `tour_` file
   before sign-off.** The two families exist to keep that boundary enforceable by
@@ -136,7 +181,7 @@ measurement, not assumption.
   draft-quality intermediate silently feeding a delivery build is the same failure
   shape as the shuffled photo order — it produces a bad video with no error.
 
-- **Docs do not go stale.** Any change to `make_tour.py` — new feature, flag, output,
+- **Docs do not go stale.** Any change to `make_tour.py` or `tour.py` — new feature, flag, output,
   renamed constant, changed default — must be propagated to `CLAUDE.md`, `IDEA.md`,
   `STEPS.md`, and the module docstring in the *same* pass. `STEPS.md` is the runbook
   someone else follows to produce client deliverables; drift there produces bad work.
@@ -144,10 +189,11 @@ measurement, not assumption.
 ## Running it
 
 ```bash
-streamlit run dashboard.py            # the UI: assets, timing, build, review
+python3 tour.py                       # the wizard: listing, questions, three rungs
+python3 tour.py --check-photos        # optional: Claude reads the contact sheet
 ```
 
-Or straight from a listing folder — everything the dashboard does, it does by
+Or straight from a listing folder — everything `tour.py` does, it does by
 running this. Three rungs, each costing what the question is worth:
 
 ```bash
@@ -187,17 +233,23 @@ See `STEPS.md` for the full runbook — every scenario, flag, and failure mode.
   clears 720p and fails 1080p. 1080p requires the photographer's originals or the
   MLS back end.
 - `make_tour.py` takes `.build.lock` with `O_EXCL` at startup and releases it via
-  `atexit` on any exit, clean or not, so the CLI and the dashboard can no longer
-  corrupt each other's intermediates. The dashboard only *reads* the lock to report
-  it — it must never write it, or the build it launches would be locked out of its
-  own folder.
+  `atexit` on any exit, clean or not, so two runs can no longer corrupt each other's
+  intermediates. `tour.py` only *reads* the lock to report it — it must never write
+  it, or the build it launches would be locked out of its own folder.
 - `finish()` applies `BRAND_IN`/`BRAND_OUT` to *any* non-persistent layer, not just
   the lower third. Nothing is broken today — the logo is always persistent — but
   giving the logo its own window means adding `LOGO_IN`/`LOGO_OUT` and making the
-  window per-layer, not reusing the brand one.
+  window per-layer, not reusing the brand one. With an intro card the window shifts
+  by the card's length, so `brand_in: 0.8` still means 0.8s into the *photos*.
+- With a card, the branded cut outruns the unbranded one, so `vertical()` pads the
+  blurred band with `tpad=stop_mode=clone` and pins the output to the branded
+  length. The band holds the last blurred room frame behind the card rather than
+  ending early. Without a card the pad is not emitted and the output is unchanged.
 - `--finish-only` reuses `work_silent.mp4`, which was stitched from the photo list as
   it stood at the time. Renaming photos to reorder them therefore does **not** reach
-  a `--finish-only` build — it would reship the old order. The CLI warns; the
-  dashboard withholds the flag outright once `photo_state()` changes.
+  a `--finish-only` build — it would reship the old order. The CLI warns; `tour.py`
+  withholds the flag outright once `photo_state()` changes. It withholds
+  it for a changed `card` or `card_seconds` too — the card rides in the branded
+  stitch, so changing it invalidates that intermediate exactly like the pacing keys.
 - The centered sample watermark wants a source at least 864px on the long edge at
   1080p. `viabolat.png` is currently 50x50 and upscales ~9.7x; the build warns.
