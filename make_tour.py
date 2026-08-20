@@ -1,0 +1,527 @@
+#!/usr/bin/env python3
+"""
+make_tour.py — build one real estate walkthrough video from still photos.
+
+Usage:
+    python3 make_tour.py
+    python3 make_tour.py --no-music      # build without a soundtrack
+    python3 make_tour.py --finish-only   # reuse work_silent.mp4, redo the tail
+    python3 make_tour.py --allow-lowres  # build even from undersized photos
+    python3 make_tour.py --720p          # 1280x720, for sources under 2150px
+    python3 make_tour.py --keep-work     # keep intermediates so --finish-only works
+
+A successful build deletes its own intermediates (clips/, work_silent.mp4,
+work_music_*.m4a). Pass --keep-work when you intend to iterate on music or
+branding with --finish-only. A FAILED build keeps everything for inspection.
+
+Expects:
+    photos/          numbered jpgs in tour order: 01_exterior.jpg, 02_entry.jpg ...
+    music.mp3        a LICENSED track, longer than the finished video
+    lower_third.png  optional RGBA branding: either a full-frame
+                     1920x1080 plate or a small lower-third strip
+    logo.png         optional RGBA brokerage logo, pinned top-left. Transparent
+                     padding is trimmed automatically, then the art is fitted
+                     into a 360x200 box (1080p-relative), aspect preserved.
+    viabolat.png     optional RGBA proofing watermark for the sample_ cuts only.
+                     Centered, 45% of frame, 35% opacity. Wants a source at
+                     least 864px on the long edge.
+
+Outputs -- six cuts, two families:
+
+    DELIVERY (clean, what the client gets on sign-off)
+    out/tour_branded.mp4      music + branding
+    out/tour_unbranded.mp4    music, no branding  (MLS/IDX safe)
+    out/tour_vertical.mp4     portrait, blur-padded for Reels/TikTok
+
+    SAMPLE (same edit + centered proofing watermark, what the client reviews)
+    out/sample_branded.mp4
+    out/sample_unbranded.mp4
+    out/sample_vertical.mp4
+
+The watermark is NOT gated on branding -- it is the reason a sample exists, so it
+appears on the unbranded sample too. Never send a sample_ file as a deliverable
+and never send a tour_ file before sign-off.
+
+Landscape is 1920x1080, or 1280x720 with --720p; the portrait cut and the
+branding overlay follow whichever preset is active.
+
+Requires ffmpeg with libx264 and aac.
+"""
+
+import glob
+import os
+import subprocess
+import sys
+
+# ---- tune these -------------------------------------------------------------
+CLIP_SECONDS = 4.0     # per photo, before crossfade overlap
+XFADE_SECONDS = 0.5    # crossfade length
+FPS = 30
+ZOOM_MAX = 1.12        # 12% push. Above ~1.20 it starts to look cheap.
+MUSIC_VOLUME = 0.55
+MUSIC_XFADE = 2.0      # crossfade length when a short track has to loop
+BRAND_PERSISTENT = True          # True = lower third on screen the whole video
+BRAND_IN, BRAND_OUT = 0.8, 6.5   # only used when BRAND_PERSISTENT is False
+LOGO_PERSISTENT = True           # brokerage mark: normally up for the whole video
+LOGO_BOX_W, LOGO_BOX_H = 360, 200  # 1080p-relative box; ~19% of frame width
+# Sample cuts: a centered proofing watermark. Obscuring the room is the POINT here
+# -- these go to the client for approval, the tour_ cuts are the delivery.
+SAMPLE_WATERMARK = "viabolat.png"
+SAMPLE_WM_FRAC = 0.45            # fraction of the frame it may occupy
+SAMPLE_WM_OPACITY = 0.35         # 0-1. Readable, still see-through.
+
+# 1080p needs 2150px sources; 720p needs 1434px. Pick the one your photos can
+# actually feed -- a crisp downscale beats a soft upscale every time.
+# reason: 1536px sources upscale 1.4x to 1080p (soft) but downscale to 720p (crisp).
+OUT_W, OUT_H = (1280, 720) if "--720p" in sys.argv else (1920, 1080)
+# -----------------------------------------------------------------------------
+
+# ---- everything below derives from OUT_W/OUT_H; do not hardcode a size ------
+# reason: zoompan truncates its crop origin AND crop size to whole integers.
+# At 3x supersampling the push is only ~1.7px/frame, so rounding stalls the crop
+# for a frame then jumps two -- visible as camera shake. Measured frame-to-frame
+# spread: 3x = 55%, 6x = 21%, 8x = 22% (no further gain). A constant 7680px work
+# width lands on that knee for both presets. Post-downscale filtering does not
+# help: zoompan has already snapped the crop before any scaler sees it.
+WORK_W = 7680
+WORK_H = round(WORK_W * OUT_H / OUT_W / 2) * 2   # even, matches output aspect
+MIN_PHOTO_W = int(OUT_W * ZOOM_MAX)     # below this, the zoom crop upscales
+VERT_W, VERT_H = OUT_H, OUT_W           # portrait cut: 1080x1920 or 720x1280
+SCALE = OUT_W / 1920.0                  # 1080p-relative, for overlay + blur sizing
+MARGIN = round(70 * SCALE)              # overlay inset from frame edge
+# reason: a logo PNG's native size is arbitrary -- a wordmark and a square badge
+# have nothing in common. Fit into a box instead of scaling by a fixed factor so
+# both land at a sane on-screen size without per-file tuning.
+LOGO_W = round(LOGO_BOX_W * SCALE)
+LOGO_H = round(LOGO_BOX_H * SCALE)
+WM_W = round(OUT_W * SAMPLE_WM_FRAC)    # watermark fit box, both presets
+WM_H = round(OUT_H * SAMPLE_WM_FRAC)
+BLUR_SIGMA = round(28 * SCALE, 1)       # portrait backdrop blur
+
+FRAMES = int(CLIP_SECONDS * FPS)
+PREP = (f"scale={WORK_W}:{WORK_H}:force_original_aspect_ratio=increase,"
+        f"crop={WORK_W}:{WORK_H}")
+TAIL = f"s={OUT_W}x{OUT_H}:fps={FPS}"
+CENTER_X = "iw/2-(iw/zoom/2)"
+CENTER_Y = "ih/2-(ih/zoom/2)"
+STEP = round((ZOOM_MAX - 1.0) / FRAMES, 6)
+
+# Four motion styles, cycled so no two neighbouring clips move the same way.
+MOTIONS = [
+    # push in — good for a focal point: fireplace, island, view out a window
+    f"zoompan=z='min(zoom+{STEP},{ZOOM_MAX})':d={FRAMES}:x='{CENTER_X}':y='{CENTER_Y}':{TAIL}",
+    # pan right — good for wide living rooms and open plans
+    f"zoompan=z='{ZOOM_MAX}':d={FRAMES}:x='(iw-iw/zoom)*on/{FRAMES-1}':y='{CENTER_Y}':{TAIL}",
+    # pull out — good for reveals: step into a room, then show the whole thing
+    f"zoompan=z='{ZOOM_MAX}-{STEP}*on':d={FRAMES}:x='{CENTER_X}':y='{CENTER_Y}':{TAIL}",
+    # tilt up — good for exteriors, stairwells, vaulted ceilings
+    f"zoompan=z='{ZOOM_MAX}':d={FRAMES}:x='{CENTER_X}':y='(ih-ih/zoom)*(1-on/{FRAMES-1})':{TAIL}",
+]
+
+
+def run(cmd):
+    print("  $", " ".join(str(c) for c in cmd)[:150], "...")
+    subprocess.run(cmd, check=True)
+
+
+def duration(path):
+    out = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+         "-of", "csv=p=0", path],
+        capture_output=True, text=True, check=True)
+    return float(out.stdout.strip())
+
+
+def build_clips(photos):
+    os.makedirs("clips", exist_ok=True)
+    paths = []
+    for i, photo in enumerate(photos):
+        out = f"clips/{i:03d}.mp4"
+        vf = f"{PREP},{MOTIONS[i % len(MOTIONS)]},setsar=1,format=yuv420p"
+        run(["ffmpeg", "-y", "-loglevel", "error",
+             "-loop", "1", "-i", photo, "-t", str(CLIP_SECONDS),
+             "-filter_complex", vf,
+             "-c:v", "libx264", "-crf", "18", "-preset", "medium",
+             "-r", str(FPS), out])
+        paths.append(out)
+        print(f"  [{i+1}/{len(photos)}] {os.path.basename(photo)}")
+    return paths
+
+
+def stitch(clips, out="work_silent.mp4"):
+    """Chain xfade transitions. offset_i = i * (CLIP - XFADE)."""
+    if len(clips) == 1:
+        run(["ffmpeg", "-y", "-loglevel", "error", "-i", clips[0],
+             "-c", "copy", out])
+        return out
+    inputs, filt, prev = [], [], "0:v"
+    for c in clips:
+        inputs += ["-i", c]
+    for i in range(1, len(clips)):
+        offset = i * (CLIP_SECONDS - XFADE_SECONDS)
+        label = f"v{i}"
+        filt.append(f"[{prev}][{i}:v]xfade=transition=fade:"
+                    f"duration={XFADE_SECONDS}:offset={offset:.2f}[{label}]")
+        prev = label
+    run(["ffmpeg", "-y", "-loglevel", "error"] + inputs +
+        ["-filter_complex", ";".join(filt), "-map", f"[{prev}]",
+         "-c:v", "libx264", "-crf", "18", "-preset", "medium",
+         "-pix_fmt", "yuv420p", "-r", str(FPS), out])
+    return out
+
+
+def dimensions(path):
+    """(width, height) of an image or video, or (0, 0) if unreadable."""
+    r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0",
+                        "-show_entries", "stream=width,height",
+                        "-of", "csv=p=0", path], capture_output=True, text=True)
+    try:
+        w, h = (int(x) for x in r.stdout.strip().split(",")[:2])
+        return w, h
+    except ValueError:
+        return 0, 0
+
+
+def check_resolution(photos, allow_lowres=False):
+    """Refuse to render photos too small to fill the frame.
+    # reason: 384x288 sources were upscaled 5x to 1080p, which no crf/preset
+    # setting can fix. Fail at second zero instead of after a 5-minute render.
+    """
+    bad = []
+    for p in photos:
+        w, h = dimensions(p)
+        if not w:
+            bad.append((p, "unreadable", 0)); continue
+        # the frame is filled by the larger of the two scale factors
+        scale = max(OUT_W * ZOOM_MAX / w, OUT_H * ZOOM_MAX / h)
+        if scale > 1.0:
+            bad.append((p, f"{w}x{h}", scale))
+    if not bad:
+        return
+    print(f"\n{len(bad)} of {len(photos)} photos are below {MIN_PHOTO_W}px wide:")
+    for p, dims, scale in bad:
+        print(f"  {os.path.basename(p):<32} {dims:>10}  upscaled {scale:.1f}x")
+    if not allow_lowres:
+        sys.exit("\nThese will look soft or mushy at 1080p. Reshoot or re-export "
+                 "at 3000px+ wide, or rerun with --allow-lowres to build anyway.")
+    print("  --allow-lowres set: building anyway, expect soft output.\n")
+
+
+def music_span(path):
+    """(start, end) of actual content, ignoring leading/trailing silence."""
+    r = subprocess.run(["ffmpeg", "-v", "info", "-i", path, "-vn", "-af",
+                        "silencedetect=noise=-50dB:d=0.3", "-f", "null", "-"],
+                       capture_output=True, text=True)
+    total = duration(path)
+    spans, cur = [], None
+    for line in r.stderr.splitlines():
+        if "silence_start:" in line:
+            cur = float(line.split("silence_start:")[1].split()[0])
+        elif "silence_end:" in line and cur is not None:
+            spans.append((cur, float(line.split("silence_end:")[1].split()[0])))
+            cur = None
+    if cur is not None:
+        spans.append((cur, total))          # silence ran to end of file
+    start, end = 0.0, total
+    for a, b in spans:
+        if a <= 0.05:
+            start = max(start, b)           # leading silence
+        if b >= total - 0.05:
+            end = min(end, a)               # trailing silence
+    return start, max(end, start + 1.0)
+
+
+def prepare_music(src, need):
+    """Trim silence off a track and loop it with crossfades to cover `need`.
+    # reason: a 30s mp3 was really 24.8s of music plus 4.7s of dead air. Raw
+    # -stream_loop repeated the dead air, leaving a 5s dropout mid-video.
+    """
+    a, b = music_span(src)
+    body = b - a
+    cur = "work_music_0.m4a"
+    run(["ffmpeg", "-y", "-loglevel", "error", "-ss", f"{a:.3f}",
+         "-to", f"{b:.3f}", "-i", src, "-vn",
+         "-c:a", "aac", "-b:a", "192k", cur])
+    tail = duration(src) - b
+    if a > 0.05 or tail > 0.05:
+        print(f"  trimmed {a:.1f}s lead-in and {tail:.1f}s trailing silence "
+              f"-> {body:.1f}s of music")
+    length, i = body, 1
+    while length < need + 1.0:
+        nxt = f"work_music_{i}.m4a"
+        run(["ffmpeg", "-y", "-loglevel", "error", "-i", cur, "-i", cur,
+             "-filter_complex", f"[0:a][1:a]acrossfade=d={MUSIC_XFADE}[a]",
+             "-map", "[a]", "-c:a", "aac", "-b:a", "192k", nxt])
+        length = length * 2 - MUSIC_XFADE
+        print(f"  looped music -> {length:.1f}s "
+              f"({MUSIC_XFADE}s crossfade at the seam)")
+        cur, i = nxt, i + 1
+    return cur
+
+
+def music_ok(path):
+    """True only if path is a real, decodable audio file.
+    # reason: os.path.exists() passed on a 0-byte music.mp3 and ffmpeg died at
+    # the very last step, after ~5 minutes of clip rendering. Validate up front.
+    """
+    if not path or not os.path.exists(path) or os.path.getsize(path) == 0:
+        return False
+    p = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "a:0",
+                        "-show_entries", "stream=codec_type", "-of", "csv=p=0",
+                        path], capture_output=True, text=True)
+    return p.returncode == 0 and "audio" in p.stdout
+
+
+def alpha_bbox(path, thresh=8):
+    """Tight bounds of a PNG's non-transparent pixels as (x, y, w, h), or None.
+
+    reason: the fit box scales the whole canvas, so transparent padding baked
+    into an export silently shrinks the mark and shoves it off its margin -- a
+    684x438 logo whose art only fills 514x273 renders 33% smaller than asked,
+    inset by the padding on top of MARGIN. Measure the art instead of trusting
+    the canvas, so any logo drops in without hand-checking the file.
+    """
+    w, h = dimensions(path)
+    p = subprocess.run(["ffmpeg", "-v", "error", "-i", path, "-vf", "alphaextract",
+                        "-f", "rawvideo", "-pix_fmt", "gray", "-"],
+                       capture_output=True)
+    a = p.stdout[:w * h]
+    if p.returncode != 0 or len(a) < w * h:
+        return None                      # no alpha channel -- nothing to trim
+    # reason: max() over a bytes slice runs in C. A per-pixel Python loop over a
+    # large logo is seconds; this is milliseconds. a[c::w] strides one column.
+    rows = [r for r in range(h) if max(a[r * w:(r + 1) * w]) > thresh]
+    if not rows:
+        return None                      # fully transparent -- leave it alone
+    cols = [c for c in range(w) if max(a[c::w]) > thresh]
+    return cols[0], rows[0], cols[-1] - cols[0] + 1, rows[-1] - rows[0] + 1
+
+
+def trim_filter(path):
+    """(crop_filter_or_empty, (art_w, art_h)) for an overlay PNG.
+
+    reason: logo and watermark both need padding trimmed before the fit box, and
+    both need the art's true size to report upscale. One helper, one behaviour.
+    """
+    lw, lh = dimensions(path)
+    box = alpha_bbox(path)
+    if box and (box[2], box[3]) != (lw, lh):
+        return f"crop={box[2]}:{box[3]}:{box[0]}:{box[1]},", (box[2], box[3])
+    return "", (lw, lh)
+
+
+def finish(silent, music, brand, out, branded=True, logo=None, watermark=None):
+    dur = duration(silent)
+    use_brand = bool(branded and brand and os.path.exists(brand))
+    use_logo = bool(branded and logo and os.path.exists(logo))
+    # reason: NOT gated on `branded`. The proofing watermark is the whole reason a
+    # sample cut exists, so it must survive onto the unbranded sample too.
+    use_wm = bool(watermark and os.path.exists(watermark))
+
+    # reason: the lower third carries per-listing agent info, the logo is the
+    # constant brokerage mark. They are separate inputs so changing one does not
+    # mean re-authoring the other. Both are branding, so both follow `branded`
+    # and stay off the MLS/IDX cut.
+    pre = []            # scale filter per overlay input
+    layers = []         # (label, overlay position, persistent) in stacking order
+    idx = 1             # ffmpeg input index; 0 is always the silent video
+
+    if use_brand:
+        bw, bh = dimensions(brand)
+        # reason: a full-frame plate is already positioned by its own artwork --
+        # insetting it by MARGIN shifts the design off-register. Only a small
+        # strip PNG wants a margin. Either way it is resampled to the preset.
+        full_frame = bw >= 0.9 * 1920
+        if full_frame:
+            pre.append(f"[{idx}:v]scale={OUT_W}:{OUT_H}[bp];")
+            pos = "x=0:y=0"
+        else:
+            pre.append(f"[{idx}:v]scale=iw*{SCALE}:-1[bp];")
+            pos = f"x={MARGIN}:y=H-h-{MARGIN}"
+        layers.append(("bp", pos, BRAND_PERSISTENT))
+        idx += 1
+
+    if use_logo:
+        trim, (aw, ah) = trim_filter(logo)
+        fit = min(LOGO_W / aw, LOGO_H / ah)
+        print(f"    logo art {aw}x{ah} -> renders "
+              f"{round(aw * fit)}x{round(ah * fit)} top-left")
+        pre.append(f"[{idx}:v]{trim}scale=w={LOGO_W}:h={LOGO_H}:"
+                   f"force_original_aspect_ratio=decrease[lg];")
+        layers.append(("lg", f"x={MARGIN}:y={MARGIN}", LOGO_PERSISTENT))
+        idx += 1
+
+    if use_wm:
+        trim, (aw, ah) = trim_filter(watermark)
+        fit = min(WM_W / aw, WM_H / ah)
+        rw, rh = round(aw * fit), round(ah * fit)
+        print(f"    watermark art {aw}x{ah} -> renders {rw}x{rh} centered "
+              f"at {SAMPLE_WM_OPACITY:.0%} opacity")
+        # reason: same principle as the photo gate -- say it out loud rather than
+        # silently shipping a smeared 15x upscale of a tiny source.
+        if fit > 1.5:
+            print(f"    WARNING: watermark upscales {fit:.1f}x and will look soft. "
+                  f"Supply at least {round(WM_W)}px on the long edge.")
+        # reason: colorchannelmixer aa multiplies the existing alpha, so the mark's
+        # own transparency and shape survive -- it does not fill the bounding box.
+        pre.append(f"[{idx}:v]{trim}scale=w={WM_W}:h={WM_H}:"
+                   f"force_original_aspect_ratio=decrease,"
+                   f"format=rgba,colorchannelmixer=aa={SAMPLE_WM_OPACITY}[wm];")
+        # reason: last = topmost. A proofing mark sits over the lower third so it
+        # cannot be cropped or covered away.
+        layers.append(("wm", "x=(W-w)/2:y=(H-h)/2", True))
+        idx += 1
+
+    # reason: overlay is binary, so N layers need N-1 intermediate labels chained
+    # in order. The last one flows straight into the fades with no label.
+    v = "".join(pre) + "[0:v]"
+    for i, (label, pos, persistent) in enumerate(layers):
+        v += f"[{label}]overlay={pos}"
+        if not persistent:
+            v += f":enable='between(t,{BRAND_IN},{BRAND_OUT})'"
+        v += "," if i == len(layers) - 1 else f"[ov{i}];[ov{i}]"
+    v += f"fade=t=in:st=0:d=1,fade=t=out:st={dur-1.5:.2f}:d=1.5[v]"
+
+    audio_idx = idx
+    if music:
+        a = (f"[{audio_idx}:a]afade=t=in:st=0:d=2,"
+             f"afade=t=out:st={dur-3:.2f}:d=3,volume={MUSIC_VOLUME}[a]")
+    else:
+        # silent stereo track so every output still carries an audio stream
+        a = f"[{audio_idx}:a]anull[a]"
+
+    inputs = ["-i", silent]
+    # reason: must match the order idx was handed out above, or the overlay
+    # inputs and the audio input index all point at the wrong stream.
+    if use_brand:
+        inputs += ["-i", brand]
+    if use_logo:
+        inputs += ["-i", logo]
+    if use_wm:
+        inputs += ["-i", watermark]
+    if music:
+        inputs += ["-i", music]     # already trimmed and looped by prepare_music
+    else:
+        inputs += ["-f", "lavfi", "-t", f"{dur:.2f}",
+                   "-i", "anullsrc=channel_layout=stereo:sample_rate=44100"]
+
+    run(["ffmpeg", "-y", "-loglevel", "error"] + inputs +
+        ["-filter_complex", f"{v};{a}", "-map", "[v]", "-map", "[a]",
+         "-c:v", "libx264", "-crf", "18", "-preset", "medium",
+         "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k",
+         # reason: -shortest is unreliable with filter_complex (it stopped at
+         # 50s on a 60s video). Pin the duration to the silent cut instead.
+         "-t", f"{dur:.3f}", "-movflags", "+faststart", out])
+
+
+def vertical(src, out):
+    vf = (f"[0:v]split=2[bg][fg];"
+          f"[bg]scale={VERT_W}:{VERT_H}:force_original_aspect_ratio=increase,"
+          f"crop={VERT_W}:{VERT_H},gblur=sigma={BLUR_SIGMA},"
+          f"eq=brightness=-0.12[bgb];"
+          f"[fg]scale={VERT_W}:-2[fgs];"
+          f"[bgb][fgs]overlay=(W-w)/2:(H-h)/2[v]")
+    run(["ffmpeg", "-y", "-loglevel", "error", "-i", src,
+         "-filter_complex", vf, "-map", "[v]", "-map", "0:a",
+         "-c:v", "libx264", "-crf", "20", "-preset", "medium",
+         "-pix_fmt", "yuv420p", "-c:a", "copy",
+         "-movflags", "+faststart", out])
+
+
+def cleanup(keep_work=False):
+    """Delete regenerable build artifacts. Only ever called after a successful
+    run -- run() raises on any ffmpeg failure, so a broken build keeps its
+    intermediates for inspection.
+    """
+    junk = glob.glob("work_music_*.m4a")          # always regenerated
+    if not keep_work:
+        junk += glob.glob("clips/*.mp4")
+        if os.path.exists("work_silent.mp4"):
+            junk += ["work_silent.mp4"]
+    for p in junk:
+        os.remove(p)
+    if os.path.isdir("clips") and not os.listdir("clips"):
+        os.rmdir("clips")
+    if junk:
+        mb = "" if keep_work else " (rerun with --keep-work to keep them)"
+        print(f"Cleaned up {len(junk)} intermediate file(s){mb}")
+    if keep_work:
+        print("  kept work_silent.mp4 + clips/ for --finish-only")
+
+
+def main():
+    # reason: Zillow and most CDNs serve .webp now; globbing only jpg/png made
+    # a full folder of photos look empty. Match any extension, case-insensitive.
+    exts = {".jpg", ".jpeg", ".png", ".webp", ".tif", ".tiff", ".bmp", ".heic"}
+    photos = sorted(p for p in glob.glob("photos/*")
+                    if os.path.splitext(p)[1].lower() in exts)
+    if not photos:
+        sys.exit("No photos found. Put them in ./photos/ named in tour order.")
+    print(f"Output preset: {OUT_W}x{OUT_H} "
+          f"(needs photos >= {MIN_PHOTO_W}px on the long edge)")
+    check_resolution(photos, allow_lowres="--allow-lowres" in sys.argv)
+
+    no_music = "--no-music" in sys.argv
+    music = None if no_music else "music.mp3"
+    if music and not music_ok(music):
+        sys.exit("music.mp3 is missing, empty, or has no audio stream. "
+                 "Drop in a track you are licensed to use, or rerun with "
+                 "--no-music to build silent versions.")
+
+    os.makedirs("out", exist_ok=True)
+    silent = "work_silent.mp4"
+    if "--finish-only" in sys.argv and os.path.exists(silent):
+        print(f"Reusing {silent} ({duration(silent):.1f}s) - skipping clips.")
+    else:
+        # reason: --finish-only with no work_silent.mp4 (a previous default build
+        # cleaned it up) must fall back to a full build, not crash in finish().
+        if "--finish-only" in sys.argv:
+            print(f"--finish-only: no {silent} to reuse, building from photos.")
+        print(f"Building {len(photos)} clips...")
+        clips = build_clips(photos)
+
+        print("Stitching with crossfades...")
+        silent = stitch(clips)
+
+    print("Adding music and branding..." if music else "Adding branding (silent)...")
+    if music:
+        music = prepare_music(music, duration(silent))
+    # reason: every overlay is silently optional, which made a typo'd filename look
+    # like a working build with no branding. Say what is actually applied.
+    for name, path in (("lower third", "lower_third.png"), ("logo", "logo.png"),
+                       ("sample watermark", SAMPLE_WATERMARK)):
+        print(f"  {name}: {path if os.path.exists(path) else 'not found - skipped'}")
+
+    print("  tour_branded...")
+    finish(silent, music, "lower_third.png",
+           "out/tour_branded.mp4", branded=True, logo="logo.png")
+    print("  tour_unbranded...")
+    finish(silent, music, None,
+           "out/tour_unbranded.mp4", branded=False, logo=None)
+
+    # reason: sample cuts are the client proofing copy -- identical edit, plus a
+    # centered watermark so an unapproved tour cannot be used as-is. The tour_
+    # files are the delivery once they sign off.
+    print("  sample_branded...")
+    finish(silent, music, "lower_third.png", "out/sample_branded.mp4",
+           branded=True, logo="logo.png", watermark=SAMPLE_WATERMARK)
+    print("  sample_unbranded...")
+    finish(silent, music, None, "out/sample_unbranded.mp4",
+           branded=False, logo=None, watermark=SAMPLE_WATERMARK)
+
+    print("Building vertical cuts...")
+    vertical("out/tour_branded.mp4", "out/tour_vertical.mp4")
+    vertical("out/sample_branded.mp4", "out/sample_vertical.mp4")
+
+    # reason: --finish-only means the user is iterating on music/branding, so the
+    # clips are still needed next run. Deleting them would force a full rebuild.
+    cleanup(keep_work=any(f in sys.argv for f in ("--keep-work", "--finish-only")))
+
+    total = len(photos) * CLIP_SECONDS - (len(photos) - 1) * XFADE_SECONDS
+    print(f"\nDone. Runtime {total:.1f}s")
+    for f in sorted(glob.glob("out/*.mp4")):
+        print(f"  {f}  ({os.path.getsize(f)/1e6:.1f} MB)")
+
+
+if __name__ == "__main__":
+    main()

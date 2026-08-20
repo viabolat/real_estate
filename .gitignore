@@ -1,0 +1,22 @@
+# Build intermediates — a successful build deletes these itself
+clips/
+work_silent.mp4
+
+# Outputs — delivery and sample cuts are never source
+out/
+*.mp4
+
+# Per-property branding assets — these change from listing to listing
+logo.png
+lower_third.png
+
+# Listing working directories (per-property photos + deliverables)
+brewester/
+corcoran/
+photos/
+
+# Licensed audio — not redistributable via the repo
+music.mp3
+
+__pycache__/
+*.pyc
