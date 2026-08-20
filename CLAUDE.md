@@ -8,10 +8,15 @@ Project-level context. Loaded automatically each session, alongside the global
 `make_tour.py` turns a folder of still listing photos into a branded walkthrough
 video with music. Single script, no dependencies beyond `ffmpeg` / `ffprobe`.
 
-`dashboard.py` is a local Streamlit front end over it — shared asset library, UI
-timing controls, per-listing settings, live build log. It is the only part of the
-project with a third-party dependency (`requirements.txt`); the script itself has
-none, and everything the dashboard does can still be done from the CLI.
+`dashboard.py` is a local Streamlit front end over it. It is an **internal tool** —
+nothing it renders reaches a client except the finished video — so it is shaped
+around the loop the operator actually runs (*is the order right, does the edit feel
+right, ship it*), not around the settings that make it possible. Three tabs: Build,
+Asset library, Brand. The Build tab is one selectbox and three buttons; everything
+with the same answer on every listing is inherited from `brand.json` or derived from
+the photos, and the rest sits under Advanced. It is the only part of the project
+with a third-party dependency (`requirements.txt`); the script itself has none, and
+everything the dashboard does can still be done from the CLI.
 
 Reads from the **working directory**, which is normally a listing folder:
 
@@ -32,11 +37,23 @@ only `--finish-only`.
 ## Layout
 
 ```
+agents/<brand>/brand.json     per-brand defaults — DASHBOARD ONLY, see below
 agents/<brand>/<listing>/     photos/, config.json, out/  — cwd for a build
 global_assets/logos/          shared branding, referenced by config.json
 global_assets/music/
 global_assets/lower_thirds/
 ```
+
+`brand.json` holds what is identical across every listing a brokerage owns — logo,
+music, pacing, lower-third timing. **`make_tour.py` never reads it.** The dashboard
+resolves `DEFAULTS → brand.json → listing config.json` and writes the effective
+values into the listing's `config.json`, which stays the single source of truth for
+a build. That keeps the script's contract intact — read the working directory, know
+nothing about the `agents/<brand>/<listing>` layout — and keeps `config.json` an
+accurate record of what produced a delivered video months later. A new listing
+inherits at creation; changing a brand default does **not** retroactively alter
+existing listings, which is what the explicit "Re-apply brand defaults" action in
+the Brand tab is for.
 
 `config.json` — every key optional, defaults are the constants in the source:
 
@@ -60,6 +77,13 @@ what the client reviews before paying:
 - `sample_branded.mp4`
 - `sample_unbranded.mp4`
 - `sample_vertical.mp4`
+
+Plus one more, only from `--draft`, and deliberately outside `out/`:
+
+- `draft.mp4` — 720p at a fast x264 preset, branded **and** watermarked, one cut,
+  written to the listing root. A review rung, never a deliverable. Its
+  intermediates (`work_draft.mp4`, `clips_draft/`) are named apart from the
+  delivery ones so a draft-quality stitch can never feed a delivery build.
 
 The watermark is deliberately **not** gated on the `branded` flag — it is the entire
 reason a sample cut exists, so it appears on `sample_unbranded.mp4` too.
@@ -97,6 +121,13 @@ measurement, not assumption.
   before sign-off.** The two families exist to keep that boundary enforceable by
   filename. Do not add a flag that strips the watermark from a sample cut.
 
+- **`draft.mp4` is not a deliverable and does not go in `out/`.** `out/` holds real
+  cuts only, which is what makes the `tour_`/`sample_` prefix a reliable boundary. A
+  draft is 720p at a fast preset and carries the watermark; do not add a flag that
+  removes it, and do not let `--draft` read or write `work_silent.mp4`. A stale
+  draft-quality intermediate silently feeding a delivery build is the same failure
+  shape as the shuffled photo order — it produces a bad video with no error.
+
 - **Docs do not go stale.** Any change to `make_tour.py` — new feature, flag, output,
   renamed constant, changed default — must be propagated to `CLAUDE.md`, `IDEA.md`,
   `STEPS.md`, and the module docstring in the *same* pass. `STEPS.md` is the runbook
@@ -109,11 +140,26 @@ streamlit run dashboard.py            # the UI: assets, timing, build, review
 ```
 
 Or straight from a listing folder — everything the dashboard does, it does by
-running this:
+running this. Three rungs, each costing what the question is worth:
 
 ```bash
 cd agents/corcoran/46_beacon_5
-python3 ../../../make_tour.py         # 1920x1080, needs photos >= 2150px
+python3 ../../../make_tour.py --contact-sheet  # ~1s   is the order right?
+python3 ../../../make_tour.py --draft          # ~1min does the edit feel right?
+python3 ../../../make_tour.py                  # ~6min ship it
+```
+
+Only the third produces deliverables. `--contact-sheet` writes
+`contact_sheet.png` — a numbered grid of `photos/` in build order — and exits
+before encoding *and before the resolution gate*, since "are these in the right
+order" is worth answering on photos that are not yet good enough to build with.
+`--draft` forces 720p at a fast preset and writes one branded, watermarked cut to
+`draft.mp4` in the listing root.
+
+The rest:
+
+```bash
+python3 ../../../make_tour.py                  # 1920x1080, needs photos >= 2150px
 python3 ../../../make_tour.py --720p           # 1280x720, needs photos >= 1433px
 python3 ../../../make_tour.py --allow-lowres   # bypass the gate — PREVIEW ONLY
 python3 ../../../make_tour.py --no-music       # silent build
@@ -132,10 +178,11 @@ See `STEPS.md` for the full runbook — every scenario, flag, and failure mode.
 - Zillow's CDN tops out at ~1440px (`uncropped_scaled_within_1536_1152`). That
   clears 720p and fails 1080p. 1080p requires the photographer's originals or the
   MLS back end.
-- The script has no locking. Two concurrent builds in one folder will collide — one
-  run's cleanup deletes files the other is still using. The dashboard guards this
-  with a `.build.lock` per listing; a build started straight from the CLI does not,
-  and does not see the dashboard's lock either.
+- `make_tour.py` takes `.build.lock` with `O_EXCL` at startup and releases it via
+  `atexit` on any exit, clean or not, so the CLI and the dashboard can no longer
+  corrupt each other's intermediates. The dashboard only *reads* the lock to report
+  it — it must never write it, or the build it launches would be locked out of its
+  own folder.
 - `finish()` applies `BRAND_IN`/`BRAND_OUT` to *any* non-persistent layer, not just
   the lower third. Nothing is broken today — the logo is always persistent — but
   giving the logo its own window means adding `LOGO_IN`/`LOGO_OUT` and making the

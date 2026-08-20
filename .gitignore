@@ -1,6 +1,12 @@
 # Build intermediates — a successful build deletes these itself
 clips/
 work_silent.mp4
+clips_draft/
+work_draft.mp4
+
+# Review rungs — never deliverables, never source
+draft.mp4
+contact_sheet.png
 
 # Outputs — delivery and sample cuts are never source
 out/
@@ -20,8 +26,9 @@ global_assets/music/*
 global_assets/lower_thirds/*
 !global_assets/*/.gitkeep
 
-# Per-listing build settings and state
+# Per-listing build settings and state, and per-brand defaults
 config.json
+brand.json
 .build.lock
 .last_build.json
 

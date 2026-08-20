@@ -120,13 +120,29 @@ construction — you cannot accidentally ship a soft tour.
    shuffled walkthrough. Both the CLI and the dashboard warn, but the warning is
    only useful if you read it.
    Supported extensions: `.jpg .jpeg .png .webp .tif .tiff .bmp .heic`
-3. Run without `--allow-lowres`, from the listing folder:
+3. **Check the order before spending anything on an encode.**
    ```bash
-   cd agents/<brand>/<listing> && python3 ../../../make_tour.py
+   cd agents/<brand>/<listing> && python3 ../../../make_tour.py --contact-sheet
+   ```
+   ~1s, no encoding. Writes `contact_sheet.png` — every photo in a numbered grid, in
+   the exact order the tour will play. It runs *before* the resolution gate on
+   purpose: "are these in the right order" is worth answering on photos that are not
+   yet good enough to build with. Dashboard: **Check order**.
+4. Settle the edit on a draft, not on deliverables:
+   ```bash
+   python3 ../../../make_tour.py --draft
+   ```
+   ~1min, one 720p cut at `draft.mp4` — branded and watermarked, so pacing, timing
+   and every branding choice show at once. Iterate here. `draft.mp4` is never a
+   deliverable and never enters `out/`. Dashboard: **Draft**.
+5. Run without `--allow-lowres`, from the listing folder:
+   ```bash
+   python3 ../../../make_tour.py
    ```
    Or `streamlit run dashboard.py` from the project root and leave the
-   bypass-the-gate checkbox alone.
-4. If it exits with the resolution table, go back to step 1. Do not reach for the flag.
+   bypass-the-gate checkbox alone — the dashboard derives the preset from what the
+   photos can actually feed and disables **Build delivery** when neither clears.
+6. If it exits with the resolution table, go back to step 1. Do not reach for the flag.
 
 The gate is a property of the photos, not of the interface. The dashboard runs the
 same script and hits the same wall — it just makes the flag easier to reach for,
@@ -161,12 +177,15 @@ the filenames it finds, and unprefixed names sort into an order nobody chose. Th
 not hypothetical: `46_beacon_5` was delivered from Zillow hashes and opened on a dining
 room, with the entry hall third and the roof terrace second-to-last. Nothing errored.
 
-Two guards exist now, and both should stay:
+Three guards exist now, and all three should stay:
 
 - Every build prints the resolved order as a numbered list before encoding, and warns
   when filenames carry no numeric prefix.
 - The dashboard shows the same list per listing and raises a warning banner, expanded
   by default, when any photo is unprefixed.
+- `--contact-sheet` renders the order as an image in about a second, so checking it
+  costs nothing. A numbered list catches a missing prefix; only the sheet catches
+  "the entry hall is third." Look at it before the first real build.
 
 A sensible default running order, adapt per property:
 

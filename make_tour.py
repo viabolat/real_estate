@@ -2,17 +2,38 @@
 """
 make_tour.py — build one real estate walkthrough video from still photos.
 
-Usage:
-    python3 make_tour.py
+Three rungs, each costing what the question is worth:
+
+    python3 make_tour.py --contact-sheet # ~1s   is the order right?
+    python3 make_tour.py --draft         # ~1min does the edit feel right?
+    python3 make_tour.py                 # ~6min ship it
+
     python3 make_tour.py --no-music      # build without a soundtrack
-    python3 make_tour.py --finish-only   # reuse work_silent.mp4, redo the tail
+    python3 make_tour.py --finish-only   # reuse the stitch, redo the tail
     python3 make_tour.py --allow-lowres  # build even from undersized photos
     python3 make_tour.py --720p          # 1280x720, for sources under 2150px
     python3 make_tour.py --keep-work     # keep intermediates so --finish-only works
 
+--contact-sheet writes contact_sheet.png -- one numbered grid of photos/ in build
+order -- and exits. It encodes nothing and runs before the resolution gate, since
+"are these in the right order" is worth answering on photos that are not yet good
+enough to build with.
+
+--draft forces 720p at a fast x264 preset and builds ONE cut, draft.mp4, in the
+listing root: lower third + logo + the centered proofing watermark, so every
+branding decision shows at once. It is a preview, never a deliverable. It keeps
+its intermediates strictly separate -- work_draft.mp4 and clips_draft/ -- so a
+draft-quality stitch can never be picked up by a delivery build, and it never
+writes into out/, so the tour_/sample_ filename boundary stays intact.
+
 A successful build deletes its own intermediates (clips/, work_silent.mp4,
 work_music_*.m4a). Pass --keep-work when you intend to iterate on music or
 branding with --finish-only. A FAILED build keeps everything for inspection.
+
+Only one build may run in a folder at a time: the script takes .build.lock with
+O_EXCL on startup and releases it on any exit, clean or not. A second run refuses
+immediately, naming the pid that holds it, rather than deleting intermediates the
+first run is still using.
 
 Expects, in the working directory:
     photos/          numbered jpgs in tour order: 01_exterior.jpg, 02_entry.jpg ...
@@ -55,7 +76,10 @@ renaming photos to reorder them: --finish-only reuses the earlier stitch and
 would reship the old order, which is why that path warns.
 
 dashboard.py is a local Streamlit front end over all of the above: it manages the
-shared asset library, writes config.json, and runs this script per listing.
+shared asset library, writes config.json, and runs this script per listing. It
+also keeps per-brand defaults in agents/<brand>/brand.json, which THIS script
+never reads -- the dashboard resolves them into each listing's config.json, so
+config.json stays the single record of what produced a delivered video.
 
 Outputs -- six cuts, two families:
 
@@ -69,16 +93,21 @@ Outputs -- six cuts, two families:
     out/sample_unbranded.mp4
     out/sample_vertical.mp4
 
+    DRAFT (--draft only, never a deliverable)
+    draft.mp4                 listing root, NOT out/
+
 The watermark is NOT gated on branding -- it is the reason a sample exists, so it
 appears on the unbranded sample too. Never send a sample_ file as a deliverable
-and never send a tour_ file before sign-off.
+and never send a tour_ file before sign-off. draft.mp4 is neither: it is a
+720p/fast-preset review cut and does not leave the machine that built it.
 
-Landscape is 1920x1080, or 1280x720 with --720p; the portrait cut and the
-branding overlay follow whichever preset is active.
+Landscape is 1920x1080, or 1280x720 with --720p or --draft; the portrait cut and
+the branding overlay follow whichever preset is active.
 
 Requires ffmpeg with libx264 and aac.
 """
 
+import atexit
 import glob
 import json
 import os
@@ -140,10 +169,30 @@ PHOTO_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".tif", ".tiff", ".bmp", ".heic"
 SAMPLE_WM_FRAC = 0.45            # fraction of the frame it may occupy
 SAMPLE_WM_OPACITY = 0.35         # 0-1. Readable, still see-through.
 
+# reason: a draft answers "is the edit right?", never "is the picture good?", so it
+# is pinned to the cheap preset and a fast encoder regardless of what the delivery
+# build will use. Measured on 8 photos: delivery 5m50s, draft ~45s.
+DRAFT = "--draft" in sys.argv
+
 # 1080p needs 2150px sources; 720p needs 1434px. Pick the one your photos can
 # actually feed -- a crisp downscale beats a soft upscale every time.
 # reason: 1536px sources upscale 1.4x to 1080p (soft) but downscale to 720p (crisp).
-OUT_W, OUT_H = (1280, 720) if "--720p" in sys.argv else (1920, 1080)
+OUT_W, OUT_H = (1280, 720) if ("--720p" in sys.argv or DRAFT) else (1920, 1080)
+
+# Encoder settings. Delivery values are the ones every cut shipped with to date --
+# changing them changes what the client receives, so they are named, not inline.
+CRF = 20 if DRAFT else 18
+X264_PRESET = "veryfast" if DRAFT else "medium"
+VERTICAL_CRF = 20                # portrait cut re-encodes an already-encoded source
+
+# A draft must never feed a delivery build: it is 720p at a fast preset, and a
+# stale intermediate silently reused is exactly how the wrong photo order shipped.
+# Separate filenames are what keep the two families from ever touching.
+SILENT_WORK = "work_draft.mp4" if DRAFT else "work_silent.mp4"
+DRAFT_OUT = "draft.mp4"          # listing root, NOT out/ -- out/ holds real cuts only
+CLIPS_DIR = "clips_draft" if DRAFT else "clips"
+SHEET_OUT = "contact_sheet.png"
+LOCK_FILE = ".build.lock"
 # -----------------------------------------------------------------------------
 
 # ---- everything below derives from OUT_W/OUT_H; do not hardcode a size ------
@@ -203,22 +252,23 @@ def duration(path):
 
 
 def build_clips(photos):
-    os.makedirs("clips", exist_ok=True)
+    os.makedirs(CLIPS_DIR, exist_ok=True)
     paths = []
     for i, photo in enumerate(photos):
-        out = f"clips/{i:03d}.mp4"
+        out = f"{CLIPS_DIR}/{i:03d}.mp4"
         vf = f"{PREP},{MOTIONS[i % len(MOTIONS)]},setsar=1,format=yuv420p"
         run(["ffmpeg", "-y", "-loglevel", "error",
              "-loop", "1", "-i", photo, "-t", str(CLIP_SECONDS),
              "-filter_complex", vf,
-             "-c:v", "libx264", "-crf", "18", "-preset", "medium",
+             "-c:v", "libx264", "-crf", str(CRF), "-preset", X264_PRESET,
              "-r", str(FPS), out])
         paths.append(out)
         print(f"  [{i+1}/{len(photos)}] {os.path.basename(photo)}")
     return paths
 
 
-def stitch(clips, out="work_silent.mp4"):
+def stitch(clips, out=None):
+    out = SILENT_WORK if out is None else out
     """Chain xfade transitions. offset_i = i * (CLIP - XFADE)."""
     if len(clips) == 1:
         run(["ffmpeg", "-y", "-loglevel", "error", "-i", clips[0],
@@ -235,7 +285,7 @@ def stitch(clips, out="work_silent.mp4"):
         prev = label
     run(["ffmpeg", "-y", "-loglevel", "error"] + inputs +
         ["-filter_complex", ";".join(filt), "-map", f"[{prev}]",
-         "-c:v", "libx264", "-crf", "18", "-preset", "medium",
+         "-c:v", "libx264", "-crf", str(CRF), "-preset", X264_PRESET,
          "-pix_fmt", "yuv420p", "-r", str(FPS), out])
     return out
 
@@ -252,20 +302,34 @@ def dimensions(path):
         return 0, 0
 
 
-def check_resolution(photos, allow_lowres=False):
-    """Refuse to render photos too small to fill the frame.
-    # reason: 384x288 sources were upscaled 5x to 1080p, which no crf/preset
-    # setting can fix. Fail at second zero instead of after a 5-minute render.
+def gate_failures(photos, out_w=None, out_h=None):
+    """[(path, "WxH", upscale_factor)] for photos too small to fill the frame.
+
+    reason: separated from check_resolution so the dashboard can ask the same
+    question -- "which photos block which preset?" -- without printing or exiting,
+    and answer it on page load instead of after a five-minute render. One
+    implementation of the rule, two callers.
     """
+    out_w = OUT_W if out_w is None else out_w
+    out_h = OUT_H if out_h is None else out_h
     bad = []
     for p in photos:
         w, h = dimensions(p)
         if not w:
             bad.append((p, "unreadable", 0)); continue
         # the frame is filled by the larger of the two scale factors
-        scale = max(OUT_W * ZOOM_MAX / w, OUT_H * ZOOM_MAX / h)
+        scale = max(out_w * ZOOM_MAX / w, out_h * ZOOM_MAX / h)
         if scale > 1.0:
             bad.append((p, f"{w}x{h}", scale))
+    return bad
+
+
+def check_resolution(photos, allow_lowres=False):
+    """Refuse to render photos too small to fill the frame.
+    # reason: 384x288 sources were upscaled 5x to 1080p, which no crf/preset
+    # setting can fix. Fail at second zero instead of after a 5-minute render.
+    """
+    bad = gate_failures(photos)
     if not bad:
         return
     print(f"\n{len(bad)} of {len(photos)} photos are below {MIN_PHOTO_W}px wide:")
@@ -483,7 +547,7 @@ def finish(silent, music, brand, out, branded=True, logo=None, watermark=None):
 
     run(["ffmpeg", "-y", "-loglevel", "error"] + inputs +
         ["-filter_complex", f"{v};{a}", "-map", "[v]", "-map", "[a]",
-         "-c:v", "libx264", "-crf", "18", "-preset", "medium",
+         "-c:v", "libx264", "-crf", str(CRF), "-preset", X264_PRESET,
          "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k",
          # reason: -shortest is unreliable with filter_complex (it stopped at
          # 50s on a 60s video). Pin the duration to the silent cut instead.
@@ -499,9 +563,78 @@ def vertical(src, out):
           f"[bgb][fgs]overlay=(W-w)/2:(H-h)/2[v]")
     run(["ffmpeg", "-y", "-loglevel", "error", "-i", src,
          "-filter_complex", vf, "-map", "[v]", "-map", "0:a",
-         "-c:v", "libx264", "-crf", "20", "-preset", "medium",
+         "-c:v", "libx264", "-crf", str(VERTICAL_CRF), "-preset", X264_PRESET,
          "-pix_fmt", "yuv420p", "-c:a", "copy",
          "-movflags", "+faststart", out])
+
+
+CELL_W, CELL_H = 480, 270        # contact sheet cell; 4 across = a 1920px sheet
+
+
+def contact_sheet(photos, out=None):
+    """Tile the photos, numbered, into one image -- the cheapest order check there is.
+
+    reason: verifying the running order used to mean sitting through a full build
+    (5m50s for 8 photos at 1080p) because the order is only visible in the finished
+    video. This answers the same question in well under a second, with no encoding.
+
+    Takes the already-sorted list main() builds, and passes each file as an explicit
+    -i rather than re-globbing: the sheet has to show the build's order, and glob
+    would neither guarantee that nor cope with mixed extensions.
+    """
+    out = SHEET_OUT if out is None else out
+    cols = min(4, len(photos))
+    rows = -(-len(photos) // cols)
+    inputs, parts, labels = [], [], []
+    for i, photo in enumerate(photos):
+        inputs += ["-i", photo]
+        parts.append(
+            f"[{i}:v]scale={CELL_W}:{CELL_H}:force_original_aspect_ratio=increase,"
+            f"crop={CELL_W}:{CELL_H},"
+            f"drawtext=text='{i + 1}':x=10:y=8:fontsize=34:fontcolor=yellow:"
+            f"box=1:boxcolor=black@0.65:boxborderw=6[c{i}]")
+        labels.append(f"[c{i}]")
+    parts.append(f"{''.join(labels)}concat=n={len(photos)}:v=1:a=0[s];"
+                 f"[s]tile={cols}x{rows}:color=black[v]")
+    run(["ffmpeg", "-y", "-loglevel", "error", *inputs,
+         "-filter_complex", ";".join(parts), "-map", "[v]",
+         "-frames:v", "1", "-update", "1", out])
+    print(f"Contact sheet -> {out}  ({cols}x{rows}, {len(photos)} photos)")
+    return out
+
+
+def acquire_lock():
+    """Refuse to start a second build in the same folder.
+
+    reason: cleanup() deletes by glob, so two concurrent runs in one listing remove
+    each other's intermediates mid-encode. The lock lives here rather than in the
+    dashboard because the dashboard builds by running this script -- a CLI run would
+    not see a lock the dashboard held, and a dashboard-held lock would shut this
+    process out of the folder it was launched to build. O_EXCL because
+    check-then-create races exactly the two builds this guards.
+    """
+    try:
+        fd = os.open(LOCK_FILE, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        try:
+            holder = open(LOCK_FILE).read().strip() or "unknown"
+        except OSError:
+            holder = "unknown"
+        sys.exit(f"A build is already running here (pid {holder}). Wait for it, or "
+                 f"delete {LOCK_FILE} if that process is gone.")
+    with os.fdopen(fd, "w") as f:
+        f.write(str(os.getpid()))
+    # reason: atexit fires on a clean return, on sys.exit, and on an uncaught
+    # exception -- every way this script ends short of SIGKILL, which no finally
+    # would survive either. Avoids re-indenting main() into a try block.
+    atexit.register(release_lock)
+
+
+def release_lock():
+    try:
+        os.remove(LOCK_FILE)
+    except OSError:
+        pass
 
 
 def cleanup(keep_work=False):
@@ -511,18 +644,18 @@ def cleanup(keep_work=False):
     """
     junk = glob.glob("work_music_*.m4a")          # always regenerated
     if not keep_work:
-        junk += glob.glob("clips/*.mp4")
-        if os.path.exists("work_silent.mp4"):
-            junk += ["work_silent.mp4"]
+        junk += glob.glob(f"{CLIPS_DIR}/*.mp4")
+        if os.path.exists(SILENT_WORK):
+            junk += [SILENT_WORK]
     for p in junk:
         os.remove(p)
-    if os.path.isdir("clips") and not os.listdir("clips"):
-        os.rmdir("clips")
+    if os.path.isdir(CLIPS_DIR) and not os.listdir(CLIPS_DIR):
+        os.rmdir(CLIPS_DIR)
     if junk:
         mb = "" if keep_work else " (rerun with --keep-work to keep them)"
         print(f"Cleaned up {len(junk)} intermediate file(s){mb}")
     if keep_work:
-        print("  kept work_silent.mp4 + clips/ for --finish-only")
+        print(f"  kept {SILENT_WORK} + {CLIPS_DIR}/ for --finish-only")
 
 
 def tour_order(photos):
@@ -552,6 +685,14 @@ def main():
     if _cfg:
         print(f"Config: {CONFIG_FILE} ({len(_cfg)} override(s))")
     tour_order(photos)
+    # reason: the order check is deliberately upstream of the resolution gate. Its
+    # whole job is to answer "are these the right photos in the right order?", and
+    # that question is worth answering on photos that are not yet good enough to
+    # build with -- which is exactly when you still have time to swap them.
+    if "--contact-sheet" in sys.argv:
+        contact_sheet(photos)
+        return
+
     # reason: an inverted window builds a perfectly valid filtergraph in which
     # between(t,IN,OUT) is never true, so the lower third silently never appears.
     if not BRAND_PERSISTENT and BRAND_OUT <= BRAND_IN:
@@ -568,8 +709,10 @@ def main():
                  "Drop in a track you are licensed to use, or rerun with "
                  "--no-music to build silent versions.")
 
-    os.makedirs("out", exist_ok=True)
-    silent = "work_silent.mp4"
+    acquire_lock()
+    if not DRAFT:
+        os.makedirs("out", exist_ok=True)
+    silent = SILENT_WORK
     if "--finish-only" in sys.argv and os.path.exists(silent):
         print(f"Reusing {silent} ({duration(silent):.1f}s) - skipping clips.")
         # reason: the order printed above describes photos/ as it stands now, but
@@ -596,6 +739,23 @@ def main():
     for name, path in (("lower third", LOWER_THIRD), ("logo", LOGO),
                        ("sample watermark", SAMPLE_WATERMARK)):
         print(f"  {name}: {path if os.path.exists(path) else 'not found - skipped'}")
+
+    # reason: one cut, and it is the watermarked branded one -- that single file
+    # shows the running order, the pacing, the lower third, the logo and the music
+    # fit all at once, which is everything a draft is for. Encoding the other five
+    # to answer those questions is the waste this flag exists to stop.
+    if DRAFT:
+        print(f"  {DRAFT_OUT} (720p draft, not a deliverable)...")
+        finish(silent, music, LOWER_THIRD, DRAFT_OUT,
+               branded=True, logo=LOGO, watermark=SAMPLE_WATERMARK)
+        cleanup(keep_work=any(f in sys.argv
+                              for f in ("--keep-work", "--finish-only")))
+        total = len(photos) * CLIP_SECONDS - (len(photos) - 1) * XFADE_SECONDS
+        print(f"\nDone. Runtime {total:.1f}s")
+        print(f"  {DRAFT_OUT}  ({os.path.getsize(DRAFT_OUT)/1e6:.1f} MB)")
+        print("  DRAFT -- 720p at a fast preset, for review on this machine only.")
+        print("  Nothing here is a deliverable. Rebuild without --draft to ship.")
+        return
 
     print("  tour_branded...")
     finish(silent, music, LOWER_THIRD,
