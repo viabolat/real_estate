@@ -10,10 +10,20 @@ out/
 logo.png
 lower_third.png
 
-# Listing working directories (per-property photos + deliverables)
-brewester/
-corcoran/
+# Listing working directories (per-property photos, config, deliverables)
+agents/
 photos/
+
+# Shared asset library — per-property binaries, same reasoning as logo.png
+global_assets/logos/*
+global_assets/music/*
+global_assets/lower_thirds/*
+!global_assets/*/.gitkeep
+
+# Per-listing build settings and state
+config.json
+.build.lock
+.last_build.json
 
 # Licensed audio — not redistributable via the repo
 music.mp3

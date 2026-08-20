@@ -110,15 +110,22 @@ construction — you cannot accidentally ship a soft tour.
 ## 5. THE ACTUAL WORKFLOW
 
 1. Get originals from the photographer or the MLS back end (§2.1 / §2.2).
-2. Drop them in `photos/` using the existing ordering convention:
+2. Drop them in the listing's `photos/` — `agents/<brand>/<listing>/photos/` — using
+   the existing ordering convention:
    `01_exterior_front.jpg`, `02_exterior_street.jpg`, ... `17_exterior_courtyard.jpg`
    The numeric prefix sets tour order; the rest of the name is for your own reference.
    Supported extensions: `.jpg .jpeg .png .webp .tif .tiff .bmp .heic`
-3. Run without `--allow-lowres`:
+3. Run without `--allow-lowres`, from the listing folder:
    ```bash
-   python3 make_tour.py
+   cd agents/<brand>/<listing> && python3 ../../../make_tour.py
    ```
+   Or `streamlit run dashboard.py` from the project root and leave the
+   bypass-the-gate checkbox alone.
 4. If it exits with the resolution table, go back to step 1. Do not reach for the flag.
+
+The gate is a property of the photos, not of the interface. The dashboard runs the
+same script and hits the same wall — it just makes the flag easier to reach for,
+which is why it renders that checkbox as a warning.
 
 ---
 

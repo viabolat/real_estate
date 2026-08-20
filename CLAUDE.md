@@ -8,7 +8,12 @@ Project-level context. Loaded automatically each session, alongside the global
 `make_tour.py` turns a folder of still listing photos into a branded walkthrough
 video with music. Single script, no dependencies beyond `ffmpeg` / `ffprobe`.
 
-Reads from the project root:
+`dashboard.py` is a local Streamlit front end over it — shared asset library, UI
+timing controls, per-listing settings, live build log. It is the only part of the
+project with a third-party dependency (`requirements.txt`); the script itself has
+none, and everything the dashboard does can still be done from the CLI.
+
+Reads from the **working directory**, which is normally a listing folder:
 
 | Path | Required | Purpose |
 |---|---|---|
@@ -17,8 +22,31 @@ Reads from the project root:
 | `lower_third.png` | no | Agent + listing info |
 | `logo.png` | no | Brokerage mark, top-left |
 | `viabolat.png` | no | Proofing watermark, centered, `sample_` cuts only |
+| `config.json` | no | Per-listing overrides — timing, pacing, asset paths |
 
-All are read fresh every build — swapping any of them needs only `--finish-only`.
+Any asset path that does not resolve against the working directory is retried
+beside `make_tour.py`, so the shared library and `viabolat.png` keep working from
+any listing folder. All are read fresh every build — swapping any of them needs
+only `--finish-only`.
+
+## Layout
+
+```
+agents/<brand>/<listing>/     photos/, config.json, out/  — cwd for a build
+global_assets/logos/          shared branding, referenced by config.json
+global_assets/music/
+global_assets/lower_thirds/
+```
+
+`config.json` — every key optional, defaults are the constants in the source:
+
+| Key | Default | Note |
+|---|---|---|
+| `clip_seconds` | `4.0` | forces a full rebuild when changed |
+| `xfade_seconds` | `0.5` | forces a full rebuild when changed |
+| `brand_persistent` | `true` | `false` = lower third only inside the window below |
+| `brand_in` / `brand_out` | `0.8` / `6.5` | only read when not persistent; out > in |
+| `lower_third` / `logo` / `music` / `watermark` | the plain filenames | repo-relative paths into `global_assets/` |
 
 Outputs **six** cuts to `out/`, in two families:
 
@@ -56,7 +84,8 @@ measurement, not assumption.
   room, which on a property listing is misrepresentation. See `IDEA.md` §3.
 - **Photo order lives in the filename prefix and nowhere else.** No sidecar file, no
   manifest, no lookup table — those drift out of sync with the folder. Rename to
-  reorder.
+  reorder. `config.json` and `.last_build.json` carry timing, pacing, asset paths
+  and build state **only**; neither may ever gain a photo order or selection key.
 - **A successful build deletes its own intermediates.** A failed build keeps them
   for inspection. Do not add cleanup that fires before `finish()` and `vertical()`.
 
@@ -72,12 +101,20 @@ measurement, not assumption.
 ## Running it
 
 ```bash
-python3 make_tour.py                  # 1920x1080, needs photos >= 2150px
-python3 make_tour.py --720p           # 1280x720,  needs photos >= 1433px
-python3 make_tour.py --allow-lowres   # bypass the gate — PREVIEW ONLY
-python3 make_tour.py --no-music       # silent build
-python3 make_tour.py --keep-work      # keep clips/ + work_silent.mp4
-python3 make_tour.py --finish-only    # reuse work_silent.mp4, redo music/branding
+streamlit run dashboard.py            # the UI: assets, timing, build, review
+```
+
+Or straight from a listing folder — everything the dashboard does, it does by
+running this:
+
+```bash
+cd agents/corcoran/46_beacon_5
+python3 ../../../make_tour.py         # 1920x1080, needs photos >= 2150px
+python3 ../../../make_tour.py --720p           # 1280x720, needs photos >= 1433px
+python3 ../../../make_tour.py --allow-lowres   # bypass the gate — PREVIEW ONLY
+python3 ../../../make_tour.py --no-music       # silent build
+python3 ../../../make_tour.py --keep-work      # keep clips/ + work_silent.mp4
+python3 ../../../make_tour.py --finish-only    # reuse work_silent, redo branding
 ```
 
 `--finish-only` implies `--keep-work` — it falls back to a full build if
@@ -91,8 +128,14 @@ See `STEPS.md` for the full runbook — every scenario, flag, and failure mode.
 - Zillow's CDN tops out at ~1440px (`uncropped_scaled_within_1536_1152`). That
   clears 720p and fails 1080p. 1080p requires the photographer's originals or the
   MLS back end.
-- The script has no locking. Two concurrent builds in this directory will collide —
-  one run's cleanup will delete files the other is still using.
+- The script has no locking. Two concurrent builds in one folder will collide — one
+  run's cleanup deletes files the other is still using. The dashboard guards this
+  with a `.build.lock` per listing; a build started straight from the CLI does not,
+  and does not see the dashboard's lock either.
+- `finish()` applies `BRAND_IN`/`BRAND_OUT` to *any* non-persistent layer, not just
+  the lower third. Nothing is broken today — the logo is always persistent — but
+  giving the logo its own window means adding `LOGO_IN`/`LOGO_OUT` and making the
+  window per-layer, not reusing the brand one.
 - `vertical()` sources from the *branded* cut of each family (`tour_branded.mp4` and
   `sample_branded.mp4`), so branding ghosts into the blurred side bands of both
   vertical outputs. Sourcing from the unbranded cuts would fix it. Not yet approved.

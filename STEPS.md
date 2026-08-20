@@ -14,14 +14,22 @@ For photo sourcing and resolution rules, see `IDEA.md`. For project rules, `CLAU
 | `lower_third.png` | no | Agent + listing info. Full-frame 1920x1080 plate, or a small strip. |
 | `logo.png` | no | Brokerage mark, top-left. Transparent padding trimmed automatically. |
 | `viabolat.png` | no | Proofing watermark, centered. **`sample_` cuts only.** Wants >= 864px. |
+| `config.json` | no | Per-listing overrides: timing, pacing, asset paths. See §4. |
 
 Missing branding files are skipped silently in the build, but the run prints which
 ones it found — check those two lines if branding doesn't appear.
 
 Supported photo extensions: `.jpg .jpeg .png .webp .tif .tiff .bmp .heic`
 
-**Always run from inside this directory.** Every path in the script is relative to
-your working directory, not to the script's location.
+**Run from the folder that holds `photos/`** — normally a listing folder,
+`agents/<brand>/<listing>/`. Every path in the script is relative to your working
+directory. The one exception: an asset path that does not resolve there is retried
+beside `make_tour.py`, which is what lets `viabolat.png` and the shared
+`global_assets/` library work from any listing folder without being copied in.
+
+`streamlit run dashboard.py` (from the project root) does all of this through a UI
+— see §2. It is a front end, not a separate pipeline: it writes `config.json` and
+runs the exact command shown in each scenario below.
 
 ---
 
@@ -41,6 +49,32 @@ Flags combine freely: `python3 make_tour.py --720p --no-music --keep-work`
 ---
 
 ## 2. Scenarios
+
+### Build from the dashboard
+```bash
+pip install -r requirements.txt     # once
+streamlit run dashboard.py
+```
+Pick brand → listing, pick logo / lower third / music from the shared library, set
+the timing, hit **Save and build**. It writes `<listing>/config.json`, runs the
+script with cwd set to that listing, and streams the log.
+
+It picks the build mode for you: `--finish-only` when only branding, music or
+timing changed since the last build, a full `--keep-work` build when the photos,
+the pacing, or the output preset changed. One build per listing at a time — it
+holds a `.build.lock` while running, because the script has no locking of its own.
+
+### Change when the lower third appears
+Dashboard: untick **Persistent**, set the two sliders, build. By hand:
+```bash
+# in the listing folder, config.json:
+#   {"brand_persistent": false, "brand_in": 2.0, "brand_out": 8.5}
+python3 ../../../make_tour.py --finish-only
+```
+`brand_out` must be greater than `brand_in` or the build refuses to start — an
+inverted window is a valid filtergraph in which the overlay simply never appears.
+A `brand_out` past the end of the video warns and leaves the lower third up to the
+last frame.
 
 ### Build from scratch
 ```bash
@@ -187,25 +221,34 @@ into the blurred bands.
 
 ---
 
-## 4. Tuning (edit `make_tour.py`, no flag)
+## 4. Tuning
 
-| Line | Constant | Default | Effect |
-|---|---|---|---|
-| 57 | `CLIP_SECONDS` | `4.0` | Seconds per photo |
-| 58 | `XFADE_SECONDS` | `0.5` | Crossfade length |
-| 60 | `ZOOM_MAX` | `1.12` | Ken Burns push. Above ~1.20 looks cheap. |
-| 61 | `MUSIC_VOLUME` | `0.55` | Soundtrack level |
-| 63 | `BRAND_PERSISTENT` | `True` | `False` = lower third only during a window |
-| 64 | `BRAND_IN, BRAND_OUT` | `0.8, 6.5` | That window, when `BRAND_PERSISTENT` is `False` |
-| 65 | `LOGO_PERSISTENT` | `True` | Same, for the logo |
-| 66 | `LOGO_BOX_W, LOGO_BOX_H` | `360, 200` | Logo size box, 1080p-relative (~19% frame width) |
-| 69 | `SAMPLE_WATERMARK` | `"viabolat.png"` | Which file the sample cuts watermark with |
-| 70 | `SAMPLE_WM_FRAC` | `0.45` | Watermark size, fraction of the frame |
-| 71 | `SAMPLE_WM_OPACITY` | `0.35` | Watermark opacity, 0-1 |
-| 91 | `MARGIN` | `70 * SCALE` | Overlay inset from the frame edge |
+Constants marked **cfg** are also `config.json` keys — set them per listing without
+touching the script. The rest are code edits that apply to every listing.
 
-After changing any of lines 63-91, `--finish-only` is enough. Changing 57-60 requires
-a full rebuild.
+| Line | Constant | cfg key | Default | Effect |
+|---|---|---|---|---|
+| 112 | `CLIP_SECONDS` | `clip_seconds` | `4.0` | Seconds per photo |
+| 113 | `XFADE_SECONDS` | `xfade_seconds` | `0.5` | Crossfade length |
+| 115 | `ZOOM_MAX` | — | `1.12` | Ken Burns push. Above ~1.20 looks cheap. |
+| 116 | `MUSIC_VOLUME` | — | `0.55` | Soundtrack level |
+| 119 | `BRAND_PERSISTENT` | `brand_persistent` | `True` | `False` = lower third only during a window |
+| 120-121 | `BRAND_IN` / `BRAND_OUT` | `brand_in` / `brand_out` | `0.8` / `6.5` | That window, when `BRAND_PERSISTENT` is `False` |
+| 122 | `LOGO_PERSISTENT` | — | `True` | Same, for the logo — but see the note below |
+| 123 | `LOGO_BOX_W, LOGO_BOX_H` | — | `360, 200` | Logo size box, 1080p-relative (~19% frame width) |
+| 126-128 | `LOWER_THIRD` / `LOGO` / `MUSIC` | `lower_third` / `logo` / `music` | the plain filenames | Which files the build uses |
+| 131 | `SAMPLE_WATERMARK` | `watermark` | `"viabolat.png"` | Which file the sample cuts watermark with |
+| 135 | `SAMPLE_WM_FRAC` | — | `0.45` | Watermark size, fraction of the frame |
+| 136 | `SAMPLE_WM_OPACITY` | — | `0.35` | Watermark opacity, 0-1 |
+| 156 | `MARGIN` | — | `70 * SCALE` | Overlay inset from the frame edge |
+
+Branding, watermark and music changes need only `--finish-only`. Changing
+`CLIP_SECONDS`, `XFADE_SECONDS` or `ZOOM_MAX` requires a full rebuild — they
+reshape the clips themselves, and `--finish-only` reuses the stitched cut.
+
+Setting `LOGO_PERSISTENT = False` makes the logo reuse `BRAND_IN`/`BRAND_OUT` —
+the enable window in `finish()` is shared by every non-persistent layer. Give the
+logo its own window before relying on that.
 
 Raising `ZOOM_MAX` also raises the resolution requirement — the gate is
 `OUT_W x ZOOM_MAX`.
@@ -251,7 +294,10 @@ back end. See `IDEA.md` §2.
 | `No photos found` | Empty `photos/`, or unsupported extensions | Check §0 extension list |
 | Resolution table, then exit | Photos below the gate | Get real photos (`IDEA.md` §2). Not the flag. |
 | `music.mp3 is missing, empty, or has no audio stream` | Bad or absent track | Replace it, or `--no-music` |
-| Branding missing from output | Filename typo | Check the `lower third:` / `logo:` lines in the run output |
+| Branding missing from output | Filename typo, or a `config.json` path that resolves nowhere | Check the `lower third:` / `logo:` lines in the run output — they print the resolved path |
+| `brand_out (N) must be greater than brand_in (N)` | Inverted timing window | Fix `config.json`. The overlay would never appear. |
+| `WARNING: brand_out Ns is past the ...s runtime` | Window ends after the video does | Harmless — the lower third stays up to the last frame. Shorten it if that is not what you wanted. |
+| Lower third appears despite a window | Overlay set to persistent | `brand_in`/`brand_out` are read only when `brand_persistent` is `false` |
 | Logo is an opaque box | PNG has no alpha channel | Re-export as RGBA |
 | `WARNING: watermark upscales N.Nx` | `viabolat.png` too small | Supply >= 864px on the long edge |
 | `sample_` files identical to `tour_` | Watermark file missing | Check the `sample watermark:` line in the run output |
@@ -262,5 +308,8 @@ back end. See `IDEA.md` §2.
 **A failed build keeps its intermediates on purpose** so you can inspect them. Only a
 successful run cleans up.
 
-**No locking.** Two builds in this directory at the same time will collide — one
-run's cleanup deletes files the other is still using. Run one at a time.
+**No locking.** Two builds in one folder at the same time will collide — one run's
+cleanup deletes files the other is still using. Run one at a time. The dashboard
+enforces this per listing with a `.build.lock`; the CLI does not, and does not see
+the dashboard's lock. If the dashboard reports a build already running after a
+crash, use its **Clear stale lock** button.

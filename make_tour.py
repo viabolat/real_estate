@@ -14,7 +14,7 @@ A successful build deletes its own intermediates (clips/, work_silent.mp4,
 work_music_*.m4a). Pass --keep-work when you intend to iterate on music or
 branding with --finish-only. A FAILED build keeps everything for inspection.
 
-Expects:
+Expects, in the working directory:
     photos/          numbered jpgs in tour order: 01_exterior.jpg, 02_entry.jpg ...
     music.mp3        a LICENSED track, longer than the finished video
     lower_third.png  optional RGBA branding: either a full-frame
@@ -25,6 +25,32 @@ Expects:
     viabolat.png     optional RGBA proofing watermark for the sample_ cuts only.
                      Centered, 45% of frame, 35% opacity. Wants a source at
                      least 864px on the long edge.
+    config.json      optional per-listing overrides -- see below.
+
+Run it from the folder holding photos/. That is normally a listing folder such as
+brewester/9_w_cedar/, in which case the four branding files above are usually
+supplied by config.json instead. Any asset path that does not resolve against the
+working directory is retried beside this script, so a shared global_assets/ library
+and the fixed viabolat.png keep working from any listing folder.
+
+config.json -- every key optional, every default is the constant in the source:
+
+    clip_seconds      4.0    seconds per photo, before crossfade overlap
+    xfade_seconds     0.5    crossfade length
+    brand_persistent  true   false = show the lower third only between the times below
+    brand_in          0.8    only read when brand_persistent is false
+    brand_out         6.5    ditto; must be greater than brand_in
+    lower_third       "lower_third.png"
+    logo              "logo.png"
+    music             "music.mp3"
+    watermark         "viabolat.png"
+
+Photo order is NOT a config key and never will be -- it lives in the filename
+prefix and nowhere else. Changing clip_seconds or xfade_seconds invalidates
+work_silent.mp4, so those changes need a full build, not --finish-only.
+
+dashboard.py is a local Streamlit front end over all of the above: it manages the
+shared asset library, writes config.json, and runs this script per listing.
 
 Outputs -- six cuts, two families:
 
@@ -49,24 +75,63 @@ Requires ffmpeg with libx264 and aac.
 """
 
 import glob
+import json
 import os
 import subprocess
 import sys
 
+# ---- config.json ------------------------------------------------------------
+# A listing folder may carry a config.json overriding the values marked [cfg]
+# below. An absent file, or an absent key, falls back to the default written
+# here -- running the bare CLI in a folder with no config behaves exactly as it
+# always has. config.json carries timing, pacing and asset paths ONLY: photo
+# order lives in the filename prefix and nowhere else.
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+CONFIG_FILE = "config.json"
+
+
+def _asset(path):
+    """Resolve an asset path: as given (relative to cwd), else beside the script.
+
+    reason: a build may run with cwd set to a listing folder, where the shared
+    global_assets/ library and the fixed viabolat.png sit beside the script, not
+    beside the photos. Trying cwd first keeps a per-listing override working.
+    """
+    if not path or os.path.exists(path):
+        return path
+    beside = os.path.join(SCRIPT_DIR, path)
+    return beside if os.path.exists(beside) else path
+
+
+_cfg = {}
+if os.path.exists(CONFIG_FILE):
+    with open(CONFIG_FILE) as f:
+        _cfg = json.load(f)
+
 # ---- tune these -------------------------------------------------------------
-CLIP_SECONDS = 4.0     # per photo, before crossfade overlap
-XFADE_SECONDS = 0.5    # crossfade length
+CLIP_SECONDS = _cfg.get("clip_seconds", 4.0)     # [cfg] per photo, pre-crossfade
+XFADE_SECONDS = _cfg.get("xfade_seconds", 0.5)   # [cfg] crossfade length
 FPS = 30
 ZOOM_MAX = 1.12        # 12% push. Above ~1.20 it starts to look cheap.
 MUSIC_VOLUME = 0.55
 MUSIC_XFADE = 2.0      # crossfade length when a short track has to loop
-BRAND_PERSISTENT = True          # True = lower third on screen the whole video
-BRAND_IN, BRAND_OUT = 0.8, 6.5   # only used when BRAND_PERSISTENT is False
+# [cfg] True = lower third on screen the whole video
+BRAND_PERSISTENT = _cfg.get("brand_persistent", True)
+BRAND_IN = _cfg.get("brand_in", 0.8)    # [cfg] only when BRAND_PERSISTENT is False
+BRAND_OUT = _cfg.get("brand_out", 6.5)  # [cfg] ditto
 LOGO_PERSISTENT = True           # brokerage mark: normally up for the whole video
 LOGO_BOX_W, LOGO_BOX_H = 360, 200  # 1080p-relative box; ~19% of frame width
+# [cfg] Branding inputs. A config.json points these at the shared global_assets/
+# library; with no config they are the plain filenames this folder always used.
+LOWER_THIRD = _asset(_cfg.get("lower_third", "lower_third.png"))
+LOGO = _asset(_cfg.get("logo", "logo.png"))
+MUSIC = _asset(_cfg.get("music", "music.mp3"))
 # Sample cuts: a centered proofing watermark. Obscuring the room is the POINT here
 # -- these go to the client for approval, the tour_ cuts are the delivery.
-SAMPLE_WATERMARK = "viabolat.png"
+SAMPLE_WATERMARK = _asset(_cfg.get("watermark", "viabolat.png"))   # [cfg]
+# reason: Zillow and most CDNs serve .webp now; globbing only jpg/png made a full
+# folder of photos look empty. Module level so dashboard.py shares one list.
+PHOTO_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".tif", ".tiff", ".bmp", ".heic"}
 SAMPLE_WM_FRAC = 0.45            # fraction of the frame it may occupy
 SAMPLE_WM_OPACITY = 0.35         # 0-1. Readable, still see-through.
 
@@ -312,6 +377,12 @@ def trim_filter(path):
 
 def finish(silent, music, brand, out, branded=True, logo=None, watermark=None):
     dur = duration(silent)
+    # reason: a brand_out past the end of the cut is not an ffmpeg error -- the
+    # overlay just stays up to the last frame. Say so rather than let the operator
+    # believe a window was applied that never closed.
+    if not BRAND_PERSISTENT and BRAND_OUT > dur:
+        print(f"    WARNING: brand_out {BRAND_OUT}s is past the {dur:.1f}s runtime -- "
+              f"the lower third will stay up to the end.")
     use_brand = bool(branded and brand and os.path.exists(brand))
     use_logo = bool(branded and logo and os.path.exists(logo))
     # reason: NOT gated on `branded`. The proofing watermark is the whole reason a
@@ -450,21 +521,25 @@ def cleanup(keep_work=False):
 
 
 def main():
-    # reason: Zillow and most CDNs serve .webp now; globbing only jpg/png made
-    # a full folder of photos look empty. Match any extension, case-insensitive.
-    exts = {".jpg", ".jpeg", ".png", ".webp", ".tif", ".tiff", ".bmp", ".heic"}
     photos = sorted(p for p in glob.glob("photos/*")
-                    if os.path.splitext(p)[1].lower() in exts)
+                    if os.path.splitext(p)[1].lower() in PHOTO_EXTS)
     if not photos:
         sys.exit("No photos found. Put them in ./photos/ named in tour order.")
+    if _cfg:
+        print(f"Config: {CONFIG_FILE} ({len(_cfg)} override(s))")
+    # reason: an inverted window builds a perfectly valid filtergraph in which
+    # between(t,IN,OUT) is never true, so the lower third silently never appears.
+    if not BRAND_PERSISTENT and BRAND_OUT <= BRAND_IN:
+        sys.exit(f"brand_out ({BRAND_OUT}) must be greater than brand_in "
+                 f"({BRAND_IN}). Fix {CONFIG_FILE} and rerun.")
     print(f"Output preset: {OUT_W}x{OUT_H} "
           f"(needs photos >= {MIN_PHOTO_W}px on the long edge)")
     check_resolution(photos, allow_lowres="--allow-lowres" in sys.argv)
 
     no_music = "--no-music" in sys.argv
-    music = None if no_music else "music.mp3"
+    music = None if no_music else MUSIC
     if music and not music_ok(music):
-        sys.exit("music.mp3 is missing, empty, or has no audio stream. "
+        sys.exit(f"{MUSIC} is missing, empty, or has no audio stream. "
                  "Drop in a track you are licensed to use, or rerun with "
                  "--no-music to build silent versions.")
 
@@ -488,13 +563,13 @@ def main():
         music = prepare_music(music, duration(silent))
     # reason: every overlay is silently optional, which made a typo'd filename look
     # like a working build with no branding. Say what is actually applied.
-    for name, path in (("lower third", "lower_third.png"), ("logo", "logo.png"),
+    for name, path in (("lower third", LOWER_THIRD), ("logo", LOGO),
                        ("sample watermark", SAMPLE_WATERMARK)):
         print(f"  {name}: {path if os.path.exists(path) else 'not found - skipped'}")
 
     print("  tour_branded...")
-    finish(silent, music, "lower_third.png",
-           "out/tour_branded.mp4", branded=True, logo="logo.png")
+    finish(silent, music, LOWER_THIRD,
+           "out/tour_branded.mp4", branded=True, logo=LOGO)
     print("  tour_unbranded...")
     finish(silent, music, None,
            "out/tour_unbranded.mp4", branded=False, logo=None)
@@ -503,8 +578,8 @@ def main():
     # centered watermark so an unapproved tour cannot be used as-is. The tour_
     # files are the delivery once they sign off.
     print("  sample_branded...")
-    finish(silent, music, "lower_third.png", "out/sample_branded.mp4",
-           branded=True, logo="logo.png", watermark=SAMPLE_WATERMARK)
+    finish(silent, music, LOWER_THIRD, "out/sample_branded.mp4",
+           branded=True, logo=LOGO, watermark=SAMPLE_WATERMARK)
     print("  sample_unbranded...")
     finish(silent, music, None, "out/sample_unbranded.mp4",
            branded=False, logo=None, watermark=SAMPLE_WATERMARK)
