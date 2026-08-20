@@ -87,6 +87,8 @@ Outputs -- six cuts, two families:
     out/tour_branded.mp4      music + branding
     out/tour_unbranded.mp4    music, no branding  (MLS/IDX safe)
     out/tour_vertical.mp4     portrait, blur-padded for Reels/TikTok
+                              (blur band off the unbranded cut, centre off the
+                               branded one -- see vertical())
 
     SAMPLE (same edit + centered proofing watermark, what the client reviews)
     out/sample_branded.mp4
@@ -554,15 +556,27 @@ def finish(silent, music, brand, out, branded=True, logo=None, watermark=None):
          "-t", f"{dur:.3f}", "-movflags", "+faststart", out])
 
 
-def vertical(src, out):
-    vf = (f"[0:v]split=2[bg][fg];"
-          f"[bg]scale={VERT_W}:{VERT_H}:force_original_aspect_ratio=increase,"
+def vertical(bg_src, fg_src, out):
+    """Portrait cut: blurred backdrop behind the letterboxed 16:9 frame.
+
+    The backdrop and the centered frame come from *different* cuts on purpose.
+    reason: the backdrop is the source scaled up ~1.8x and centre-cropped, so
+    anything the source draws near the bottom edge lands in the bottom band at
+    nearly twice its size. Taking both layers from the branded cut therefore
+    reproduced the lower third in the band, blurred but large enough to read the
+    street address off. The band now comes from the unbranded sibling, which has
+    nothing to reproduce, while the centre still comes from the branded one --
+    this is the social cut, so it should carry the lower third and logo. Taking
+    both layers from the unbranded cut would also kill the ghost, by deleting the
+    branding, which is not the same fix.
+    """
+    vf = (f"[0:v]scale={VERT_W}:{VERT_H}:force_original_aspect_ratio=increase,"
           f"crop={VERT_W}:{VERT_H},gblur=sigma={BLUR_SIGMA},"
           f"eq=brightness=-0.12[bgb];"
-          f"[fg]scale={VERT_W}:-2[fgs];"
+          f"[1:v]scale={VERT_W}:-2[fgs];"
           f"[bgb][fgs]overlay=(W-w)/2:(H-h)/2[v]")
-    run(["ffmpeg", "-y", "-loglevel", "error", "-i", src,
-         "-filter_complex", vf, "-map", "[v]", "-map", "0:a",
+    run(["ffmpeg", "-y", "-loglevel", "error", "-i", bg_src, "-i", fg_src,
+         "-filter_complex", vf, "-map", "[v]", "-map", "1:a",
          "-c:v", "libx264", "-crf", str(VERTICAL_CRF), "-preset", X264_PRESET,
          "-pix_fmt", "yuv420p", "-c:a", "copy",
          "-movflags", "+faststart", out])
@@ -775,8 +789,10 @@ def main():
            branded=False, logo=None, watermark=SAMPLE_WATERMARK)
 
     print("Building vertical cuts...")
-    vertical("out/tour_branded.mp4", "out/tour_vertical.mp4")
-    vertical("out/sample_branded.mp4", "out/sample_vertical.mp4")
+    vertical("out/tour_unbranded.mp4", "out/tour_branded.mp4",
+             "out/tour_vertical.mp4")
+    vertical("out/sample_unbranded.mp4", "out/sample_branded.mp4",
+             "out/sample_vertical.mp4")
 
     # reason: --finish-only means the user is iterating on music/branding, so the
     # clips are still needed next run. Deleting them would force a full rebuild.

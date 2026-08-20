@@ -262,7 +262,7 @@ Six files land in `out/`, overwritten on every run. Two families, same edit.
 |---|---|---|
 | `tour_branded.mp4` | Lower third + logo + music | Social, your site, your channels |
 | `tour_unbranded.mp4` | Music only, no branding | **MLS / IDX** — required to be clean |
-| `tour_vertical.mp4` | 9:16 portrait, blurred side bands | Reels, TikTok, Shorts |
+| `tour_vertical.mp4` | 9:16 portrait, branded centre, clean blurred bands | Reels, TikTok, Shorts |
 
 ### Sample — `sample_*`, watermarked. Send **for review**.
 
@@ -284,8 +284,9 @@ otherwise the MLS-safe cut would be an unwatermarked free copy.
 
 Runtime = `photos x 4s - (photos - 1) x 0.5s`. 17 photos = 60.0s.
 
-Note: both vertical cuts are built *from* their branded sibling, so branding ghosts
-into the blurred bands.
+Note: each vertical cut is built from *two* sources — the blurred band from the
+unbranded sibling, the centered frame from the branded one. So the band is clean and
+the centre still carries the lower third and logo.
 
 ### Draft — `draft.mp4`, listing root. Never leaves this machine.
 

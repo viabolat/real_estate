@@ -70,7 +70,7 @@ Outputs **six** cuts to `out/`, in two families:
 **Delivery** — clean, what the client gets on sign-off:
 - `tour_branded.mp4`   — lower third + top-left logo, for social / your own channels
 - `tour_unbranded.mp4` — no branding, MLS/IDX-safe
-- `tour_vertical.mp4`  — 9:16 portrait cut with blurred side bands
+- `tour_vertical.mp4`  — 9:16 portrait cut, branded centre, clean blurred side bands
 
 **Sample** — identical edit plus a centered proofing watermark (`viabolat.png`),
 what the client reviews before paying:
@@ -120,6 +120,14 @@ measurement, not assumption.
 - **Never send a `sample_` file as a deliverable, and never send a `tour_` file
   before sign-off.** The two families exist to keep that boundary enforceable by
   filename. Do not add a flag that strips the watermark from a sample cut.
+
+- **`vertical()` takes two sources per family, and that is not redundancy.** The
+  blurred band comes from the *unbranded* cut, the centered frame from the
+  *branded* one. Both layers used to come from the branded cut, and because the
+  band is the source scaled ~1.8x and centre-cropped, the lower third reappeared
+  in it large enough to read the street address off. Do not collapse it back to a
+  single input. Sourcing both layers from the unbranded cut also removes the
+  ghost — by stripping the branding off the social cut, which is not the same fix.
 
 - **`draft.mp4` is not a deliverable and does not go in `out/`.** `out/` holds real
   cuts only, which is what makes the `tour_`/`sample_` prefix a reliable boundary. A
@@ -191,8 +199,5 @@ See `STEPS.md` for the full runbook — every scenario, flag, and failure mode.
   it stood at the time. Renaming photos to reorder them therefore does **not** reach
   a `--finish-only` build — it would reship the old order. The CLI warns; the
   dashboard withholds the flag outright once `photo_state()` changes.
-- `vertical()` sources from the *branded* cut of each family (`tour_branded.mp4` and
-  `sample_branded.mp4`), so branding ghosts into the blurred side bands of both
-  vertical outputs. Sourcing from the unbranded cuts would fix it. Not yet approved.
 - The centered sample watermark wants a source at least 864px on the long edge at
   1080p. `viabolat.png` is currently 50x50 and upscales ~9.7x; the build warns.
