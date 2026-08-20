@@ -114,6 +114,11 @@ construction — you cannot accidentally ship a soft tour.
    the existing ordering convention:
    `01_exterior_front.jpg`, `02_exterior_street.jpg`, ... `17_exterior_courtyard.jpg`
    The numeric prefix sets tour order; the rest of the name is for your own reference.
+   **Rename CDN or camera filenames before anything else.** Files straight off a
+   listing CDN (`adr5o9req9xnxs3mopdy.png`) carry no prefix, so the tour plays in
+   whatever order the hashes sort into — the build still succeeds, it just ships a
+   shuffled walkthrough. Both the CLI and the dashboard warn, but the warning is
+   only useful if you read it.
    Supported extensions: `.jpg .jpeg .png .webp .tif .tiff .bmp .heic`
 3. Run without `--allow-lowres`, from the listing folder:
    ```bash
@@ -150,6 +155,26 @@ pull full-resolution files from the MLS back end. Nothing else moves the quality
 Photo order is baked into the filename prefix and nothing else — no sidecar file, no
 manifest, no lookup table. Rename to reorder. This is deliberate: an external ordering
 file is a temporary fix that drifts out of sync with the folder.
+
+The tradeoff is that a folder with **no** prefixes still builds — `make_tour.py` sorts
+the filenames it finds, and unprefixed names sort into an order nobody chose. That is
+not hypothetical: `46_beacon_5` was delivered from Zillow hashes and opened on a dining
+room, with the entry hall third and the roof terrace second-to-last. Nothing errored.
+
+Two guards exist now, and both should stay:
+
+- Every build prints the resolved order as a numbered list before encoding, and warns
+  when filenames carry no numeric prefix.
+- The dashboard shows the same list per listing and raises a warning banner, expanded
+  by default, when any photo is unprefixed.
+
+A sensible default running order, adapt per property:
+
+    01 exterior / entry → 02-04 main living spaces → 05-06 dining → 07 kitchen
+    → bedrooms → baths → outdoor space last
+
+Renaming to reorder invalidates `work_silent.mp4`. Rebuild fully — a `--finish-only`
+run reuses the earlier stitch and reships the old order.
 
 ---
 

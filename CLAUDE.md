@@ -86,6 +86,10 @@ measurement, not assumption.
   manifest, no lookup table — those drift out of sync with the folder. Rename to
   reorder. `config.json` and `.last_build.json` carry timing, pacing, asset paths
   and build state **only**; neither may ever gain a photo order or selection key.
+  Because sorting the filenames *is* the ordering mechanism, a folder with no
+  numeric prefixes still builds — it just builds in alphabetical order. Every build
+  prints the resolved order first and warns when nothing authored it; the dashboard
+  shows the same list. Keep both. That silent failure shipped once already.
 - **A successful build deletes its own intermediates.** A failed build keeps them
   for inspection. Do not add cleanup that fires before `finish()` and `vertical()`.
 
@@ -136,6 +140,10 @@ See `STEPS.md` for the full runbook — every scenario, flag, and failure mode.
   the lower third. Nothing is broken today — the logo is always persistent — but
   giving the logo its own window means adding `LOGO_IN`/`LOGO_OUT` and making the
   window per-layer, not reusing the brand one.
+- `--finish-only` reuses `work_silent.mp4`, which was stitched from the photo list as
+  it stood at the time. Renaming photos to reorder them therefore does **not** reach
+  a `--finish-only` build — it would reship the old order. The CLI warns; the
+  dashboard withholds the flag outright once `photo_state()` changes.
 - `vertical()` sources from the *branded* cut of each family (`tour_branded.mp4` and
   `sample_branded.mp4`), so branding ghosts into the blurred side bands of both
   vertical outputs. Sourcing from the unbranded cuts would fix it. Not yet approved.

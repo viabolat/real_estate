@@ -304,6 +304,22 @@ if not pics:
     st.warning(f"No photos in `{os.path.relpath(listing_dir, ROOT)}/photos/`. "
                "Name them in tour order — the numeric prefix **is** the order: "
                "`01_exterior_front.jpg`, `02_entry.webp`, …")
+else:
+    # reason: order is the sort of the filenames and nothing else, so a folder of
+    # CDN hashes builds a shuffled tour whose only symptom is the finished video.
+    # Showing the resolved order here puts it in front of the operator pre-build.
+    unprefixed = [f for f in pics if not f[:1].isdigit()]
+    if unprefixed:
+        st.warning(f"**{len(unprefixed)} of {len(pics)} photos have no numeric "
+                   "prefix**, so the order below is alphabetical, not authored — "
+                   "the tour will play in whatever sequence the filenames happen "
+                   "to sort into. Rename them `01_`, `02_`, … in walkthrough "
+                   "order before building anything a client sees.")
+    with st.expander(f"Tour order — {len(pics)} photo(s)",
+                     expanded=bool(unprefixed)):
+        st.caption("Rename to reorder. The prefix is the only source of order.")
+        for i, f in enumerate(pics, 1):
+            st.write(f"{i}. `{f}`")
 
 cfg = load_config(listing_dir)
 

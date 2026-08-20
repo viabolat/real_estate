@@ -9,7 +9,7 @@ For photo sourcing and resolution rules, see `IDEA.md`. For project rules, `CLAU
 
 | Path | Required | Notes |
 |---|---|---|
-| `photos/` | **yes** | Numbered in tour order: `01_exterior.jpg`, `02_entry.webp`, ... |
+| `photos/` | **yes** | Numbered in tour order: `01_exterior.jpg`, `02_entry.webp`, ... The prefix **is** the order. Every run prints the resolved order first — read it. |
 | `music.mp3` | no | A **licensed** track. Skip with `--no-music`. |
 | `lower_third.png` | no | Agent + listing info. Full-frame 1920x1080 plate, or a small strip. |
 | `logo.png` | no | Brokerage mark, top-left. Transparent padding trimmed automatically. |
@@ -147,6 +147,25 @@ no manifest or sidecar file.
 mv photos/07_interior_living2.webp photos/05_interior_living2.webp
 python3 make_tour.py --keep-work     # full rebuild required
 ```
+`--finish-only` reuses `work_silent.mp4` and would reship the old order. It warns,
+but it does not stop. Drop the flag after any rename.
+
+### Photos arrived with CDN or camera filenames
+Files pulled off a listing CDN look like `adr5o9req9xnxs3mopdy.png`; phone dumps look
+like `IMG_4417.HEIC`. Neither carries a prefix, so the tour plays in whatever order
+those names sort into — **the build succeeds and ships a shuffled walkthrough.**
+Rename them before doing anything else:
+```bash
+cd photos
+mv adr5o9req9xnxs3mopdy.png 05_dining_formal.png     # and so on, one per file
+```
+A workable default running order, adapt per property:
+
+    01 exterior / entry → 02-04 main living spaces → 05-06 dining → 07 kitchen
+    → bedrooms → baths → outdoor space last
+
+The run prints `WARNING: N of M filenames do not start with a number` when this is
+the situation, and the dashboard raises the same warning above the photo list.
 
 ### Add, remove, or replace a photo
 ```bash
@@ -228,19 +247,19 @@ touching the script. The rest are code edits that apply to every listing.
 
 | Line | Constant | cfg key | Default | Effect |
 |---|---|---|---|---|
-| 112 | `CLIP_SECONDS` | `clip_seconds` | `4.0` | Seconds per photo |
-| 113 | `XFADE_SECONDS` | `xfade_seconds` | `0.5` | Crossfade length |
-| 115 | `ZOOM_MAX` | — | `1.12` | Ken Burns push. Above ~1.20 looks cheap. |
-| 116 | `MUSIC_VOLUME` | — | `0.55` | Soundtrack level |
-| 119 | `BRAND_PERSISTENT` | `brand_persistent` | `True` | `False` = lower third only during a window |
-| 120-121 | `BRAND_IN` / `BRAND_OUT` | `brand_in` / `brand_out` | `0.8` / `6.5` | That window, when `BRAND_PERSISTENT` is `False` |
-| 122 | `LOGO_PERSISTENT` | — | `True` | Same, for the logo — but see the note below |
-| 123 | `LOGO_BOX_W, LOGO_BOX_H` | — | `360, 200` | Logo size box, 1080p-relative (~19% frame width) |
-| 126-128 | `LOWER_THIRD` / `LOGO` / `MUSIC` | `lower_third` / `logo` / `music` | the plain filenames | Which files the build uses |
-| 131 | `SAMPLE_WATERMARK` | `watermark` | `"viabolat.png"` | Which file the sample cuts watermark with |
-| 135 | `SAMPLE_WM_FRAC` | — | `0.45` | Watermark size, fraction of the frame |
-| 136 | `SAMPLE_WM_OPACITY` | — | `0.35` | Watermark opacity, 0-1 |
-| 156 | `MARGIN` | — | `70 * SCALE` | Overlay inset from the frame edge |
+| 117 | `CLIP_SECONDS` | `clip_seconds` | `4.0` | Seconds per photo |
+| 118 | `XFADE_SECONDS` | `xfade_seconds` | `0.5` | Crossfade length |
+| 120 | `ZOOM_MAX` | — | `1.12` | Ken Burns push. Above ~1.20 looks cheap. |
+| 121 | `MUSIC_VOLUME` | — | `0.55` | Soundtrack level |
+| 124 | `BRAND_PERSISTENT` | `brand_persistent` | `True` | `False` = lower third only during a window |
+| 125-126 | `BRAND_IN` / `BRAND_OUT` | `brand_in` / `brand_out` | `0.8` / `6.5` | That window, when `BRAND_PERSISTENT` is `False` |
+| 127 | `LOGO_PERSISTENT` | — | `True` | Same, for the logo — but see the note below |
+| 128 | `LOGO_BOX_W, LOGO_BOX_H` | — | `360, 200` | Logo size box, 1080p-relative (~19% frame width) |
+| 131-133 | `LOWER_THIRD` / `LOGO` / `MUSIC` | `lower_third` / `logo` / `music` | the plain filenames | Which files the build uses |
+| 136 | `SAMPLE_WATERMARK` | `watermark` | `"viabolat.png"` | Which file the sample cuts watermark with |
+| 140 | `SAMPLE_WM_FRAC` | — | `0.45` | Watermark size, fraction of the frame |
+| 141 | `SAMPLE_WM_OPACITY` | — | `0.35` | Watermark opacity, 0-1 |
+| 161 | `MARGIN` | — | `70 * SCALE` | Overlay inset from the frame edge |
 
 Branding, watermark and music changes need only `--finish-only`. Changing
 `CLIP_SECONDS`, `XFADE_SECONDS` or `ZOOM_MAX` requires a full rebuild — they
@@ -302,6 +321,9 @@ back end. See `IDEA.md` §2.
 | `WARNING: watermark upscales N.Nx` | `viabolat.png` too small | Supply >= 864px on the long edge |
 | `sample_` files identical to `tour_` | Watermark file missing | Check the `sample watermark:` line in the run output |
 | `--finish-only` did a full rebuild | No `work_silent.mp4` to reuse | Expected fallback. It says so and continues. |
+| `WARNING: N of M filenames do not start with a number` | Photos still carry CDN or camera names | Rename to `01_`, `02_`, ... **before** delivering. The order is alphabetical, not yours. See §2 |
+| Rooms play in the wrong order | Prefixes wrong, or a rename was rebuilt with `--finish-only` | Fix the prefixes, then a full rebuild with `--keep-work` |
+| `WARNING: --finish-only reuses that earlier stitch` | Photos may have changed since `work_silent.mp4` was made | If they did, drop the flag. If they did not, ignore it. |
 | Photo change didn't appear | Used `--finish-only` | Full rebuild — see §2 |
 | Files vanished after a run | Successful builds clean up | Use `--keep-work` |
 

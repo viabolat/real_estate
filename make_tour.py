@@ -16,6 +16,9 @@ branding with --finish-only. A FAILED build keeps everything for inspection.
 
 Expects, in the working directory:
     photos/          numbered jpgs in tour order: 01_exterior.jpg, 02_entry.jpg ...
+                     The numeric prefix IS the order. Every build prints the
+                     resolved order first, and warns when filenames carry no
+                     prefix -- that order is alphabetical, not authored.
     music.mp3        a LICENSED track, longer than the finished video
     lower_third.png  optional RGBA branding: either a full-frame
                      1920x1080 plate or a small lower-third strip
@@ -47,7 +50,9 @@ config.json -- every key optional, every default is the constant in the source:
 
 Photo order is NOT a config key and never will be -- it lives in the filename
 prefix and nowhere else. Changing clip_seconds or xfade_seconds invalidates
-work_silent.mp4, so those changes need a full build, not --finish-only.
+work_silent.mp4, so those changes need a full build, not --finish-only. So does
+renaming photos to reorder them: --finish-only reuses the earlier stitch and
+would reship the old order, which is why that path warns.
 
 dashboard.py is a local Streamlit front end over all of the above: it manages the
 shared asset library, writes config.json, and runs this script per listing.
@@ -520,6 +525,25 @@ def cleanup(keep_work=False):
         print("  kept work_silent.mp4 + clips/ for --finish-only")
 
 
+def tour_order(photos):
+    """Print the resolved tour order, and warn when nothing actually authored it.
+
+    reason: order is just the sort of the filenames, so a folder of CDN hashes or
+    camera serials builds a shuffled tour whose only symptom is the finished video
+    -- 46_beacon_5 was delivered that way. Printing the list puts the order in
+    front of the operator before the encode, and the warning names the cause.
+    """
+    print(f"Tour order ({len(photos)} photos, from the filename prefix):")
+    for i, photo in enumerate(photos, 1):
+        print(f"  {i:>2}. {os.path.basename(photo)}")
+    unprefixed = [x for x in photos if not os.path.basename(x)[:1].isdigit()]
+    if unprefixed:
+        print(f"    WARNING: {len(unprefixed)} of {len(photos)} filenames do not start "
+              "with a number, so the order above is alphabetical, not authored.")
+        print("    WARNING: rename them 01_, 02_, ... in walkthrough order before "
+              "delivering. See IDEA.md 5 and 7.")
+
+
 def main():
     photos = sorted(p for p in glob.glob("photos/*")
                     if os.path.splitext(p)[1].lower() in PHOTO_EXTS)
@@ -527,6 +551,7 @@ def main():
         sys.exit("No photos found. Put them in ./photos/ named in tour order.")
     if _cfg:
         print(f"Config: {CONFIG_FILE} ({len(_cfg)} override(s))")
+    tour_order(photos)
     # reason: an inverted window builds a perfectly valid filtergraph in which
     # between(t,IN,OUT) is never true, so the lower third silently never appears.
     if not BRAND_PERSISTENT and BRAND_OUT <= BRAND_IN:
@@ -547,6 +572,11 @@ def main():
     silent = "work_silent.mp4"
     if "--finish-only" in sys.argv and os.path.exists(silent):
         print(f"Reusing {silent} ({duration(silent):.1f}s) - skipping clips.")
+        # reason: the order printed above describes photos/ as it stands now, but
+        # work_silent.mp4 was stitched by an earlier run. Renaming photos to fix the
+        # order and then rebuilding with --finish-only silently reships the old order.
+        print("    WARNING: --finish-only reuses that earlier stitch. If photos/ has "
+              "changed since, the order above is NOT what renders -- drop the flag.")
     else:
         # reason: --finish-only with no work_silent.mp4 (a previous default build
         # cleaned it up) must fall back to a full build, not crash in finish().
