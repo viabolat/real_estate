@@ -1111,8 +1111,13 @@ def contact_sheet(photos, out=None):
     for i, photo in enumerate(photos):
         inputs += ["-i", photo]
         parts.append(
+            # reason: force_original_aspect_ratio rewrites SAR to preserve the
+            # display aspect, so a mixed-aspect folder (1024x683 beside
+            # 1024x768) reaches concat with 1:1 on some cells and 2048:2049 on
+            # others, and concat refuses to configure. The clip path already
+            # pins setsar=1 for the same reason; this one did not.
             f"[{i}:v]scale={CELL_W}:{CELL_H}:force_original_aspect_ratio=increase,"
-            f"crop={CELL_W}:{CELL_H},"
+            f"crop={CELL_W}:{CELL_H},setsar=1,"
             f"drawtext=text='{i + 1}':x=10:y=8:fontsize=34:fontcolor=yellow:"
             f"box=1:boxcolor=black@0.65:boxborderw=6[c{i}]")
         labels.append(f"[c{i}]")

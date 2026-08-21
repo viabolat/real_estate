@@ -44,10 +44,30 @@ agents/<brand>/<listing>/     photos/, config.json, out/  — cwd for a build
 global_assets/logos/          shared branding, referenced by config.json
 global_assets/music/
 global_assets/lower_thirds/
+scraper/                      Zillow dump -> leads.csv + a scaffolded listing
+status.py                     read-only: every listing and its one next action
 ```
 
+`<brand>` and `<listing>` are **not named by hand.** Both are slugified straight from
+the scrape — `broker_name` and `address` in `scraper/leads.csv` — by
+`scraper/zillow_photos.py`, so the folder and the lead row can never disagree. The
+slug drops apostrophes rather than turning them into separators, so
+`Gibson Sotheby's International Realty` is `gibson_sothebys_international_realty`,
+not `gibson_sotheby_s_...`. `status.py` re-checks every folder against `leads.csv` on
+each run — matched on agent phone, since address text formatting varies and a phone
+number does not — and prints the `mv` for anything that has drifted.
+
+One consequence, accepted deliberately: `Coldwell Banker Realty - Boston` and
+`Coldwell Banker Realty - Waltham` are two brand folders with two `brand.json` files,
+because that is what the scrape says. Set the logo twice rather than maintaining an
+alias table, which is a second naming authority and would drift.
+
 `brand.json` holds what is identical across every listing a brokerage owns — logo,
-music, pacing, lower-third timing, the agent's own name and phone, the card mode.
+music, pacing, lower-third timing, the card mode. It holds **no agent identity.**
+`leads.csv` already lists two agents under `Coldwell Banker Realty - Boston` and two
+under `Gibson Sotheby's International Realty`, so a brand-level `agent_name` /
+`agent_phone` puts one agent's phone number on another agent's video. Those two keys
+live in the listing's `config.json`, written from the scrape, and nowhere else.
 **`make_tour.py` never reads it.** `tour.py`
 resolves `DEFAULTS → brand.json → listing config.json` and writes the effective
 values into the listing's `config.json`, which stays the single source of truth for
@@ -209,6 +229,36 @@ measurement, not assumption.
   draft-quality intermediate silently feeding a delivery build is the same failure
   shape as the shuffled photo order — it produces a bad video with no error.
 
+- **One dump per file, and a dump that is not a listing is refused.** The parsers
+  are first-match regexes over the whole text, so two dumps concatenated into one
+  file read the first listing's agent name and phone onto the second listing's
+  photos. Both scripts now exit non-zero on a dump with no `zpid` and no address
+  rather than writing a row of blanks and an `agents/unknown_brokerage/listing/`
+  folder — that exited 0, so a batch run reported it as processed cleanly while
+  poisoning `leads.csv`, which is also the naming authority.
+
+- **No lead, phone number or email address is ever committed.** `leads.csv`,
+  `leads.html`, the raw dumps, `agents.txt` and `property_email.txt` are ignored by
+  repo-level rules, not by a global `~/.gitignore_global` that does not travel.
+  `python3 check_pii.py` scans everything git would publish — against the real
+  values in `leads.csv`, not a guess — and exits non-zero. Run it before every
+  push. A private repo is an access-control boundary, not a redaction one: it gets
+  shared, cloned, or opened up years later, and nothing re-reviews the history at
+  that moment. Write `.gitignore` patterns on their own lines — git only honours
+  `#` at the start of a line, so a trailing comment turns the pattern into a
+  literal that matches nothing.
+
+- **The scrape names the folders; nothing else does.** `agents/<brand>/<listing>` is
+  `slugify(broker_name)/slugify(address)` from `scraper/leads.csv`. Do not hand-name
+  a listing folder, and do not add an alias table mapping a scraped brokerage onto a
+  shorter hand-picked name — that is a second naming authority, and the two drift the
+  moment a brokerage is renamed. `coldwell_banker/2_comm_ave` sat beside a lead row
+  reading `Coldwell Banker Realty - Boston` / `2 Commonwealth Ave` for exactly that
+  reason. `status.py` prints the `mv` when a folder no longer matches its lead row.
+
+- **`brand.json` never carries `agent_name` or `agent_phone`.** A brokerage has many
+  agents; the folder is keyed on the brokerage. See the `brand.json` note above.
+
 - **Docs do not go stale.** Any change to `make_tour.py` or `tour.py` — new feature, flag, output,
   renamed constant, changed default — must be propagated to `CLAUDE.md`, `IDEA.md`,
   `STEPS.md`, and the module docstring in the *same* pass. `STEPS.md` is the runbook
@@ -217,9 +267,19 @@ measurement, not assumption.
 ## Running it
 
 ```bash
+python3 scraper/zillow_run.py         # every dump in scraper/dumps/ -> leads + listings
+python3 check_pii.py                  # before any push: no lead, phone or email escapes
+python3 status.py                     # what every listing is waiting on
 python3 tour.py                       # the wizard: listing, questions, three rungs
 python3 tour.py --check-photos        # optional: Claude reads the contact sheet
 ```
+
+`zillow_run.py` names the folders, downloads `photos/`, writes `brand.json` and
+`config.json` from the dump, pins the watermark path, and prints the resolution
+verdict `make_tour.py`'s gate would give — before any of it is worth building. It
+never overwrites an existing `brand.json` or `config.json`. Point it at one dump
+file, or let it default to every `*.txt` in `scraper/dumps/`. See
+`scraper/README.md`.
 
 Or straight from a listing folder — everything `tour.py` does, it does by
 running this. Three rungs, each costing what the question is worth:

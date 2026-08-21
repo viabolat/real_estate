@@ -187,6 +187,12 @@ without saying so, or let one lose the tag on its way out.
 
 ## 6. CURRENT STATE (as of 2026-08-19)
 
+> **Historical snapshot.** This describes one folder before the `agents/` layout and
+> the scraper existed. It is kept because it is the evidence the sourcing argument
+> below rests on. For the live picture across every listing, run `python3 status.py`
+> or see `PROGRESS.md` §3.
+
+
 The 17 photos in `photos/` are Zillow-sourced downsamples:
 
 - 11 files at **384x288** — need 3.7x upscale for 720p, 5.6x for 1080p

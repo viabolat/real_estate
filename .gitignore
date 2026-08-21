@@ -37,3 +37,37 @@ music.mp3
 
 __pycache__/
 *.pyc
+
+# ---------------------------------------------------------------------------
+# LEADS AND PII — never commit. This repo is private, but a private repo is an
+# access-control boundary, not a redaction one: it gets shared with a
+# collaborator, cloned onto a second machine, or made public years later, and
+# nothing re-reviews the history at that moment. These are named explicitly
+# rather than left to a global ~/.gitignore_global rule, which does not travel
+# with the repo -- leads.csv was covered only by a global *.csv rule.
+#
+# reason: every pattern below is on its own line with no trailing comment. git
+# only treats "#" as a comment at the START of a line, so "scraper/paste.txt
+# # raw dump" is a literal pattern containing spaces and matches nothing. That
+# is how the first version of this block silently left leads.html and
+# paste.txt -- the whole lead list and a raw scrape -- unignored.
+# ---------------------------------------------------------------------------
+
+# The lead list itself: agent names, phones, emails.
+scraper/leads.csv
+scraper/leads.html
+
+# Raw Zillow dumps: agent name, phone, email, address.
+scraper/paste.txt
+scraper/beautified.txt
+scraper/dumps/*
+!scraper/dumps/.gitkeep
+
+# Pre-agents/ scrape output, kept on disk for reference.
+scraper/photos/
+
+# Outreach scratch: client first names, a live Stripe payment link, and the
+# delivery URLs for work already sold.
+agents.txt
+property_email.txt
+outreach/

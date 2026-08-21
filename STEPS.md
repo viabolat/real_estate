@@ -5,6 +5,59 @@ For photo sourcing and resolution rules, see `IDEA.md`. For project rules, `CLAU
 
 ---
 
+## 0a. Getting a listing onto disk
+
+Before any of this there has to be a listing folder. One command builds it from a
+copied Zillow page dump:
+
+```bash
+python3 scraper/zillow_run.py            # every *.txt in scraper/dumps/
+python3 scraper/zillow_run.py one.txt    # or just the one
+```
+
+Paste one listing per file into `scraper/dumps/`. **Never two in one file** — the
+parsers take the first match in the whole text, so a concatenated file puts the first
+listing's agent name and phone on the second listing's photos, with nothing raised.
+A dump that is not a listing page (empty, half-copied, wrong tab) is refused and
+writes nothing; the run names it at the end and exits non-zero. Re-running the folder
+is safe — duplicate lead rows are skipped, photos already on disk are skipped, and
+neither JSON is ever overwritten — so there is nothing to move or tidy between runs.
+
+It appends the lead row to `scraper/leads.csv`, creates
+`agents/<broker_name>/<address>/photos/` — both names slugified from the scrape, which
+is the only naming authority; do not rename these by hand — downloads every photo in
+gallery order, writes `brand.json` and `config.json` from the dump (address, agent,
+phone, brokerage, watermark path), and prints the resolution verdict the gate in §3
+would give. Neither JSON is ever overwritten if it already exists.
+
+Two fields it deliberately leaves blank, because they are yours: `logo` and `music`.
+Fill them in once per brokerage in `agents/<broker_name>/brand.json`. Until then the
+card falls back to the type-only design and the build is silent.
+
+To see where every listing stands:
+
+```bash
+python3 status.py            # one line each: photo count, smallest photo, next action
+python3 status.py --long     # also show what each listing inherits
+```
+
+It writes nothing. It also re-checks every folder name against `leads.csv` and prints
+the `mv` for any that drifted.
+
+### Before pushing
+
+```bash
+python3 check_pii.py
+```
+
+Exit 0 means no lead, agent phone or email address is in anything git would publish.
+It scans against the real values in `leads.csv`, and prints findings **masked** — a
+check that echoes the phone number it found has moved the leak into your scrollback.
+Run it before every push; the repo being private is not the same as the data being
+redacted.
+
+---
+
 ## 0. What the script expects
 
 | Path | Required | Notes |
