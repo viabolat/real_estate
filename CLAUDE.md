@@ -64,30 +64,38 @@ the Brand tab is for.
 |---|---|---|
 | `clip_seconds` | `4.0` | forces a full rebuild when changed |
 | `xfade_seconds` | `0.5` | forces a full rebuild when changed |
-| `brand_persistent` | `true` | `false` = lower third only inside the window below |
+| `brand_persistent` | `true` | `false` = lower third only inside the window below. `tour.py` defaults it to `false` when a card is carrying the same three lines — see below |
 | `brand_in` / `brand_out` | `0.8` / `6.5` | only read when not persistent; out > in |
 | `lower_third` / `logo` / `music` / `watermark` | the plain filenames | repo-relative paths into `global_assets/` |
 | `address` / `agent_name` / `agent_phone` | `""` | the lower third's three lines, and the card's body. Any may be blank |
 | `brokerage` | `""` | card only, and only when there is no logo |
+| `output_prefix` | `""` | what leads the output filenames. Blank derives it from `agent_name`; blank both leaves the bare `tour_`/`sample_` names. `tour.py` writes the brand folder here when `agent_name` is blank — `make_tour.py` must never learn the `agents/<brand>/<listing>` layout itself |
 | `card` | `"none"` | `intro` \| `outro` \| `both`. `tour.py` writes `outro` on a new listing; a bare CLI run in an older folder is unchanged |
 | `card_seconds` | `5.0` | forces a full rebuild when changed |
 | `card_style` | `"auto"` | `logo` when one resolves, `type` when none does |
 | `card_theme` | `"auto"` | measures the logo against both grounds, takes the higher contrast |
 | `accent` / `font` / `scrim` | `#C8A24A` / `Liberation Sans` / `black@0.55` | rule and phone line / any installed family / the lower third's panel |
 
-Outputs **six** cuts to `out/`, in two families:
+Outputs **six** cuts to `out/`, in two families. Every name is prefixed with the
+agent's own name — `output_prefix`, or `agent_name` slugified when that is blank —
+because six listings all producing a `tour_branded.mp4` collide the moment the
+files leave `out/` for a downloads folder or an email thread. Both blank leaves the
+bare names, so a pre-existing folder built from the CLI is unchanged:
 
 **Delivery** — clean, what the client gets on sign-off:
-- `tour_branded.mp4`   — card + lower third + top-left logo, for social / your own
-  channels. Longer than the unbranded cut by the card(s) it carries
-- `tour_unbranded.mp4` — no branding, MLS/IDX-safe
-- `tour_vertical.mp4`  — 9:16 portrait cut, branded centre, clean blurred side bands
+- `<agent>_tour_branded.mp4`   — card + lower third + top-left logo, for social /
+  your own channels. Longer than the unbranded cut by the card(s) it carries
+- `<agent>_tour_unbranded.mp4` — no branding, MLS/IDX-safe
+- `<agent>_tour_vertical.mp4`  — 9:16 portrait, branded centre, clean blurred bands
 
 **Sample** — identical edit plus a centered proofing watermark (`viabolat.png`),
 what the client reviews before paying:
-- `sample_branded.mp4`
-- `sample_unbranded.mp4`
-- `sample_vertical.mp4`
+- `<agent>_sample_branded.mp4`
+- `<agent>_sample_unbranded.mp4`
+- `<agent>_sample_vertical.mp4`
+
+A build from photos that miss the resolution gate names all six `..._lowres.mp4`.
+See the `_lowres` non-negotiable below.
 
 Plus one more, only from `--draft`, and deliberately outside `out/`:
 
@@ -134,8 +142,18 @@ measurement, not assumption.
 
 ## Non-negotiables
 
-- **`--allow-lowres` is for previews only.** Never for anything a client or the MLS
-  sees. If a build needs the flag, the photos are not ready. See `IDEA.md` §4.
+- **Below-par photos build, and the shortfall rides in the filename.** The gate no
+  longer refuses — it decides what the files are *called*. A build that needs
+  `--allow-lowres` names every cut `..._lowres.mp4`, and `tour.py` passes the flag
+  only after stating the count, the worst offender and its upscale factor. It used
+  to refuse outright at the *end* of a run, after the question set and a draft had
+  already been paid for, having known the verdict at preflight — second one. That
+  threw the work away and gave the operator nothing to act on. A console refusal is
+  a boundary that survives nothing; a filename is a boundary that survives being
+  emailed. Do not restore the refusal, and do not add a flag that drops the tag.
+- **A `_lowres` cut is not MLS-ready.** The tag is the warning, not permission. If
+  a delivery needs it, the photos are not ready — get the photographer's originals.
+  See `IDEA.md` §4.
 - **No AI upscaling of listing photos.** It fabricates detail that is not in the
   room, which on a property listing is misrepresentation. See `IDEA.md` §3.
 - **Photo order lives in the filename prefix and nowhere else.** No sidecar file, no
@@ -161,6 +179,16 @@ measurement, not assumption.
   branding layers to the photo body. The proofing watermark is deliberately exempt —
   an unwatermarked outro card is exactly the frame an unapproved sample would be
   screenshot from.
+
+- **The lower third does not say what the card already says.** Both are drawn from
+  the same `address` / `agent_name` / `agent_phone`, so a persistent lower third
+  plus a card prints the operator's details twice in one video. `finish()` keeps
+  the two from overlapping *in time*; that rule says nothing about the redundancy
+  across the whole cut. So `tour.py` defaults `brand_persistent` to `false`
+  whenever a card exists and no hand-made `lower_third.png` does: the lower third
+  introduces the property, clears, and the card closes. A `lower_third.png`
+  someone authored says something the card does not, so it is exempt. The default
+  is stated out loud and still overridable.
 
 - **Never send a `sample_` file as a deliverable, and never send a `tour_` file
   before sign-off.** The two families exist to keep that boundary enforceable by
@@ -215,7 +243,7 @@ The rest:
 ```bash
 python3 ../../../make_tour.py                  # 1920x1080, needs photos >= 2150px
 python3 ../../../make_tour.py --720p           # 1280x720, needs photos >= 1433px
-python3 ../../../make_tour.py --allow-lowres   # bypass the gate — PREVIEW ONLY
+python3 ../../../make_tour.py --allow-lowres   # build anyway; names every cut _lowres
 python3 ../../../make_tour.py --no-music       # silent build
 python3 ../../../make_tour.py --keep-work      # keep clips/ + work_silent.mp4
 python3 ../../../make_tour.py --finish-only    # reuse work_silent, redo branding

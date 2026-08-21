@@ -77,8 +77,10 @@ It invents detail that is not in the room. On a property listing that is
 misrepresentation, not a quality fix — and it becomes a problem precisely when a deal
 goes sideways. Upscalers routinely fabricate fixtures, window views, and trim detail.
 
-### ❌ Building deliverables with `--allow-lowres`
-That flag exists for previews. See §4.
+### ❌ Sending a `_lowres` cut to the MLS
+`--allow-lowres` builds; it does not fix. Every cut it produces is named
+`..._lowres.mp4` precisely so that this stays visible after the console has
+scrolled away. See §4.
 
 ### ❌ Re-encoding through chat apps, Google Photos "storage saver", or email compression
 Every hop downsamples. Move files with a zip, a drive link, or a USB stick.
@@ -87,23 +89,42 @@ Every hop downsamples. Move files with a zip, a drive link, or a USB stick.
 
 ## 4. ENFORCEMENT — already baked into the script
 
-`check_resolution()` hard-exits before any encoding work, printing a per-photo table
-with the exact upscale factor each file would need:
+`check_resolution()` runs before any encoding work and prints a per-photo table with
+the exact upscale factor each file would need, plus the worst offender:
 
 ```
-17 of 17 photos are below 1433px wide:
+17 of 17 photos are below 1433px on the long edge, which is what 1280x720 needs:
   01_exterior_front.webp              768x576  upscaled 1.9x
   02_exterior_street.png              384x288  upscaled 3.7x
   ...
+  worst: 02_exterior_street.png at 384x288, upscaled 3.7x
 ```
+
+From the bare CLI it then exits, naming the pixel target and the way out.
+With `--allow-lowres` it builds — and **names every cut `..._lowres.mp4`.**
 
 **The working rule:**
 
-> `--allow-lowres` is for previews only. Never for anything a client or the MLS sees.
+> A `_lowres` cut is a review copy. Never send one to a client or the MLS.
 > **If a build needs the flag, the photos are not ready.**
 
-The gate *is* the consistency mechanism. If it builds clean, quality is guaranteed by
-construction — you cannot accidentally ship a soft tour.
+### Why the gate marks instead of refusing
+
+It used to refuse, full stop — including in `tour.py`, at the *end* of a run, after
+the question set and a draft had already been paid for, despite having computed the
+identical verdict at preflight in the first second. That failed twice over: it threw
+away ten minutes of the operator's work, and the refusal text named no count, no
+size and no target, so there was nothing to act on.
+
+The gate is unchanged as a *measurement*. What changed is the consequence: it now
+decides what the files are **called**. That is a stronger boundary, not a weaker one
+— a console refusal protects nothing once the operator reaches for the flag, whereas
+`jane_smith_tour_unbranded_lowres.mp4` still says what it is three weeks later in
+somebody's downloads folder. `tour.py` states the count, the worst offender and its
+upscale factor *before* it builds, and says plainly that the result is not MLS-ready.
+
+Stripping the tag is a deliberate two-hand act — rename the file yourself — which is
+the point.
 
 ---
 
@@ -113,10 +134,10 @@ construction — you cannot accidentally ship a soft tour.
 creates the listing, copies the photos in, offers the prefixes, prints the preflight
 (order, which presets the photos clear, which assets and text fields are missing)
 **before** anything encodes, asks the handful of questions that actually vary, and
-then walks the three rungs. It refuses to build a delivery from photos that fail the
-gate rather than offering a checkbox that bypasses it. It writes the answers into
-`config.json` and runs the exact commands spelled out below — the steps are what it
-does, not an alternative to it.
+then walks the three rungs. Photos that fail the gate still build — at 720p, named
+`_lowres`, after it has told you the count, the worst file and its upscale factor.
+It writes the answers into `config.json` and runs the exact commands spelled out
+below — the steps are what it does, not an alternative to it.
 
 1. Get originals from the photographer or the MLS back end (§2.1 / §2.2).
 2. Drop them in the listing's `photos/` — `agents/<brand>/<listing>/photos/` — using
@@ -153,13 +174,14 @@ does, not an alternative to it.
    python3 ../../../make_tour.py
    ```
    Or let `tour.py` do it — it derives the preset from what the photos can actually
-   feed and refuses delivery outright when neither clears, rather than offering a
-   bypass.
-6. If it exits with the resolution table, go back to step 1. Do not reach for the flag.
+   feed, and drops to 720p + `--allow-lowres` only when neither preset clears, after
+   naming the shortfall.
+6. If it exits with the resolution table, go back to step 1. A `_lowres` build is a
+   review copy to keep the job moving, not the answer to the table.
 
 The gate is a property of the photos, not of the interface. `tour.py` runs the same
-script and hits the same wall; it has no control that turns the gate off, because
-there is no answer to "these photos are too small" that lives in an interface.
+script and measures the same wall; what it will not do is hand you a `_lowres` file
+without saying so, or let one lose the tag on its way out.
 
 ---
 
@@ -274,7 +296,7 @@ the reason the default is what it is — read it before switching a listing to `
 | Question | Answer as built |
 |---|---|
 | Reuse `lower_third.png`, or a separate `outro.png`? | Neither. Both plates are **drawn by ffmpeg `drawtext`** from `address` / `agent_name` / `agent_phone` / `brokerage` in `config.json`. No Canva round trip, one text source, and a listing cannot be shipped carrying another listing's plate. A hand-made `lower_third.png` still wins if one exists. |
-| Does the card appear on `tour_unbranded.mp4`? | **No**, and not by a flag — by construction. The card rides in a second stitch, `work_branded.mp4`; the unbranded cuts read `work_silent.mp4`, which is photos only. |
+| Does the card appear on the `_tour_unbranded` cut? | **No**, and not by a flag — by construction. The card rides in a second stitch, `work_branded.mp4`; the unbranded cuts read `work_silent.mp4`, which is photos only. |
 | Does the `sample_` family get it? | Yes — same edit, so the client reviews the real thing. The centered watermark is deliberately **not** held off over the card: an unwatermarked outro card is exactly the frame an unapproved sample would be screenshot from. |
 | Music re-timed to land on the card? | Yes. The audio fade is pinned to the branded duration, which now includes the card. |
 | Legible at 9:16? | Verified. The vertical band is clone-padded and the output pinned to the branded length, so the last blurred room frame holds behind the card instead of the band ending early. |

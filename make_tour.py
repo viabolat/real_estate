@@ -75,6 +75,9 @@ config.json -- every key optional, every default is the constant in the source:
     agent_name        ""     the card. Any of them may be blank; blanks are
     agent_phone       ""     dropped and the rest close up.
     brokerage         ""     card only, and only when there is no logo
+    output_prefix     ""     what goes in front of the output filenames. Blank
+                             derives it from agent_name; blank both leaves the
+                             bare tour_/sample_ names a pre-existing folder has
     card              "none" none | intro | outro | both
     card_seconds      5.0    length of the card clip
     card_style        "auto" auto | logo | type -- auto picks logo when one
@@ -110,22 +113,29 @@ keeps per-brand defaults in agents/<brand>/brand.json, which THIS script never
 reads -- tour.py resolves them into each listing's config.json, so config.json
 stays the single record of what produced a delivered video.
 
-Outputs -- six cuts, two families:
+Outputs -- six cuts, two families. Each name is prefixed with the agent's own
+name (from agent_name, or output_prefix), because six listings all producing a
+file called tour_branded.mp4 collide the moment they leave out/:
 
     DELIVERY (clean, what the client gets on sign-off)
-    out/tour_branded.mp4      music + branding
-    out/tour_unbranded.mp4    music, no branding  (MLS/IDX safe)
-    out/tour_vertical.mp4     portrait, blur-padded for Reels/TikTok
-                              (blur band off the unbranded cut, centre off the
-                               branded one -- see vertical())
+    out/<agent>_tour_branded.mp4      music + branding
+    out/<agent>_tour_unbranded.mp4    music, no branding  (MLS/IDX safe)
+    out/<agent>_tour_vertical.mp4     portrait, blur-padded for Reels/TikTok
+                                      (blur band off the unbranded cut, centre
+                                       off the branded one -- see vertical())
 
     SAMPLE (same edit + centered proofing watermark, what the client reviews)
-    out/sample_branded.mp4
-    out/sample_unbranded.mp4
-    out/sample_vertical.mp4
+    out/<agent>_sample_branded.mp4
+    out/<agent>_sample_unbranded.mp4
+    out/<agent>_sample_vertical.mp4
 
     DRAFT (--draft only, never a deliverable)
-    draft.mp4                 listing root, NOT out/
+    draft.mp4                         listing root, NOT out/
+
+A build made from photos that miss the resolution gate -- only reachable with
+--allow-lowres -- names all six ..._lowres.mp4. The tag travels with the file
+because the console line that warned about it does not: a soft cut sitting in a
+downloads folder three weeks later still says what it is.
 
 The watermark is NOT gated on branding -- it is the reason a sample exists, so it
 appears on the unbranded sample too. Never send a sample_ file as a deliverable
@@ -206,6 +216,22 @@ AGENT_PHONE = _cfg.get("agent_phone", "")    # [cfg]
 ADDRESS = _cfg.get("address", "")            # [cfg]
 BROKERAGE = _cfg.get("brokerage", "")        # [cfg]
 
+
+def _slug(text):
+    """Lowercase, underscore-joined, filename-safe. "" when nothing survives."""
+    return "_".join("".join(c.lower() if c.isalnum() else " "
+                            for c in str(text)).split())
+
+
+# reason: six listings all producing a file called tour_branded.mp4 collide the
+# moment the files leave out/ -- a downloads folder, an email thread, a client's
+# Drive. The agent's own name is the one field that is always filled in and always
+# the right answer, so it rides in front of the output name. output_prefix
+# overrides it for the one case tour.py has to handle: a listing whose agent_name
+# is still blank, where the brand folder is a better fallback than no prefix at
+# all. Both blank leaves the bare names a pre-existing folder already has.
+OUTPUT_PREFIX = _slug(_cfg.get("output_prefix") or AGENT_NAME)    # [cfg]
+
 # reason: default "none", not "outro". A bare CLI run in a folder that predates
 # cards must produce exactly the video it always did. tour.py writes "outro" into
 # config.json for new listings, which is where the preference belongs.
@@ -277,6 +303,8 @@ LOCK_FILE = ".build.lock"
 WORK_W = 7680
 WORK_H = round(WORK_W * OUT_H / OUT_W / 2) * 2   # even, matches output aspect
 MIN_PHOTO_W = int(OUT_W * ZOOM_MAX)     # below this, the zoom crop upscales
+                                        # (see gate_min(), the same rule for any
+                                        #  preset this run is not building)
 VERT_W, VERT_H = OUT_H, OUT_W           # portrait cut: 1080x1920 or 720x1280
 SCALE = OUT_W / 1920.0                  # 1080p-relative, for overlay + blur sizing
 MARGIN = round(70 * SCALE)              # overlay inset from frame edge
@@ -397,6 +425,16 @@ def dimensions(path):
         return 0, 0
 
 
+def gate_min(out_w, out_h=None):
+    """Minimum long-edge pixels a photo needs to feed this preset.
+
+    reason: MIN_PHOTO_W is fixed to the preset THIS run selected, but tour.py asks
+    the question about presets it is not running. One derivation, both callers, so
+    the number the wizard quotes can never drift from the number the gate applies.
+    """
+    return int(out_w * ZOOM_MAX)
+
+
 def gate_failures(photos, out_w=None, out_h=None):
     """[(path, "WxH", upscale_factor)] for photos too small to fill the frame.
 
@@ -420,20 +458,50 @@ def gate_failures(photos, out_w=None, out_h=None):
 
 
 def check_resolution(photos, allow_lowres=False):
-    """Refuse to render photos too small to fill the frame.
-    # reason: 384x288 sources were upscaled 5x to 1080p, which no crf/preset
-    # setting can fix. Fail at second zero instead of after a 5-minute render.
+    """Report photos too small to fill the frame. Returns True when any are.
+
+    reason: 384x288 sources were upscaled 5x to 1080p, which no crf/preset setting
+    can fix. Fail at second zero instead of after a 5-minute render. The return
+    value is what names the output _lowres when the caller builds anyway -- the
+    console line scrolls away, the filename does not.
     """
     bad = gate_failures(photos)
     if not bad:
-        return
-    print(f"\n{len(bad)} of {len(photos)} photos are below {MIN_PHOTO_W}px wide:")
-    for p, dims, scale in bad:
-        print(f"  {os.path.basename(p):<32} {dims:>10}  upscaled {scale:.1f}x")
+        return False
+    worst = max(bad, key=lambda r: r[2])
+    print(f"\n{len(bad)} of {len(photos)} photos are below {MIN_PHOTO_W}px on the "
+          f"long edge, which is what {OUT_W}x{OUT_H} needs:")
+    for path, dims, scale in bad:
+        print(f"  {os.path.basename(path):<32} {dims:>10}  upscaled {scale:.1f}x")
+    print(f"  worst: {os.path.basename(worst[0])} at {worst[1]}, "
+          f"upscaled {worst[2]:.1f}x")
     if not allow_lowres:
-        sys.exit("\nThese will look soft or mushy at 1080p. Reshoot or re-export "
-                 "at 3000px+ wide, or rerun with --allow-lowres to build anyway.")
-    print("  --allow-lowres set: building anyway, expect soft output.\n")
+        # reason: only suggest the smaller preset when it is actually a way out.
+        # At 720p already, "try --720p" is noise on a message whose whole job is
+        # to be actionable.
+        step_down = ("" if OUT_W <= 1280 else
+                     f"build --720p (needs {gate_min(1280)}px) if that clears "
+                     f"them, or ")
+        sys.exit(f"\nThese will look soft at {OUT_W}x{OUT_H}. Re-export at "
+                 f"{MIN_PHOTO_W}px+ on the long edge -- 3000px+ if you can get "
+                 f"the photographer's originals -- {step_down}rerun with "
+                 f"--allow-lowres to build anyway, which names every cut "
+                 f"_lowres so the shortfall travels with the file.")
+    print("  --allow-lowres set: building anyway. Every cut will be named "
+          "_lowres.\n")
+    return True
+
+
+def out_path(name, lowres=False):
+    """out/<agent>_<name>[_lowres].mp4 -- delivery naming, in one place.
+
+    reason: the tour_/sample_ token is the boundary that stops a watermarked proof
+    being sent as a deliverable, so it stays in the name whatever prefixes it.
+    _lowres is a suffix for the same reason the watermark is burned in: a soft cut
+    that has already been emailed on has no console log attached to it any more.
+    """
+    prefix = f"{OUTPUT_PREFIX}_" if OUTPUT_PREFIX else ""
+    return f"out/{prefix}{name}{'_lowres' if lowres else ''}.mp4"
 
 
 def music_span(path):
@@ -1163,7 +1231,7 @@ def main():
                  f"({BRAND_IN}). Fix {CONFIG_FILE} and rerun.")
     print(f"Output preset: {OUT_W}x{OUT_H} "
           f"(needs photos >= {MIN_PHOTO_W}px on the long edge)")
-    check_resolution(photos, allow_lowres="--allow-lowres" in sys.argv)
+    lowres = check_resolution(photos, allow_lowres="--allow-lowres" in sys.argv)
 
     no_music = "--no-music" in sys.argv
     music = None if no_music else MUSIC
@@ -1292,28 +1360,31 @@ def main():
     # unbranded cuts read the photos-only stitch. That split is what keeps an
     # agent's name and phone number off the MLS/IDX file. With no card the two
     # are the same object and nothing extra was encoded.
-    print("  tour_branded...")
+    cuts = {n: out_path(n, lowres) for n in
+            ("tour_branded", "tour_unbranded", "tour_vertical",
+             "sample_branded", "sample_unbranded", "sample_vertical")}
+
+    print(f"  {os.path.basename(cuts['tour_branded'])}...")
     finish(branded_silent, music, brand_plate,
-           "out/tour_branded.mp4", branded=True, logo=LOGO, cards=spans)
-    print("  tour_unbranded...")
+           cuts["tour_branded"], branded=True, logo=LOGO, cards=spans)
+    print(f"  {os.path.basename(cuts['tour_unbranded'])}...")
     finish(silent, music, None,
-           "out/tour_unbranded.mp4", branded=False, logo=None)
+           cuts["tour_unbranded"], branded=False, logo=None)
 
     # reason: sample cuts are the client proofing copy -- identical edit, plus a
     # centered watermark so an unapproved tour cannot be used as-is. The tour_
     # files are the delivery once they sign off.
-    print("  sample_branded...")
-    finish(branded_silent, music, brand_plate, "out/sample_branded.mp4",
+    print(f"  {os.path.basename(cuts['sample_branded'])}...")
+    finish(branded_silent, music, brand_plate, cuts["sample_branded"],
            branded=True, logo=LOGO, watermark=SAMPLE_WATERMARK, cards=spans)
-    print("  sample_unbranded...")
-    finish(silent, music, None, "out/sample_unbranded.mp4",
+    print(f"  {os.path.basename(cuts['sample_unbranded'])}...")
+    finish(silent, music, None, cuts["sample_unbranded"],
            branded=False, logo=None, watermark=SAMPLE_WATERMARK)
 
     print("Building vertical cuts...")
-    vertical("out/tour_unbranded.mp4", "out/tour_branded.mp4",
-             "out/tour_vertical.mp4")
-    vertical("out/sample_unbranded.mp4", "out/sample_branded.mp4",
-             "out/sample_vertical.mp4")
+    vertical(cuts["tour_unbranded"], cuts["tour_branded"], cuts["tour_vertical"])
+    vertical(cuts["sample_unbranded"], cuts["sample_branded"],
+             cuts["sample_vertical"])
 
     # reason: measure before cleanup() deletes the stitches these read from.
     runtime, plain = duration(branded_silent), duration(silent)
@@ -1326,6 +1397,11 @@ def main():
     print(f"\nDone. Runtime {runtime:.1f}s{extra}")
     for f in sorted(glob.glob("out/*.mp4")):
         print(f"  {f}  ({os.path.getsize(f)/1e6:.1f} MB)")
+    if lowres:
+        print(f"\n  BELOW PAR. The photos do not reach {MIN_PHOTO_W}px, so every "
+              f"cut above is\n  a {OUT_W}x{OUT_H} upscale and is named _lowres. "
+              f"It is watchable, not sharp.\n  Rebuild from the photographer's "
+              f"originals before this goes to the MLS.")
 
 
 if __name__ == "__main__":

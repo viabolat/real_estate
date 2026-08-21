@@ -41,7 +41,7 @@ runs the exact commands shown in the scenarios below.
 | `--draft` | 720p at a fast preset, **one** cut: `draft.mp4` in the listing root, branded and watermarked. ~1min. Never a deliverable — see §3. |
 | *(none)* | 1920x1080. Requires photos >= 2150px wide. |
 | `--720p` | 1280x720. Requires photos >= 1433px wide. |
-| `--allow-lowres` | Bypass the resolution gate. **Preview only** — see §5. |
+| `--allow-lowres` | Build from photos that miss the gate. Names every cut `..._lowres.mp4` — see §5. |
 | `--no-music` | Silent build. Outputs still carry a silent audio track. |
 | `--keep-work` | Keep `clips/`, `work_silent.mp4` and `work_branded.mp4` so `--finish-only` can reuse them. |
 | `--finish-only` | Reuse the stitches, redo music + branding only. Implies `--keep-work`. Restitches `work_branded.mp4` from the kept clips if it is gone; falls back to a full build if the clips are gone too. |
@@ -84,7 +84,8 @@ seconds per photo. Answer once, and it offers to save the name, phone and broker
 as brand defaults so the next listing only asks for the address.
 
 Then the three rungs, confirming between each — contact sheet, draft, delivery —
-with the delivery **refused** when the photos do not clear 720p. It picks the build
+with the delivery built as `_lowres` when the photos do not clear 720p, after it
+names the count and the worst file. It picks the build
 mode for you: `--finish-only` when only branding, music or timing changed since the
 last build of that rung, a full `--keep-work` build when the photos, the pacing, the
 card or the output preset changed. Draft and delivery keep separate records in
@@ -132,8 +133,17 @@ build the six real cuts once at the end.
 `draft.mp4` never enters `out/` and is never a deliverable — see §3.
 
 ### Change when the lower third appears
-`tour.py` asks this every run ("Keep the lower third up for the whole tour?"). By
-hand:
+`tour.py` asks this every run ("Keep the lower third up for the whole tour?").
+
+**When a card exists, the default answer is no.** The card and the drawn lower
+third are rendered from the same `address` / `agent_name` / `agent_phone`, so
+keeping the lower third up for the whole tour prints the operator's details twice
+in one video. The default is instead: lower third introduces the property, clears
+at `brand_out`, card closes. `tour.py` says so out loud and you can still override
+it. A hand-made `lower_third.png` is exempt — it says something the card does not,
+so it stays persistent by default.
+
+By hand:
 ```bash
 # in the listing folder, config.json:
 #   {"brand_persistent": false, "brand_in": 2.0, "brand_out": 8.5}
@@ -287,7 +297,7 @@ mv logo.png logo.png.off
 mv lower_third.png lower_third.png.off
 python3 make_tour.py
 ```
-Or just use `out/tour_unbranded.mp4`, which already has no branding. Note this also
+Or just use the `_tour_unbranded.mp4` cut, which already has no branding. Note this also
 strips branding from the `sample_` cuts — the watermark survives, since it is not
 gated on branding.
 
@@ -311,21 +321,34 @@ See §5 before sending the result to anyone.
 
 Six files land in `out/`, overwritten on every run. Two families, same edit.
 
-### Delivery — `tour_*`, clean. Send **after** sign-off.
+Every filename is `<agent>_<family>_<shape>.mp4`. The `<agent>` part is
+`output_prefix`, or `agent_name` slugified when that is blank — six listings all
+writing `tour_branded.mp4` collide the moment the files leave `out/`. With both
+blank the bare names come back, so an older folder driven from the CLI is
+unchanged. Examples below use `jane_smith`.
+
+### Delivery — `*_tour_*`, clean. Send **after** sign-off.
 
 | File | Contents | Use |
 |---|---|---|
-| `tour_branded.mp4` | Card(s) + lower third + logo + music | Social, your site, your channels |
-| `tour_unbranded.mp4` | Music only — no branding, **no card** | **MLS / IDX** — required to be clean |
-| `tour_vertical.mp4` | 9:16 portrait, branded centre, clean blurred bands | Reels, TikTok, Shorts |
+| `jane_smith_tour_branded.mp4` | Card(s) + lower third + logo + music | Social, your site, your channels |
+| `jane_smith_tour_unbranded.mp4` | Music only — no branding, **no card** | **MLS / IDX** — required to be clean |
+| `jane_smith_tour_vertical.mp4` | 9:16 portrait, branded centre, clean blurred bands | Reels, TikTok, Shorts |
 
-### Sample — `sample_*`, watermarked. Send **for review**.
+### Sample — `*_sample_*`, watermarked. Send **for review**.
 
 | File | Contents |
 |---|---|
-| `sample_branded.mp4` | `tour_branded` + centered watermark |
-| `sample_unbranded.mp4` | `tour_unbranded` + centered watermark |
-| `sample_vertical.mp4` | `tour_vertical` + centered watermark |
+| `jane_smith_sample_branded.mp4` | the branded tour + centered watermark |
+| `jane_smith_sample_unbranded.mp4` | the unbranded tour + centered watermark |
+| `jane_smith_sample_vertical.mp4` | the vertical tour + centered watermark |
+
+### `_lowres` — the photos missed the gate
+
+A build made with `--allow-lowres` suffixes all six:
+`jane_smith_tour_unbranded_lowres.mp4`. The edit is identical; the pixels are an
+upscale. It is watchable for a review and **not** MLS-ready. `tour.py` prints the
+count, the worst file and its upscale factor before it builds one. See §5.
 
 The client watches a `sample_` cut to decide. On approval, deliver the matching
 `tour_` file. The watermark sits centered at 45% of frame and 35% opacity —
@@ -437,16 +460,31 @@ presets. Lowering it to "speed up 720p" reintroduces the judder it exists to rem
 
 ## 5. The resolution gate
 
-The script refuses to build if photos are too small, printing a per-file table:
+Every run measures the photos before it encodes anything, printing a per-file table
+and the worst offender:
 
 ```
-17 of 17 photos are below 2150px wide:
+17 of 17 photos are below 2150px on the long edge, which is what 1920x1080 needs:
   01_exterior_front.webp              768x576  upscaled 2.8x
   02_exterior_street.png              384x288  upscaled 5.6x
   03_exterior_entrance.webp         1440x1080  upscaled 1.5x
   ...
-  --allow-lowres set: building anyway, expect soft output.
+  worst: 02_exterior_street.png at 384x288, upscaled 5.6x
 ```
+
+From the bare CLI it then exits, naming the pixel target, the smaller preset if
+that would clear it, and `--allow-lowres`. With the flag it builds and prints:
+
+```
+  --allow-lowres set: building anyway. Every cut will be named _lowres.
+```
+
+`tour.py` never dead-ends. When neither preset clears it says so, quotes the count
+and the worst file, drops to 720p + `--allow-lowres`, and builds all six as
+`_lowres`. It used to refuse at the *end* of a run — after the question set and a
+draft — despite having known at preflight, which threw the work away and named no
+numbers. The gate still measures exactly the same thing; it now decides what the
+files are **called** instead of whether they exist.
 
 | Preset | Output | Minimum source width |
 |---|---|---|
@@ -456,11 +494,13 @@ The script refuses to build if photos are too small, printing a per-file table:
 The minimum is output width x `ZOOM_MAX` — the zoom crops *into* the photo, so the
 pipeline needs more pixels than the final frame.
 
-**`--allow-lowres` only silences the gate. It does not improve anything.** Upscaling
-a 384px photo to 1920px smears what's there; there is no detail to recover.
+**`--allow-lowres` does not improve anything.** Upscaling a 384px photo to 1920px
+smears what's there; there is no detail to recover. The `_lowres` tag is the
+warning, not permission.
 
-> **`--allow-lowres` is for previews only. Never for anything a client or the MLS
-> sees. If a build needs the flag, the photos are not ready.**
+> **Never send a `_lowres` cut to a client or the MLS. If a build needs the flag,
+> the photos are not ready.** Stripping the tag means renaming the file by hand,
+> which is deliberately a two-hand act.
 
 The fix is always better sources — the listing photographer's originals or the MLS
 back end. See `IDEA.md` §2.
@@ -493,7 +533,7 @@ back end. See `IDEA.md` §2.
 | Contact sheet disagrees with the video | Sheet regenerated after a rename, video built before it | The sheet is always current; rebuild fully with `--keep-work` |
 | `no text for the card -- skipping it` | `address`, `agent_name`, `agent_phone` and `brokerage` are all blank | Fill at least one in `config.json`, or leave `card: none` and ignore it |
 | Card appeared on the MLS cut | Cannot happen — the card lives in `work_branded.mp4` | If you see it, something wrote a card into `work_silent.mp4`. Delete both and rebuild |
-| Branded cut is longer than the unbranded one | Expected — it carries the card(s) | The run prints both lengths. `tour_unbranded.mp4` is the clean, card-free one |
+| Branded cut is longer than the unbranded one | Expected — it carries the card(s) | The run prints both lengths. the `_tour_unbranded` cut is the clean, card-free one |
 | Card or lower third text is clipped at the edge | Address longer than the plate | Shorten it, or drop the font size in `CARD_SIZES` / the lower-third rows |
 | Card text renders as boxes or the wrong face | `font` names a family fontconfig cannot resolve | `fc-list \| grep -i <family>`. Unset `font` to fall back to the default family |
 | Card ground is dark when you wanted light | The ground is picked from the logo's contrast | Set `card_theme` to `light` or `dark` to force it |

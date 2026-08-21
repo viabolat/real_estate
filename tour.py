@@ -26,6 +26,21 @@ video months later.
 Importing make_tour executes that module's own config load against THIS process's
 working directory, so per-listing values are always read from the listing's
 config.json here -- never from make_tour's module constants.
+
+Two things this file does that make_tour.py cannot:
+
+  output_prefix. The cuts are named after the agent, but make_tour.py must not
+  learn the agents/<brand>/<listing> layout. So the fallback for a blank agent_name
+  -- the brand folder -- is resolved here and handed over as a plain config value.
+
+  The resolution verdict. When neither preset clears, this used to REFUSE, at the
+  end of a run, after the question set and a draft had already been paid for,
+  having computed the identical answer at preflight in the first second. It now
+  states the count, the worst file and its upscale factor, then builds all six at
+  720p named _lowres. The gate is unchanged as a measurement; what changed is that
+  it decides what the files are CALLED rather than whether they exist. A console
+  refusal survives nothing once the operator reaches for the flag; a filename
+  survives being emailed.
 """
 
 import glob
@@ -73,6 +88,7 @@ DEFAULTS = {
     "agent_phone": "",
     "brokerage": "",
     "address": "",
+    "output_prefix": "",
 }
 # What a brand sets once and every listing under it inherits. The address is the
 # one field that is genuinely per-property, so it is the one field never inherited.
@@ -329,11 +345,21 @@ def preflight(listing_dir, cfg):
             say(f"  1080p is blocked by {len(report['1080p'])} photo(s), "
                 f"smallest {worst[1]}. See IDEA.md 4.")
     else:
-        say(f"Resolution: too small for both presets -- "
-            f"{len(report['720p'])} photo(s) fail even 720p:")
+        worst = max(report["720p"], key=lambda r: r[2])
+        say(f"Resolution: BELOW PAR. {len(report['720p'])} of {len(names)} "
+            f"photo(s) miss even 720p, which needs "
+            f"{make_tour.gate_min(*PRESETS['720p'])}px on the long edge:")
         for path, size, up in report["720p"][:5]:
-            say(f"  {os.path.basename(path)}  {size}  would upscale {up}")
-        say("  A draft can still be built for review. A delivery cannot.")
+            say(f"  {os.path.basename(path):<32} {size:>10}  "
+                f"would upscale {up:.1f}x")
+        if len(report["720p"]) > 5:
+            say(f"  ... and {len(report['720p']) - 5} more")
+        say(f"  Worst: {os.path.basename(worst[0])} at {worst[1]}, "
+            f"upscaled {worst[2]:.1f}x.")
+        say("  These will still build, at 720p, named _lowres so the shortfall "
+            "travels\n  with the file. They will be soft. To fix it properly you "
+            "need the\n  photographer's originals or the MLS back end -- see "
+            "IDEA.md 4.")
 
     say("")
     for label, path, note in check_assets(listing_dir, cfg):
@@ -376,10 +402,32 @@ def questions(listing_dir, brand, cfg):
     if cfg["card"] != "none":
         cfg["card_seconds"] = number("Card length in seconds",
                                      cfg.get("card_seconds", 5.0), 2.0, 10.0)
+    # reason: the drawn lower third and the card carry the SAME three lines, by
+    # construction -- both are rendered from address/agent_name/agent_phone. A
+    # persistent lower third plus an outro card therefore shows the operator's
+    # details twice in one video. finish() already keeps the two from overlapping
+    # in TIME, but that rule says nothing about the redundancy across the whole
+    # cut. So when a card is carrying those lines, the lower third defaults to
+    # introducing the property and then getting out of the way. Still overridable:
+    # a hand-made lower_third.png says something the card does not, so it is
+    # exempt.
+    # reason: `or "lower_third.png"` is not optional here. cfg["lower_third"] is
+    # None until someone sets a path, so resolving the bare key misses a plate
+    # sitting at the default filename -- which is where every hand-made one sits.
+    # check_assets() resolves it the same way; the two must not diverge.
+    duplicated = (cfg["card"] != "none" and
+                  not resolve(listing_dir,
+                              cfg.get("lower_third") or "lower_third.png"))
+    default_persistent = bool(cfg.get("brand_persistent", True))
+    if duplicated:
+        say(f"\n  Note: the {cfg['card']} card already carries the address, name "
+            f"and phone.\n  A lower third up for the whole tour prints them a "
+            f"second time.")
+        default_persistent = False
     cfg["brand_persistent"] = confirm(
         "Keep the lower third up for the whole tour? "
         "(n = it clears after the opening seconds)",
-        bool(cfg.get("brand_persistent", True)))
+        default_persistent)
     if not cfg["brand_persistent"]:
         cfg["brand_in"] = number("  Lower third in at", cfg.get("brand_in", 0.8),
                                  0.0, 60.0)
@@ -394,6 +442,11 @@ def questions(listing_dir, brand, cfg):
 
     cfg["clip_seconds"] = number("Seconds per photo", cfg.get("clip_seconds", 4.0),
                                  1.0, 15.0)
+    # reason: make_tour names the cuts after the agent, but it does not know the
+    # agents/<brand>/<listing> layout and must not learn it. So the fallback for a
+    # blank agent_name is resolved HERE, where the brand IS known, and handed over
+    # as a plain config value like every other inherited setting.
+    cfg["output_prefix"] = "" if cfg.get("agent_name", "").strip() else brand
     save_config(listing_dir, cfg)
     n = len(photos(listing_dir))
     say(f"\nSaved to config.json. {n} photo(s) -> about "
@@ -486,12 +539,21 @@ def rebuild_reason(listing_dir, cfg, preset, rung, silent_name):
     return None
 
 
-def delivery_flags(listing_dir, cfg, preset):
-    """(flags, full_rebuild_reason or None) for the six-cut delivery build."""
+def delivery_flags(listing_dir, cfg, preset, lowres=False):
+    """(flags, full_rebuild_reason or None) for the six-cut delivery build.
+
+    reason: lowres rides in the state's preset string, not beside it. It changes
+    every output filename, so a build that flips it must not be allowed to take
+    --finish-only and leave the previous run's differently-named cuts sitting in
+    out/ looking current.
+    """
     flags = ["--720p"] if preset == "720p" else []
+    if lowres:
+        flags.append("--allow-lowres")
     if not resolve(listing_dir, cfg.get("music") or "music.mp3"):
         flags.append("--no-music")
-    reason = rebuild_reason(listing_dir, cfg, preset, "delivery", "work_silent.mp4")
+    reason = rebuild_reason(listing_dir, cfg, preset + ("+lowres" if lowres else ""),
+                            "delivery", "work_silent.mp4")
     # reason: --finish-only reuses the stitched cut, so it can only ever apply
     # branding, music and timing. Anything upstream of the stitch needs a full run.
     flags.append("--keep-work" if reason else "--finish-only")
@@ -653,30 +715,45 @@ def main():
 
     # ---- rung 3: ship it (~6min) ----
     rule("3. Deliver")
+    # reason: this used to refuse outright when the photos missed 720p, at the END
+    # of a run, after the question set and a draft had already been paid for. The
+    # verdict was known at preflight, second one. Refusing late threw away the work
+    # AND told the operator nothing they could act on. So: build it, name it
+    # _lowres, and say plainly what is wrong with it. The gate still exists -- it
+    # decides what the files are CALLED, which is a boundary that survives being
+    # emailed, where a console refusal is a boundary that survives nothing.
     preset = best_preset(report)
-    if not preset:
-        say("Delivery refused: the photos do not clear 720p. --allow-lowres is for "
-            "previews only, never for anything a client or the MLS sees.")
-        say("Get the photographer's originals or the MLS back end. See IDEA.md 4.")
-        return
+    lowres = preset is None
+    if lowres:
+        preset = "720p"
+        n_bad, n_all = len(report["720p"]), len(photos(listing_dir))
+        say(f"These photos are below par: {n_bad} of {n_all} miss 720p.")
+        say("The six cuts will build at 720p and be named _lowres. They will be "
+            "soft.\nDo not send a _lowres cut to the MLS -- reshoot or get the "
+            "originals first.")
     n = len(photos(listing_dir))
-    say(f"Six cuts at {preset}, about {runtime(n, cfg):.0f}s each. "
-        "This takes a few minutes.")
+    say(f"Six cuts at {preset}{' (_lowres)' if lowres else ''}, "
+        f"about {runtime(n, cfg):.0f}s each. This takes a few minutes.")
     if not confirm("Build the delivery?", True):
         return
-    flags, reason = delivery_flags(listing_dir, cfg, preset)
+    flags, reason = delivery_flags(listing_dir, cfg, preset, lowres)
     if reason:
         say(f"  Full rebuild: {reason}.")
     if run_build(listing_dir, flags) != 0:
         say("\nThe build failed. The intermediates were kept for inspection.")
         return
-    save_state(listing_dir, "delivery", cfg, preset)
+    save_state(listing_dir, "delivery", cfg,
+               preset + ("+lowres" if lowres else ""))
 
     rule("Done")
     for f in outputs(listing_dir):
         say(f"  out/{f}")
     say("\nsample_ cuts carry the proofing watermark -- those are what the client "
         "reviews.\ntour_ cuts are the delivery, and only after sign-off.")
+    if lowres:
+        say("\n_lowres means these were upscaled past what the photos hold. "
+            "Watchable for\na review, not sharp enough for the MLS. See IDEA.md 4 "
+            "for how to source better.")
 
 
 if __name__ == "__main__":
