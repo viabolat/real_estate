@@ -43,6 +43,81 @@ for whatever is in flight, which expire on ship) and `.claude/settings.local.jso
 
 ## 2. BUILT
 
+### 2026-08-24 — The draft lineage was never swept up
+
+**The symptom, as the operator hit it.** Three near-identical files sitting in a
+listing folder after a `tour.py` run — `work_silent.mp4`, `work_branded.mp4`,
+`work_draft.mp4`, all silent, all unbranded, one of them apparently a duplicate.
+
+Three of the four observations were the system working as designed, and the
+explanation is worth keeping because the question will be asked again:
+
+- **All three are silent and unbranded** because the stitch stage is deliberately a
+  naked photo reel. Music, lower third, logo and watermark are applied in
+  `finish()`, which writes to `out/`. Nothing named `work_*` should ever have
+  branding on it.
+- **`work_silent` ≠ `work_branded`** — 70.5s vs 75.0s on `8_dartmouth_st_5`, which is
+  exactly the 5.0s outro card less the 0.5s crossfade. That split is the MLS rule:
+  `work_silent.mp4` feeds the unbranded cuts, so a card baked into it would put an
+  agent's name and phone on the MLS file.
+- **They survive at all** because `tour.py` always passes `--keep-work` or
+  `--finish-only` on both rungs, so the next rung can reuse the stitch. A bare
+  `python3 make_tour.py` deletes them.
+- **`work_branded` and `work_draft` really were near-duplicates here** — but only
+  because the delivery build also ran at 720p (the photos miss the 2150px gate). At
+  1080p they differ in resolution as well as preset.
+
+**The real defect underneath.** `cleanup()` only ever removed `SILENT_WORK` and
+`BRANDED_WORK`, so on a delivery run — where `SILENT_WORK` is `work_silent.mp4` —
+nothing ever deleted `work_draft.mp4` or `clips_draft/`. Combined with `tour.py`
+always passing `--keep-work`/`--finish-only`, **every listing ever drafted kept its
+draft lineage forever**: 68 MB across two listings on this machine, and it would
+have grown with every listing. Not a correctness bug, which is why it survived the
+2026-08-24 audit — nothing it produced was wrong, it just never stopped
+accumulating.
+
+**The fix, and the asymmetry that is deliberate.** A successful **delivery** build
+now clears `work_draft.mp4` and `clips_draft/` *regardless of `--keep-work`*.
+`--keep-work` and `--finish-only` are about reusing **this rung's** stitch next run,
+and a delivery run can never reuse a draft stitch — so the flags have nothing to say
+about the other rung's intermediates. The cost is that the next `--draft` after a
+delivery rebuilds in full (~45s) instead of taking `--finish-only`, which is the
+right trade: after a delivery you have shipped, and a stale draft-quality
+intermediate is exactly the hazard the separate names exist to prevent.
+
+The reverse is **not** symmetric and must not be made so. A `--draft` run clears only
+what a draft wrote. Fixing this surfaced a latent bug in the old code: `cleanup()`
+deleted `BRANDED_WORK` unconditionally, so a bare `python3 make_tour.py --draft` in a
+folder holding a kept delivery stitch deleted `work_branded.mp4` and left
+`work_silent.mp4` — half a lineage. It degraded to a restitch rather than a bad
+video (the `--finish-only` path rebuilds a missing `work_branded.mp4` from the kept
+clips), so it never showed up as a failure. Each rung now clears its own.
+
+`draft.mp4` is **not** touched. It is the review cut the operator asked for, sitting
+in the listing root by design — not an intermediate. Deleting a named output on the
+operator's behalf is a different decision, and it was not taken here.
+See §6 for the one question this left open.
+
+`tests/test_cleanup_lineage.py` guards both directions plus the `draft.mp4`
+exemption. 79 tests, ~0.8s, no ffmpeg. The 68 MB of existing leftovers were removed.
+
+**Also settled this session, no code change:**
+
+- **`make_tour.py` does not need `photos/` in the repo root.** It reads the *working
+  directory* — `cd agents/<brand>/<listing>; python3 ../../../make_tour.py`. Only
+  shared assets (`viabolat.png`, `global_assets/`) fall back to `SCRIPT_DIR`.
+- **`make_tour.py` stays alongside `tour.py`.** They are engine and interface, not
+  two ways to do the same thing: `tour.py` has zero encoding logic and shells out
+  (`tour.py:590`). Merging them is blocked on `make_tour.py` resolving every tuning
+  constant from `config.json` at *import* time against the process cwd — importing
+  it from the repo root binds the wrong values, which is precisely why `tour.py`
+  subprocesses instead of calling functions. It also imports `gate_failures`,
+  `_slug`, `PHOTO_EXTS` and `gate_min` from it so the wizard and the build cannot
+  drift on the resolution gate or the filename slug.
+- **A positional directory argument was designed and deferred** — see §5.
+
+---
+
 ### 2026-08-24 — Five crashes, a hang, and a gate that failed open
 
 An external audit proposed seven findings. **All seven were reproduced by running
@@ -371,19 +446,38 @@ record of what was decided and why; it is not repeated here.
 
 ## 3. CURRENT STATE
 
-`python3 status.py` is the live answer; this is the snapshot as of 2026-08-21.
+`python3 status.py` is the live answer — it re-reads `leads.csv` and measures every
+photo. This is a folder-level snapshot as of **2026-08-24**, verified by listing the
+directories; the per-photo pixel column is deliberately not reproduced here, because
+a hand-copied one goes stale silently and `status.py` never does.
 
-| Listing | Photos | Smallest | Next action |
+The four lead rows that had no folder on 2026-08-21 all have one now, and five more
+listings have been scraped since. Thirteen listing folders, three built:
+
+| Listing | Photos | `config.json` | Cuts in `out/` |
 |---|---|---|---|
-| `boston_advanced_realty/335_w_2nd_st_unit_8` | 12 | 270px | photos only 346px — get originals, **do not build** |
-| `brewester/9_w_cedar` | 17 | 384px | no `config.json` (predates the scraper) |
-| `coldwell_banker_realty_boston/2_commonwealth_ave` | 28 | 1024px | built, 6 cuts |
-| `corcoran/46_beacon_5` | 8 | 1080px | no `config.json` (predates the scraper) |
-| `gibson_sothebys_international_realty/260_262_commonwealth_ave_1b` | 31 | 1024px | built, 6 cuts — `_lowres`, sample only |
+| `boston_advanced_realty/335_w_2nd_st_unit_8` | 12 | yes | — photos too small, **do not build** |
+| `brewester/9_w_cedar` | 17 | **no** | — predates the scraper, *unverifiable* |
+| `coldwell_banker_realty_boston/2_commonwealth_ave` | 28 | yes | 6 |
+| `coldwell_banker_realty_boston/8_dartmouth_st_5` | 20 | yes | 6 |
+| `coldwell_banker_realty_waltham/284_sumner_st_3` | 38 | yes | — |
+| `compass/12_adella_pl` | 22 | yes | — |
+| `corcoran/46_beacon_5` | 8 | **no** | — predates the scraper, *unverifiable* |
+| `gibson_sothebys_international_realty/169_k_st_1` | 13 | yes | — |
+| `gibson_sothebys_international_realty/260_262_commonwealth_ave_1b` | 31 | yes | 6 — `_lowres`, sample only |
+| `re_max_partners_relocation/407_w_1st_st_unit_101` | 39 | yes | — |
+| `serhant/267_old_colony_606` | 36 | yes | — |
+| `serhant/99_sumner_st_penthouse_621` | 40 | yes | — |
+| `the_collaborative_companies/55_lagrange_st_unit_1705` | 19 | yes | — |
 
-Four lead rows have **no folder yet**: `coldwell_banker_realty_waltham/284_sumner_st_3`,
-`coldwell_banker_realty_boston/8_dartmouth_st_5`, `compass/12_adella_pl`,
-`gibson_sothebys_international_realty/169_k_st_1`.
+`brewester/9_w_cedar` and `corcoran/46_beacon_5` are the two hand-named folders with
+no lead row behind them. They are left alone deliberately — see the scrape-naming
+non-negotiable in `CLAUDE.md`.
+
+**Intermediates on disk after this session:** `2_commonwealth_ave` and
+`8_dartmouth_st_5` hold `work_silent.mp4` + `work_branded.mp4` + `clips/` (kept for
+`--finish-only`); `9_w_cedar` and `46_beacon_5` hold `work_silent.mp4` + `clips/`.
+Four listings hold a `draft.mp4`. No `work_draft.mp4` or `clips_draft/` remains.
 
 `IDEA.md` §6 "CURRENT STATE" is a **historical snapshot** of one folder from
 2026-08-19, kept for the sourcing argument it supports. This table supersedes it.
@@ -410,6 +504,34 @@ is a rename on disk, never a sidecar.
 ---
 
 ## 5. PROPOSED — designed, deliberately deferred
+
+### 5.0 A positional directory argument for `make_tour.py` — **deferred 2026-08-24**
+
+Every argument `make_tour.py` takes today is a flag, checked by membership
+(`"--draft" in sys.argv`). There is no way to hand it a path, so running it directly
+means `cd`-ing into the listing and counting `../`s back to the script. The proposal
+is to read the first non-flag word as the folder to build:
+
+```bash
+python3 make_tour.py agents/coldwell_banker_realty_boston/8_dartmouth_st_5 --draft
+```
+
+It `os.chdir()`s and then behaves identically — `photos/`, `config.json`, `out/`,
+`.build.lock` all resolve against it, shared assets still fall back beside the
+script. It does **not** teach the script the `agents/<brand>/<listing>` layout: it
+accepts any directory, so the cwd contract in `CLAUDE.md` stays intact.
+
+**The one constraint that decides the implementation.** `config.json` is read at
+*import* time — `_cfg`, and every `[cfg]` constant bound from it directly below. The
+`chdir` must therefore sit immediately after the imports, above that load. Any lower
+and it binds the root's config and then encodes a different folder: a silent
+wrong-config build, the exact failure shape this project keeps writing rules
+against. Existing `in sys.argv` flag checks cannot collide with a path that does not
+start with `-`, so no flag parsing changes.
+
+Roughly six lines plus doc propagation and a test that a bare in-folder run still
+resolves the cwd config. **Operator deferred it as not urgent** — `tour.py` covers
+the daily path and the awkwardness only shows on direct CLI use.
 
 ### 5.1 Cold-outreach email generation
 
@@ -472,6 +594,14 @@ once volume justifies it, and is not a reason to delay.
 
 ## 6. OPEN DECISIONS
 
+- **Should a successful delivery build also remove `draft.mp4`?** As of 2026-08-24 a
+  delivery clears the draft *intermediates* but leaves the draft cut itself. The case
+  for removing it: once six real cuts exist, a watermarked 720p file in the listing
+  root is stale and is the wrong thing to grab in a hurry. The case against, and why
+  it was not done: it is a **named output the operator asked for**, not an
+  intermediate, and deleting one on their behalf is a different class of decision
+  from sweeping up work files. Four listings currently hold one.
+
 - **`brewester/9_w_cedar` and `corcoran/46_beacon_5`** have no `config.json` and no lead
   row. Either back-fill lead rows so they join the naming scheme, or accept them as
   pre-scraper listings and leave them out of it.
@@ -485,12 +615,16 @@ once volume justifies it, and is not a reason to delay.
 - **`scraper/photos/`** is the pre-`agents/` scrape output. Gitignored, but still on
   disk. Delete it or keep it for reference — not decided.
 - **Stale build intermediates in the two pre-scraper listings.** `brewester/9_w_cedar`
-  (236M) and `corcoran/46_beacon_5` (123M) each still hold a `work_silent.mp4` and a
-  `clips/` from a build that never reached `finish()` — a successful build deletes its
-  own intermediates, so their presence means those two failed or were interrupted.
-  Gitignored and harmless to the repo, but 359M on disk and, more to the point, a
+  and `corcoran/46_beacon_5` each still hold a `work_silent.mp4` and a `clips/` from a
+  build that never reached `finish()` — a successful build deletes its own
+  intermediates, so their presence means those two failed or were interrupted.
+  Re-measured 2026-08-24: **55M and 27M of intermediates**, 82M total. (The 236M/123M
+  figures previously recorded here were the whole listing folders, `photos/` included,
+  not the intermediates — corrected.) Gitignored and harmless to the repo, but a
   `work_silent.mp4` is exactly what `--finish-only` would silently reuse. Delete both,
-  or keep them as the record of a pre-`out/` build — not decided.
+  or keep them as the record of a pre-`out/` build — not decided. Note the new
+  delivery-clears-draft sweep does **not** reach these: it only ever runs at the end
+  of a successful build, and neither of these listings has had one.
 - **`zillow_lead.field()` truncates any value containing a comma.** Confirmed by
   running it: the regex value class is `[^\\",]*`, so
   `\"streetAddress\":\"123 Main St, Apt A\"` parses as `123 Main St`, and

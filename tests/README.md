@@ -20,6 +20,7 @@ second.
 | `test_finish_window.py` | Branding is held off wherever the card is on screen; the watermark is exempt. A no-card build is unchanged from before cards existed. |
 | `test_photo_order.py` | Order lives in the filename prefix and nowhere else. The order is printed, an unauthored one warns, and `config.json` never gains an ordering key. |
 | `test_status_naming.py` | `status.py` sorts every folder into agrees / drifted / unverifiable, and never sends a folder with no lead row to the scraper. Uses a synthetic phone table — `leads.csv` is PII and gitignored. |
+| `test_cleanup_lineage.py` | A successful delivery build clears `work_draft.mp4` + `clips_draft/` even under `--keep-work`, and never `draft.mp4`; a `--draft` run never touches the delivery lineage. |
 | `test_guards.py` | The crashes and hangs from the 2026-08-24 audit: `prepare_music`'s loop terminates on a short track; a zero-dimension asset never reaches a fit box, and a broken watermark refuses while broken branding degrades; `photos/` listing survives a directory or an unreadable file; `check_pii.py` fails closed when it cannot enumerate; the hardcoded resolution gates still match `make_tour.gate_min`. |
 
 ## How they test

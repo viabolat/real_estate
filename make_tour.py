@@ -30,6 +30,12 @@ A successful build deletes its own intermediates (clips/, work_silent.mp4,
 work_music_*.m4a). Pass --keep-work when you intend to iterate on music or
 branding with --finish-only. A FAILED build keeps everything for inspection.
 
+A successful DELIVERY build additionally clears the draft lineage -- work_draft.mp4
+and clips_draft/ -- regardless of --keep-work, because a delivery supersedes any
+draft of the same listing and never reuses a draft stitch. draft.mp4 itself is
+left alone: it is the review cut that was asked for, not an intermediate. The
+reverse never happens -- a --draft run only ever clears what a draft wrote.
+
 Only one build may run in a folder at a time: the script takes .build.lock with
 O_EXCL on startup and releases it on any exit, clean or not. A second run refuses
 immediately, naming the pid that holds it, rather than deleting intermediates the
@@ -308,7 +314,15 @@ VERTICAL_CRF = 20                # portrait cut re-encodes an already-encoded so
 # A draft must never feed a delivery build: it is 720p at a fast preset, and a
 # stale intermediate silently reused is exactly how the wrong photo order shipped.
 # Separate filenames are what keep the two families from ever touching.
-SILENT_WORK = "work_draft.mp4" if DRAFT else "work_silent.mp4"
+# reason: the draft lineage is named apart so it can never feed a delivery build,
+# but nothing on the delivery side ever cleared it. tour.py always passes
+# --keep-work or --finish-only, so every listing it ever drafted kept
+# work_draft.mp4 + clips_draft/ forever. Named as constants so a DELIVERY run can
+# clear them: keep_work is about the intermediates of the rung being run, and says
+# nothing about the other rung's.
+DRAFT_SILENT_WORK = "work_draft.mp4"
+DRAFT_CLIPS_DIR = "clips_draft"
+SILENT_WORK = DRAFT_SILENT_WORK if DRAFT else "work_silent.mp4"
 # reason: an intro/outro card is branding, and work_silent.mp4 feeds ALL six cuts
 # including the MLS-safe tour_unbranded.mp4. Baking a card into that one stitch
 # would put the agent's name on the MLS cut. So the branded family gets its own
@@ -316,7 +330,7 @@ SILENT_WORK = "work_draft.mp4" if DRAFT else "work_silent.mp4"
 # work_silent.mp4, exactly as they always have.
 BRANDED_WORK = "work_branded.mp4"
 DRAFT_OUT = "draft.mp4"          # listing root, NOT out/ -- out/ holds real cuts only
-CLIPS_DIR = "clips_draft" if DRAFT else "clips"
+CLIPS_DIR = DRAFT_CLIPS_DIR if DRAFT else "clips"
 SHEET_OUT = "contact_sheet.png"
 LOCK_FILE = ".build.lock"
 # -----------------------------------------------------------------------------
@@ -1248,6 +1262,18 @@ def release_lock():
         pass
 
 
+def draft_lineage():
+    """The draft rung's intermediates, whatever rung is currently running.
+
+    reason: named apart from the delivery ones so a draft-quality stitch can
+    never feed a delivery build. That separation only holds if something
+    eventually clears them -- see cleanup().
+    """
+    stale = [DRAFT_SILENT_WORK] if os.path.exists(DRAFT_SILENT_WORK) else []
+    return stale + sorted(glob.glob(f"{DRAFT_CLIPS_DIR}/*.mp4") +
+                          glob.glob(f"{DRAFT_CLIPS_DIR}/*.png"))
+
+
 def cleanup(keep_work=False):
     """Delete regenerable build artifacts. Only ever called after a successful
     run -- run() raises on any ffmpeg failure, so a broken build keeps its
@@ -1262,17 +1288,32 @@ def cleanup(keep_work=False):
     if not keep_work:
         junk += glob.glob(f"{CLIPS_DIR}/*.mp4")
         junk += glob.glob(f"{CLIPS_DIR}/*.png")   # card plate
-        for w in (SILENT_WORK, BRANDED_WORK):
-            if os.path.exists(w):
-                junk += [w]
-    for p in junk:
+        # reason: a draft writes SILENT_WORK only -- work_branded.mp4 belongs to
+        # the delivery rung, and a bare --draft used to delete it out from under a
+        # kept delivery stitch, leaving half a lineage behind. Each rung clears
+        # its own.
+        works = (SILENT_WORK,) if DRAFT else (SILENT_WORK, BRANDED_WORK)
+        junk += [w for w in works if os.path.exists(w)]
+    # reason: a delivery build supersedes any draft of the same listing, so it
+    # clears the draft lineage REGARDLESS of keep_work -- --keep-work and
+    # --finish-only are about reusing this rung's stitch next run, and a delivery
+    # run never reuses work_draft.mp4. Nothing did this before, so tour.py (which
+    # always passes one of those flags) left ~35MB of draft intermediates in every
+    # listing it drafted. draft.mp4 itself is NOT touched: it is the review cut the
+    # operator asked for, not an intermediate.
+    stale = [] if DRAFT else draft_lineage()
+    for p in junk + stale:
         os.remove(p)
-    for d in (CLIPS_DIR, TEXT_DIR):
+    dirs = [CLIPS_DIR, TEXT_DIR] + ([] if DRAFT else [DRAFT_CLIPS_DIR])
+    for d in dirs:
         if os.path.isdir(d) and not os.listdir(d):
             os.rmdir(d)
     if junk:
         mb = "" if keep_work else " (rerun with --keep-work to keep them)"
         print(f"Cleaned up {len(junk)} intermediate file(s){mb}")
+    if stale:
+        print(f"  cleared {len(stale)} superseded draft intermediate(s) "
+              f"({DRAFT_SILENT_WORK} + {DRAFT_CLIPS_DIR}/); {DRAFT_OUT} kept")
     if keep_work:
         also = f" + {BRANDED_WORK}" if os.path.exists(BRANDED_WORK) else ""
         print(f"  kept {SILENT_WORK}{also} + {CLIPS_DIR}/ for --finish-only")

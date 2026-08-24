@@ -107,7 +107,7 @@ runs the exact commands shown in the scenarios below.
 | `--720p` | 1280x720. Requires photos >= 1433px wide. |
 | `--allow-lowres` | Build from photos that miss the gate. Names every cut `..._lowres.mp4` — see §5. |
 | `--no-music` | Silent build. Outputs still carry a silent audio track. |
-| `--keep-work` | Keep `clips/`, `work_silent.mp4` and `work_branded.mp4` so `--finish-only` can reuse them. |
+| `--keep-work` | Keep `clips/`, `work_silent.mp4` and `work_branded.mp4` so `--finish-only` can reuse them. Applies to the rung being run — a delivery build clears the draft lineage either way. |
 | `--finish-only` | Reuse the stitches, redo music + branding only. Implies `--keep-work`. Restitches `work_branded.mp4` from the kept clips if it is gone; falls back to a full build if the clips are gone too. |
 
 Flags combine freely: `python3 make_tour.py --720p --no-music --keep-work`
@@ -260,7 +260,9 @@ Builds all clips, stitches, adds music and branding, writes all **six** cuts.
 Runtime scales with photo count — 17 photos takes a few minutes.
 
 `--keep-work` is worth adding by default. Without it the intermediates are deleted
-on success and any later branding tweak forces a full rebuild.
+on success and any later branding tweak forces a full rebuild. It keeps *this* rung's
+intermediates only — a successful delivery build clears `work_draft.mp4` and
+`clips_draft/` regardless, since it can never reuse them.
 
 ### Swap a hand-made lower third plate
 ```bash
@@ -466,6 +468,14 @@ a review rung for you, not for the client — the client reviews a `sample_` cut
 Its intermediates are `work_draft.mp4` and `clips_draft/`, named apart from the
 delivery ones so a draft-quality stitch can never be picked up by a delivery build.
 
+A successful **delivery** build clears them, whether or not you passed `--keep-work`:
+a delivery supersedes any draft of the same listing and never reuses a draft stitch,
+so keeping them just accumulates ~35 MB per listing. The next `--draft` after a
+delivery therefore rebuilds in full instead of taking `--finish-only`. `draft.mp4`
+itself is left in place — it is the review cut you asked for, not an intermediate.
+The reverse never happens: a `--draft` run only ever clears what a draft wrote, so a
+kept delivery stitch survives drafting intact.
+
 ---
 
 ## 4. Tuning
@@ -606,7 +616,8 @@ back end. See `IDEA.md` §2.
 | Card carries a logo you wanted left off | A logo resolved, so the logo layout won | Set `card_style` to `type` |
 
 **A failed build keeps its intermediates on purpose** so you can inspect them. Only a
-successful run cleans up.
+successful run cleans up — which also means a failed delivery build leaves the draft
+lineage in place along with everything else.
 
 **Locking.** The script takes `.build.lock` with `O_EXCL` at startup and releases it
 on any exit, clean or not, so two builds in one folder can no longer delete each

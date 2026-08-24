@@ -191,6 +191,16 @@ measurement, not assumption.
   failure shipped once already.
 - **A successful build deletes its own intermediates.** A failed build keeps them
   for inspection. Do not add cleanup that fires before `finish()` and `vertical()`.
+  `--keep-work` / `--finish-only` govern *the rung being run*: a successful
+  **delivery** build clears the draft lineage — `work_draft.mp4`, `clips_draft/` —
+  regardless of either flag, because a delivery supersedes any draft of the same
+  listing and never reuses a draft stitch. Nothing did that before, and `tour.py`
+  always passes one of those flags, so every listing it drafted kept ~35 MB of dead
+  intermediates forever. `draft.mp4` is **not** touched — it is the review cut the
+  operator asked for, not an intermediate. The asymmetry is deliberate and must
+  stay: a `--draft` run clears only what a draft wrote, or it would delete
+  `work_branded.mp4` out from under a kept delivery stitch and leave half a lineage
+  behind. `tests/test_cleanup_lineage.py` guards both directions.
 
 - **The card never rides in `work_silent.mp4`.** That stitch feeds the unbranded
   cuts, which are the MLS/IDX files. A card baked into it puts an agent's name and
