@@ -403,14 +403,29 @@ once volume justifies it, and is not a reason to delay.
 - **`brewester/9_w_cedar` and `corcoran/46_beacon_5`** have no `config.json` and no lead
   row. Either back-fill lead rows so they join the naming scheme, or accept them as
   pre-scraper listings and leave them out of it.
-- **Commit the `scraper` branch.** Nothing on it is committed. Note `CLAUDE.md` §9:
-  **no `Co-Authored-By` trailer** on any commit message.
+- **Merge `scraper` to `main`.** The branch is committed and pushed to
+  `origin/scraper` as of 2026-08-24; it is not merged. Note `CLAUDE.md` §9: **no
+  `Co-Authored-By` trailer** on any commit message.
 - **`agents.txt` and `property_email.txt`** are untracked scratch at the repo root and
   have no owner. Both are now gitignored — they hold client first names, a live Stripe
   payment link, and delivery URLs for work already sold. `property_email.txt` still
   contains literal `[Your Name]` / `[Phone]` placeholders.
 - **`scraper/photos/`** is the pre-`agents/` scrape output. Gitignored, but still on
   disk. Delete it or keep it for reference — not decided.
+- **Stale build intermediates in the two pre-scraper listings.** `brewester/9_w_cedar`
+  (236M) and `corcoran/46_beacon_5` (123M) each still hold a `work_silent.mp4` and a
+  `clips/` from a build that never reached `finish()` — a successful build deletes its
+  own intermediates, so their presence means those two failed or were interrupted.
+  Gitignored and harmless to the repo, but 359M on disk and, more to the point, a
+  `work_silent.mp4` is exactly what `--finish-only` would silently reuse. Delete both,
+  or keep them as the record of a pre-`out/` build — not decided.
+- **One real end-to-end smoke build in `tests/`, behind a flag.** The suite proves the
+  wiring and the filtergraph without invoking ffmpeg, which is what keeps it at 0.3s
+  and dependency-free. Nothing currently proves the resulting command actually
+  *encodes*. A smoke build would need fixture photos, which this repo must never carry,
+  and would cost minutes rather than milliseconds. Open: add it behind an opt-in flag
+  with generated (not listing) imagery, or accept that the gap is covered by the
+  operator running `--draft` before every delivery.
 
 ---
 
