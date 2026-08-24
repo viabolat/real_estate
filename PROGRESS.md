@@ -34,11 +34,10 @@ protection travels with the clone.
 Branch: **`scraper`**, cut from `3c5e1a8`. The naming-integrity and test-suite work
 below is committed and pushed to `origin/scraper`; the branch is not merged to `main`.
 
-**Three files are deliberately untracked and do not travel:** `LOGIC_GUIDE.md` (the
-reasoning behind the decisions recorded here), `spec.md` (in-flight working notes) and
-`.claude/settings.local.json` (machine-local). Every rule they justify is already in
-`CLAUDE.md` as a non-negotiable and in §2 below as record — read those, not for the
-missing files.
+**Two files are deliberately untracked and do not travel:** `spec.md` (working notes
+for whatever is in flight, which expire on ship) and `.claude/settings.local.json`
+(machine-local). `LOGIC_GUIDE.md` **does** travel — it is the decision record, and the
+*alternatives rejected* in it are the part that stops settled work being redone.
 
 ---
 
