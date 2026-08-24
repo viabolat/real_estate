@@ -341,6 +341,21 @@ changes, since it reuses the already-stitched `work_silent.mp4`.
 
 See `STEPS.md` for the full runbook — every scenario, flag, and failure mode.
 
+- **A gate that cannot run must fail closed.** `check_pii.py` enumerates files by
+  shelling out to git, and `git()` swallows a failed subprocess and returns `[]`.
+  Outside a repository — git not installed, or the tree copied without its `.git` —
+  it therefore scanned *nothing* and printed `Safe to push`, exit 0, over a folder
+  that may hold the whole lead list. "Nothing to scan" and "nothing found" are
+  indistinguishable in the output and opposite in meaning. `require_git()` and the
+  empty-file-list check both exit 2 rather than let that read as clean. Do not add a
+  flag that downgrades either to a warning.
+- **A broken watermark stops the build; broken branding does not.** An unreadable
+  logo or lower third costs a cosmetic layer, so it warns and drops out rather than
+  killing a build that is already minutes deep. The proofing watermark is the only
+  thing separating a `sample_` cut from a deliverable, so a watermark that will not
+  render is a hard refusal — degrading it silently writes exactly the unmarked proof
+  the `tour_`/`sample_` split exists to prevent.
+
 ## Known constraints
 
 - Zillow's CDN tops out at ~1440px (`uncropped_scaled_within_1536_1152`). That
@@ -367,3 +382,21 @@ See `STEPS.md` for the full runbook — every scenario, flag, and failure mode.
   stitch, so changing it invalidates that intermediate exactly like the pacing keys.
 - The centered sample watermark wants a source at least 864px on the long edge at
   1080p. `viabolat.png` is currently 50x50 and upscales ~9.7x; the build warns.
+- `prepare_music()` loops a short track by crossfading it onto itself, so its length
+  step is `length*2 - d`. That has a fixed point at `d`: with the seam pinned to
+  `MUSIC_XFADE` a 2.0s body never grew and anything shorter ran negative, and the
+  loop never exited — a **hang**, with no error and no output. The seam is now
+  `min(MUSIC_XFADE, body/2)`, which is `MUSIC_XFADE` exactly for any body ≥ 4s, so
+  real tracks are unaffected. `MUSIC_LOOP_MAX` is the backstop.
+- Every fit box is `min(BOX_W / aw, BOX_H / ah)`, so an asset that exists but cannot
+  be decoded — a 0-byte or truncated PNG — divided by zero *inside `finish()`*, after
+  every clip had already been rendered. `image_ok()` is the `music_ok()` of images and
+  is checked before any fit box.
+- `status.py` is read-only and must survive whatever is in `photos/`. A **directory**
+  named `01_front.jpg` matched the extension filter and raised `IsADirectoryError` out
+  of `jpeg_size()`, killing the whole report over one bad entry. Both it and
+  `make_tour.py` now require `os.path.isfile`.
+- `tour.py`'s "+ New brand / + New listing" takes typed text, which is hand-naming —
+  the thing the scrape-naming rule exists to prevent. It cannot be removed without
+  losing the no-dump path, so it applies `make_tour._slug` to whatever is typed and
+  says out loud that the folder will read as *unverifiable* until it is scraped.

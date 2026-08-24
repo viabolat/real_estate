@@ -39,7 +39,8 @@ which fails naming the disagreeing input, and by a non-negotiable in `CLAUDE.md`
 ---
 
 ### 2026-08-24 — Guard the non-negotiables with tests, not prose
-**What:** Added `tests/` — 60 stdlib `unittest` tests across five modules, no
+**What:** Added `tests/` — 60 stdlib `unittest` tests across five modules (now 75
+across six; see the audit entry below), no
 third-party dependency, no ffmpeg invoked, ~0.3s. Covers output naming and the
 `_lowres` tag, card isolation from `work_silent.mp4`, `vertical()`'s two sources, the
 branding/watermark card gate, photo order living in the filename prefix, and
@@ -96,6 +97,53 @@ scaffolds from a dump keyed to a lead row, and neither folder has one.
 **Accepted risks:** A listing whose lead row is legitimately deleted now shows as
 unverifiable forever. Judged correct — that *is* the true state, and the message says
 so rather than implying agreement. Guarded by `tests/test_status_naming.py`.
+
+---
+
+### 2026-08-24 — Fixing an audit's findings without adopting its severities
+
+**What:** Six of seven findings from an external audit are fixed; one is deferred to
+§6 of `PROGRESS.md`. Three severity ratings and one remediation were rejected.
+
+**Why:** The findings were all real — each was reproduced by running it before any
+code changed. The *rankings* were not, because they were made without the project's
+contract in view:
+
+- The audit rated the `check_pii.py` failure **LOW** as "potentially letting PII pass
+  unchecked". It is the only finding that weakens a boundary silently rather than
+  crashing loudly, which by this project's standards makes it the worst one. A crash
+  costs a build; a gate printing `Safe to push` over an unscanned lead list costs the
+  thing the gate exists for.
+- It rated `tour.py`'s literal folder naming **LOW / architectural**. Measured against
+  *"the scrape names the folders; nothing else does"*, it is the most direct violation
+  of a stated non-negotiable in the set.
+- It rated the music hang **HIGH**. It is real and a hang is worse than a crash, but
+  it needs a sub-2-second music file, which no real track is.
+
+**Alternatives rejected:**
+- *The audit's remediation for zero-dimension assets: "skip the overlay, print a
+  warning".* Rejected for the watermark specifically. Skipping it produces an
+  unwatermarked `sample_` cut, which is precisely the file the `tour_`/`sample_` split
+  exists to make impossible. Branding degrades; the watermark refuses. The audit had
+  no way to know that, which is the point — a generic remediation cannot see a
+  project's boundaries.
+- *Fixing the `zillow_lead` comma truncation now.* Rejected on evidence, not on
+  disagreement: `scraper/dumps/` holds only 0-byte files, so the parser that names
+  every folder cannot be regression-tested against a single real input. Recorded in
+  §6 with the exact patch, to apply when a dump exists.
+- *Importing `ZOOM_MAX` into `status.py` and the scraper to kill the gate
+  duplication.* Rejected for the same reason the two sluggers stay separate — it makes
+  the scrape depend on the builder. A test pins the constants instead.
+- *A third slug function for `tour.py`.* Rejected: `tour.py` already imports
+  `make_tour`, so `_slug` was in hand. Two slug functions is a documented, tested
+  compromise; three would be drift.
+
+**Accepted risks:** `image_ok()` costs one `ffprobe` per asset per cut. Judged worth
+it against losing a rendered build to a division by zero. The clamped music seam
+changes the *audible* seam for tracks under 4s of body — accepted, because the prior
+behaviour for those tracks was to hang. And the `photos/` `isfile` filter now hides
+malformed entries from the count rather than reporting them; `status.py` shows the
+photo total, so a folder that silently loses one is visible as a changed count.
 
 ---
 

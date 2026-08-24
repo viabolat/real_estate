@@ -56,6 +56,11 @@ the `mv` for any that drifted.
 python3 check_pii.py
 ```
 
+**Exit 2 means the check could not run** — git missing, or the folder is not a git
+repository — and is a refusal, not a pass. The scan enumerates files through git, so
+outside a repository it would otherwise scan nothing and print that as clean. Treat
+exit 2 as "do not push until this runs properly".
+
 Exit 0 means no lead, agent phone or email address is in anything git would publish.
 It scans against the real values in `leads.csv`, and prints findings **masked** — a
 check that echoes the phone number it found has moved the leak into your scrollback.

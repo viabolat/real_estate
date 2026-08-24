@@ -43,9 +43,81 @@ for whatever is in flight, which expire on ship) and `.claude/settings.local.jso
 
 ## 2. BUILT
 
+### 2026-08-24 — Five crashes, a hang, and a gate that failed open
+
+An external audit proposed seven findings. **All seven were reproduced by running
+them** before anything was changed; three of its severity calls and one of its
+remediations were wrong, and are corrected below. Six are fixed, one is deferred
+with the reason recorded in §6.
+
+**The gate failed open, which the audit rated LOW.** `check_pii.py` enumerates
+files by shelling out to git, and `git()` returns `[]` on a failed subprocess. In a
+folder that is not a git repository it scanned nothing and printed *"Scanned 0
+publishable file(s) / No leads or PII found. Safe to push."* — exit 0, over a
+directory that may hold the entire lead list. That is this file's own philosophy
+inverted: *"A pattern that fails is invisible; a check that exits non-zero is not."*
+It now exits 2 both when git will not run and when the file list comes back empty.
+Rated highest here because it is the only finding that silently weakens a boundary
+rather than crashing.
+
+**The music loop could hang.** `prepare_music` loops a short track by crossfading
+it onto itself, stepping `length = length*2 - d`. That has a fixed point at `d`:
+with `d` pinned to `MUSIC_XFADE = 2.0`, a 2.0s body stayed 2.0s forever and
+anything shorter ran negative, so `while length < need` never exited. No error, no
+output, no timeout — the build just stopped. `music_span()` floors the body at
+1.0s, so any track under ~2s of real music reached it. The seam is now
+`min(MUSIC_XFADE, body/2)`, which is **exactly `MUSIC_XFADE` for any body ≥ 4s**, so
+no real track's audio changes; `MUSIC_LOOP_MAX` is the backstop.
+
+**A 0-byte PNG divided by zero mid-build.** Every fit box is
+`min(BOX_W / aw, BOX_H / ah)`, and `dimensions()` returns `(0, 0)` for anything it
+cannot decode. `os.path.exists()` passed the file, so the crash landed inside
+`finish()` — after every clip had already been rendered. This is the same hole
+`music_ok()` was written to close, one asset type over; `image_ok()` closes it.
+
+*The audit's remediation here was wrong and was not followed.* It said to skip the
+overlay with a warning. Doing that for the **watermark** writes an unmarked
+`sample_` cut — the one file `CLAUDE.md` forbids sending. Branding is cosmetic and
+degrades with a warning; the watermark is a boundary and refuses.
+
+**`status.py` died on one bad entry.** A *directory* named `01_front.jpg` matched
+the extension filter, and `jpeg_size()` opens its path with no error handling, so
+the read-only overview raised `IsADirectoryError` and reported nothing at all. Both
+it and `make_tour.py`'s photo glob now require `os.path.isfile`; `_size()` also
+swallows `PermissionError`, which is the likelier real-world trigger.
+
+**`tour.py` was a second naming authority.** Its "+ New brand / + New listing"
+took typed text literally, so `Coldwell Banker Realty - Boston` created a folder
+with spaces that no scrape could produce and that `status.py` flags forever after.
+The audit rated this LOW; against the *"the scrape names the folders; nothing else
+does"* non-negotiable it is the most direct contract violation in the set. It now
+runs `make_tour._slug` — already imported, so no third slug function — and says out
+loud that a hand-named folder reads as unverifiable until it is scraped.
+
+**The resolution gates had nothing holding them together.** `GATE_1080P` / `GATE_720P`
+are hardcoded in `status.py` and `scraper/zillow_photos.py`, mirroring
+`int(OUT_W * ZOOM_MAX)` in `make_tour.py`. Importing across would make the scraper
+depend on the builder, which is rejected for the same reason the two sluggers stay
+separate — so the redundancy stays and a test holds it together instead.
+
+`tests/test_guards.py` — 15 tests, bringing the suite to **75**. Each was verified
+to fail on the regression it names: reverting the crossfade clamp errors both music
+tests, reverting `image_ok` raises `ZeroDivisionError`, reverting the `isfile`
+filter raises `IsADirectoryError`, and drifting `GATE_1080P` fails with
+*"status.py's 1080p gate has drifted from make_tour"*. The PII test needed **both**
+new guards reverted to fail, since either one alone catches the case — defence in
+depth, confirmed rather than assumed.
+
+The new fixtures tripped `check_pii.py` again, exactly as the last batch did: the
+gate matches phone *shape*, so a made-up number in the 555 range is a finding all
+the same -- being fictional is not a property the regex can see. The fixture was
+rewritten to carry no number at all; the gate was not touched. Same rule applies
+to prose: this paragraph cannot quote the literal it is about.
+
 ### 2026-08-24 — A test suite for the non-negotiables, and one slug rule for both namers
 
-`tests/` — 60 stdlib `unittest` tests, ~0.3s, no ffmpeg invoked. They guard the
+`tests/` — 60 stdlib `unittest` tests, ~0.3s, no ffmpeg invoked (75 across six
+modules after the audit entry above). They guard the
 rules in `CLAUDE.md` that fail *silently*: a card leaking into `work_silent.mp4`
 puts an agent's phone number on the MLS and still produces a valid video, and a
 shuffled photo order was delivered once already with no symptom but the finished
@@ -419,6 +491,22 @@ once volume justifies it, and is not a reason to delay.
   Gitignored and harmless to the repo, but 359M on disk and, more to the point, a
   `work_silent.mp4` is exactly what `--finish-only` would silently reuse. Delete both,
   or keep them as the record of a pre-`out/` build — not decided.
+- **`zillow_lead.field()` truncates any value containing a comma.** Confirmed by
+  running it: the regex value class is `[^\\",]*`, so
+  `\"streetAddress\":\"123 Main St, Apt A\"` parses as `123 Main St`, and
+  `\"brokerName\":\"Compass, Inc.\"` as `Compass`. Both feed `leads.csv`, which is
+  the **naming authority** — a truncated address silently names the folder wrong
+  and the lead row wrong, in agreement with each other, which is the one shape
+  `status.py` cannot detect. Apostrophes are *not* affected; that was a false alarm
+  in the first pass of the audit and was corrected by re-testing.
+  **Deliberately not fixed yet.** The one-character change is `[^\\",]*` ->
+  `[^\\"]*` (stop at the closing escaped quote instead of the first comma), but
+  `scraper/dumps/` is empty on this machine — every dump is 0 bytes — so there is no
+  real input to regression-test the naming authority's parser against, and the
+  current 11 lead rows contain no commas, so nothing on disk exercises it either.
+  Changing a parser this load-bearing on synthetic vectors alone is how a
+  plausible-looking wrong address gets shipped. Apply and verify the moment a real
+  dump is available.
 - **One real end-to-end smoke build in `tests/`, behind a flag.** The suite proves the
   wiring and the filtergraph without invoking ffmpeg, which is what keeps it at 0.3s
   and dependency-free. Nothing currently proves the resulting command actually

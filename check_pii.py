@@ -27,6 +27,11 @@ What it looks for:
      The lead list is the ground truth for what must not escape, so it is the
      dictionary the scan is run against -- not a guess at what a name looks like.
 
+It fails CLOSED. Without git, outside a repository, or when git enumerates no
+publishable files at all, it exits 2 rather than printing a clean result -- because
+"nothing to scan" and "nothing found" read identically in the output and mean
+opposite things.
+
 Findings are printed MASKED. A check that prints the phone number it found in
 full has moved the leak into the terminal, the scrollback, and any CI log.
 """
@@ -56,6 +61,33 @@ def git(*args):
     out = subprocess.run(["git", "-C", ROOT, *args],
                          capture_output=True, text=True)
     return [l for l in out.stdout.splitlines() if l.strip()]
+
+
+def require_git():
+    """Exit non-zero unless git is installed AND ROOT is a working repository.
+
+    reason: git() swallows a failed subprocess and returns []. With git missing,
+    or with the tree copied somewhere without its .git, published_files() then
+    returned nothing and the scan reported "Scanned 0 publishable file(s) / Safe
+    to push" and exited 0 -- over a directory that may hold the entire lead list.
+    That is this file's own stated failure mode, one level up: "A pattern that
+    fails is invisible; a check that exits non-zero is not." A gate whose tooling
+    is absent must fail closed, because "nothing to scan" and "nothing found" are
+    indistinguishable in the output but opposite in meaning.
+    """
+    try:
+        out = subprocess.run(["git", "-C", ROOT, "rev-parse", "--git-dir"],
+                             capture_output=True, text=True)
+    except (OSError, subprocess.SubprocessError) as e:
+        print(f"REFUSING TO PASS: cannot run git ({e}).")
+        print("This check can only see what git would publish. Without git it "
+              "sees nothing, and nothing looks identical to clean.")
+        sys.exit(2)
+    if out.returncode != 0:
+        print(f"REFUSING TO PASS: {ROOT} is not a git repository.")
+        print("This check enumerates files via git. Outside a repository it "
+              "scans nothing, which would print as clean.")
+        sys.exit(2)
 
 
 def published_files(staged_only=False):
@@ -108,6 +140,7 @@ def main():
                     help="only scan what is staged right now")
     args = ap.parse_args()
 
+    require_git()
     files = published_files(args.staged)
     names, no_leads = lead_values()
 
@@ -134,6 +167,12 @@ def main():
     if no_leads:
         print("  NOTE: scraper/leads.csv not found -- pattern checks ran, but "
               "there was no lead list to check names against.")
+
+    if not files and not args.staged:
+        print("REFUSING TO PASS: git listed no publishable files at all.")
+        print("A repository with nothing in it is not a clean scan, it is a "
+              "scan that did not happen.")
+        sys.exit(2)
 
     if not hits:
         print("No leads or PII found. Safe to push.")

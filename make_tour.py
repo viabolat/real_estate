@@ -51,6 +51,12 @@ Expects, in the working directory:
     viabolat.png     optional RGBA proofing watermark for the sample_ cuts only.
                      Centered, 45% of frame, 35% opacity. Wants a source at
                      least 864px on the long edge.
+
+Every image asset is probed before it is composited. A logo or lower third that
+is present but unreadable -- 0 bytes, truncated, not actually an image -- is
+dropped with a warning and the build continues without that layer; a card falls
+back to its type layout. The WATERMARK is the exception and refuses the build
+outright, because a sample_ cut without it is not a sample.
     config.json      optional per-listing overrides -- see below.
 
 Run it from the folder holding photos/. That is normally a listing folder such as
@@ -192,6 +198,7 @@ FPS = 30
 ZOOM_MAX = 1.12        # 12% push. Above ~1.20 it starts to look cheap.
 MUSIC_VOLUME = 0.55
 MUSIC_XFADE = 2.0      # crossfade length when a short track has to loop
+MUSIC_LOOP_MAX = 40    # backstop on the loop below; a real track needs < 10
 # [cfg] True = lower third on screen the whole video
 BRAND_PERSISTENT = _cfg.get("brand_persistent", True)
 BRAND_IN = _cfg.get("brand_in", 0.8)    # [cfg] only when BRAND_PERSISTENT is False
@@ -564,15 +571,36 @@ def prepare_music(src, need):
     if a > 0.05 or tail > 0.05:
         print(f"  trimmed {a:.1f}s lead-in and {tail:.1f}s trailing silence "
               f"-> {body:.1f}s of music")
+    # reason: each pass replaces the track with itself crossfaded onto itself, so
+    # length becomes length*2 - d. That has a fixed point at d: with d pinned to
+    # MUSIC_XFADE, a body of exactly 2.0s stays 2.0s forever and anything shorter
+    # goes negative, so `while length < need` never exits and the build HANGS --
+    # no error, no output, nothing to read. music_span() floors body at 1.0s, so
+    # any track under ~2s of actual music reaches it. Scale the seam to the body
+    # instead. For any real track (body >= 2*MUSIC_XFADE = 4s) this is MUSIC_XFADE
+    # exactly and the output is byte-identical to before.
+    d = min(MUSIC_XFADE, body / 2.0)
+    if d < MUSIC_XFADE:
+        print(f"  WARNING: only {body:.1f}s of music after trimming silence. "
+              f"Seam crossfade reduced to {d:.1f}s so the loop can converge; "
+              f"a track this short will sound obviously looped.")
+
     length, i = body, 1
     while length < need + 1.0:
+        # reason: belt and braces on the arithmetic above. If the step ever stops
+        # growing, stop rather than spin -- a hang gives the operator nothing to
+        # act on, and this runs after the clips are already rendered.
+        if i > MUSIC_LOOP_MAX:
+            sys.exit(f"Gave up looping music after {MUSIC_LOOP_MAX} passes "
+                     f"({length:.1f}s of {need:.1f}s needed). Supply a longer "
+                     f"track, or build with --no-music.")
         nxt = f"work_music_{i}.m4a"
         run(["ffmpeg", "-y", "-loglevel", "error", "-i", cur, "-i", cur,
-             "-filter_complex", f"[0:a][1:a]acrossfade=d={MUSIC_XFADE}[a]",
+             "-filter_complex", f"[0:a][1:a]acrossfade=d={d}[a]",
              "-map", "[a]", "-c:a", "aac", "-b:a", "192k", nxt])
-        length = length * 2 - MUSIC_XFADE
+        length = length * 2 - d
         print(f"  looped music -> {length:.1f}s "
-              f"({MUSIC_XFADE}s crossfade at the seam)")
+              f"({d}s crossfade at the seam)")
         cur, i = nxt, i + 1
     return cur
 
@@ -588,6 +616,21 @@ def music_ok(path):
                         "-show_entries", "stream=codec_type", "-of", "csv=p=0",
                         path], capture_output=True, text=True)
     return p.returncode == 0 and "audio" in p.stdout
+
+
+def image_ok(path):
+    """True only if path is a real, decodable image with non-zero dimensions.
+
+    reason: the same hole music_ok() was written to close, one asset type over.
+    os.path.exists() passes on a 0-byte or truncated PNG; dimensions() then
+    returns (0, 0); and every fit box is min(BOX_W / aw, BOX_H / ah), which
+    raises ZeroDivisionError. That lands in finish(), i.e. after every clip has
+    already been rendered -- minutes of work thrown away by a file the run could
+    have rejected at the start.
+    """
+    if not path or not os.path.exists(path) or os.path.getsize(path) == 0:
+        return False
+    return all(dimensions(path))
 
 
 def alpha_bbox(path, thresh=8):
@@ -848,7 +891,10 @@ def render_card(out, logo=None):
     things to keep in step.
     """
     layout = card_layout(logo)
-    use_logo = layout == "logo" and logo and os.path.exists(logo)
+    use_logo = layout == "logo" and image_ok(logo)
+    if layout == "logo" and logo and os.path.exists(logo) and not use_logo:
+        print(f"    WARNING: {logo} is unreadable or has no dimensions -- "
+              f"card falls back to the type layout.")
     bg, fg, accent = card_theme(logo if use_logo else None)
 
     rule_w, rule_h, gap = 140, 5, 46
@@ -970,10 +1016,27 @@ def finish(silent, music, brand, out, branded=True, logo=None, watermark=None,
     if not BRAND_PERSISTENT and body_in + BRAND_OUT > body_out:
         print(f"    WARNING: brand_out {BRAND_OUT}s is past the {body_out:.1f}s mark -- "
               f"the lower third will stay up to {'the card' if has_card else 'the end'}.")
-    use_brand = bool(branded and brand and os.path.exists(brand))
-    use_logo = bool(branded and logo and os.path.exists(logo))
+    # reason: branding is cosmetic, so an unreadable lower third or logo drops out
+    # with a warning rather than killing a build that is already minutes deep.
+    use_brand = bool(branded and image_ok(brand))
+    use_logo = bool(branded and image_ok(logo))
+    for label, path, used in (("lower third", brand, use_brand),
+                              ("logo", logo, use_logo)):
+        if branded and path and os.path.exists(path) and not used:
+            print(f"    WARNING: {path} is unreadable or has no dimensions -- "
+                  f"{label} omitted from this cut.")
     # reason: NOT gated on `branded`. The proofing watermark is the whole reason a
     # sample cut exists, so it must survive onto the unbranded sample too.
+    # reason: the watermark is NOT cosmetic and is deliberately not treated like
+    # the two above. It is the only thing separating a sample_ cut from a
+    # deliverable, so silently dropping it writes an unmarked proof -- the exact
+    # file CLAUDE.md forbids sending. A broken watermark stops the build.
+    if watermark and os.path.exists(watermark) and not image_ok(watermark):
+        sys.exit(f"REFUSING TO BUILD: {watermark} is unreadable or has no "
+                 f"dimensions.\nThe proofing watermark is the boundary between a "
+                 f"sample and a deliverable; a cut without it is not a sample.\n"
+                 f"Replace the file, or point 'watermark' in config.json at a "
+                 f"valid image.")
     use_wm = bool(watermark and os.path.exists(watermark))
 
     # reason: the lower third carries per-listing agent info, the logo is the
@@ -1235,8 +1298,13 @@ def tour_order(photos):
 
 
 def main():
+    # reason: the extension filter alone matched a *directory* called
+    # photos/01_front.jpg, which then went to ffmpeg as an input and failed deep
+    # in the stitch. os.path.isfile keeps the order list to things that can
+    # actually be decoded.
     photos = sorted(p for p in glob.glob("photos/*")
-                    if os.path.splitext(p)[1].lower() in PHOTO_EXTS)
+                    if os.path.splitext(p)[1].lower() in PHOTO_EXTS
+                    and os.path.isfile(p))
     if not photos:
         sys.exit("No photos found. Put them in ./photos/ named in tour order.")
     if _cfg:

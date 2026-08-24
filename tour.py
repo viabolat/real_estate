@@ -33,6 +33,13 @@ Two things this file does that make_tour.py cannot:
   learn the agents/<brand>/<listing> layout. So the fallback for a blank agent_name
   -- the brand folder -- is resolved here and handed over as a plain config value.
 
+  Folder naming for "+ New". A brokerage or listing typed at the prompt is passed
+  through make_tour._slug -- the same function that names the output files -- so a
+  hand-started folder still lands on the scrape's naming rule instead of carrying
+  spaces, capitals and apostrophes into a path. It is the scraper that should be
+  naming folders; this only keeps the manual door from producing a name the scrape
+  could never agree with. A name that slugifies to nothing is refused.
+
   The resolution verdict. When neither preset clears, this used to REFUSE, at the
   end of a run, after the question set and a draft had already been paid for,
   having computed the identical answer at preflight in the first second. It now
@@ -637,26 +644,59 @@ def check_photos(listing_dir):
 
 # ---- the wizard -------------------------------------------------------------
 
+def _new_folder_name(raw, what):
+    """Slugify a hand-typed folder name the same way the scrape would.
+
+    reason: this took the operator's text literally, so typing "Coldwell Banker
+    Realty - Boston" made agents/Coldwell Banker Realty - Boston/ -- a folder
+    with spaces that no scrape could ever produce and that status.py reports as
+    drifted or unverifiable forever after. The scrape is the naming authority;
+    when there is no lead row to derive a name from, the least this can do is
+    apply the authority's own rule to the text. make_tour._slug IS that rule --
+    tour.py already imports make_tour, so this adds no third slug function and
+    no dependency on the scraper.
+    """
+    slug = make_tour._slug(raw)
+    if not slug:
+        raise SystemExit(f"{what} \"{raw}\" has no usable characters for a "
+                         f"folder name.")
+    if slug != raw:
+        say(f"  Using \"{slug}\" -- folder names follow the scrape's rule.")
+    return slug
+
+
 def choose_listing():
     """(brand, listing_dir), creating either inline."""
     bs = brands()
     brand = pick("Brand", [(b, b) for b in bs] or [], default=0,
                  extra=("+", "+ New brand")) if bs else "+"
+    made_by_hand = False
     if brand == "+":
-        brand = ask("New brand name").strip()
-        if not brand:
+        raw = ask("New brand name").strip()
+        if not raw:
             raise SystemExit("No brand name given.")
+        brand = _new_folder_name(raw, "Brand name")
+        made_by_hand = True
         os.makedirs(os.path.join(LISTINGS_ROOT, brand), exist_ok=True)
 
     ls = listings(brand)
     name = pick("Listing", [(x, x) for x in ls] or [], default=0,
                 extra=("+", "+ New listing")) if ls else "+"
     if name == "+":
-        name = ask("New listing folder name (e.g. 46_beacon_5)").strip()
-        if not name:
+        raw = ask("New listing folder name (e.g. 46_beacon_5)").strip()
+        if not raw:
             raise SystemExit("No listing name given.")
+        name = _new_folder_name(raw, "Listing name")
+        made_by_hand = True
     listing_dir = os.path.join(LISTINGS_ROOT, brand, name)
     os.makedirs(os.path.join(listing_dir, "photos"), exist_ok=True)
+    if made_by_hand:
+        # reason: say it once, here, rather than letting status.py be the first
+        # thing that mentions it. A hand-named folder has no lead row behind it,
+        # which is a real state with a real consequence, not a warning to bury.
+        say("  Note: named by hand, so there is no leads.csv row behind it. "
+            "status.py will list it as unverifiable until the listing is "
+            "scraped. Run scraper/zillow_run.py instead if you have the dump.")
     return brand, listing_dir
 
 

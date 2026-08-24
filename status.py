@@ -18,6 +18,11 @@ reported separately as unverifiable rather than passing silently: the check keys
 on agent_phone out of config.json, so a folder that never had a config.json was
 exactly the hand-named case it could not see.
 
+Being the read-only overview, it has to survive whatever is actually in a folder:
+a directory named 01_front.jpg, an unreadable or truncated photo, a broken symlink.
+Those are dropped from the photo count rather than raising and killing the whole
+report over one bad entry -- the count itself is what surfaces the loss.
+
 Usage:
     python3 status.py
     python3 status.py --long     # also show what each listing inherits
@@ -29,6 +34,7 @@ import importlib.util
 import json
 import os
 import re
+import struct
 import subprocess
 import sys
 
@@ -122,7 +128,15 @@ def _size(path):
     as zero pixels.
     """
     if path.lower().endswith((".jpg", ".jpeg")):
-        wh = jpeg_size(path)
+        # reason: jpeg_size() opens the path with no error handling of its own, so
+        # a directory named 01_front.jpg raised IsADirectoryError and an
+        # unreadable file raised PermissionError -- either one killed the whole
+        # report over a single bad entry. status.py is the read-only overview; it
+        # has to survive whatever is in the folder and say so.
+        try:
+            wh = jpeg_size(path)
+        except (OSError, ValueError, struct.error):
+            wh = None
         if wh:
             return max(wh)
     try:
@@ -142,8 +156,9 @@ def photo_stats(listing_dir):
         return 0, None, None
     sizes = []
     for name in sorted(os.listdir(d)):
-        if name.lower().endswith(PHOTO_EXTS):
-            px = _size(os.path.join(d, name))
+        full = os.path.join(d, name)
+        if name.lower().endswith(PHOTO_EXTS) and os.path.isfile(full):
+            px = _size(full)
             if px:
                 sizes.append(px)
     if not sizes:
