@@ -115,7 +115,9 @@ stays the single record of what produced a delivered video.
 
 Outputs -- six cuts, two families. Each name is prefixed with the agent's own
 name (from agent_name, or output_prefix), because six listings all producing a
-file called tour_branded.mp4 collide the moment they leave out/:
+file called tour_branded.mp4 collide the moment they leave out/. The slug matches
+the one that named the listing folder -- apostrophes drop rather than separate, so
+Sean O'Brien signs sean_obrien_tour_branded.mp4, not sean_o_brien_...:
 
     DELIVERY (clean, what the client gets on sign-off)
     out/<agent>_tour_branded.mp4      music + branding
@@ -218,9 +220,28 @@ BROKERAGE = _cfg.get("brokerage", "")        # [cfg]
 
 
 def _slug(text):
-    """Lowercase, underscore-joined, filename-safe. "" when nothing survives."""
+    """Lowercase, underscore-joined, filename-safe. "" when nothing survives.
+
+    reason: apostrophes are dropped rather than turned into separators, matching
+    scraper/zillow_photos.slugify -- the naming authority that already produced
+    the agents/<brand>/ folder this listing sits in. The straight
+    non-alphanumeric rule turned "Gibson Sotheby's International Realty" into
+    gibson_sotheby_s_..., so an agent whose name carries an apostrophe signed his
+    files sean_o_brien_ while his folder read sean_obrien -- two spellings of one
+    name, which is the drift the single naming authority exists to prevent.
+
+    Deliberately NOT the scraper's function, and deliberately not imported from
+    it. Two differences, both wanted: that one falls back to a default
+    ("listing") because a folder cannot be called "", while this one must return
+    "" so a config with no agent_name leaves the bare tour_/sample_ names a
+    pre-existing CLI folder already has. And make_tour runs with cwd set to a
+    listing folder and nothing but ffmpeg on the path -- importing from scraper/
+    would make the build depend on the scrape, which it otherwise never does.
+    Same apostrophe rule, restated; if you change one, change both.
+    """
+    text = str(text).replace("'", "").replace("\u2019", "")
     return "_".join("".join(c.lower() if c.isalnum() else " "
-                            for c in str(text)).split())
+                            for c in text).split())
 
 
 # reason: six listings all producing a file called tour_branded.mp4 collide the

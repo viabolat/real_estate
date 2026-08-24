@@ -126,7 +126,12 @@ python3 zillow_photos.py paste.txt --out-dir some/other/folder
 - Apostrophes are dropped rather than turned into separators, so
   `Gibson Sotheby's International Realty` slugs to
   `gibson_sothebys_international_realty`. A missing brokerage falls back to
-  `unknown_brokerage`.
+  `unknown_brokerage`. `make_tour._slug`, which names the output files inside
+  that folder, applies the same apostrophe rule — it has to, or one agent's name
+  gets two spellings. It is a separate function because `make_tour.py` runs from
+  a listing folder with no `scraper/` on the path, and it returns `""` rather
+  than a fallback so a blank `agent_name` leaves the bare `tour_`/`sample_`
+  names. `tests/test_naming.py` fails if the two drift apart.
 - **The scrape is the naming authority.** Do not rename a listing folder by
   hand, and do not add an alias table mapping a scraped brokerage onto a
   shorter name you prefer — that is a second authority, and the two drift.

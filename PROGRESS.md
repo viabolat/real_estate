@@ -18,11 +18,12 @@ Two things do not travel with the repo:
 
 - **`agents/` is gitignored in full** — every listing folder, `photos/`, `config.json`,
   `brand.json`, and all six output cuts. A fresh clone has code and docs, no listings.
-- **`scraper/leads.csv` is excluded by a global `*.csv` rule** in
-  `~/.gitignore_global`, not by this repo's `.gitignore`. It is the **naming
-  authority** — `agents/<slug(broker_name)>/<slug(address)>` is derived from it, and
-  `status.py` validates every folder against it. Without it, `status.py` silently
-  skips the folder-name check and there is nothing to re-derive names from.
+- **`scraper/leads.csv` is gitignored** — by a repo-level rule, so the protection
+  travels with the clone (it was once covered only by a global `*.csv` rule, which
+  does not). It is the **naming authority** — `agents/<slug(broker_name)>/<slug(address)>`
+  is derived from it, and `status.py` validates every folder against it. Without it,
+  `status.py` cannot run the folder-name check and there is nothing to re-derive
+  names from.
 
 **Decided 2026-08-21: `leads.csv` stays untracked.** It is the lead list — agent
 names, phones, emails — and the repo is now hardened so no lead can reach the remote
@@ -30,11 +31,80 @@ at all (see §2). Copy it across by hand, or re-derive it by re-running the scra
 It is now ignored by a **repo-level** rule rather than only by the global one, so the
 protection travels with the clone.
 
-Branch: **`scraper`**, cut from `3c5e1a8`. **Nothing on it is committed yet.**
+Branch: **`scraper`**, cut from `3c5e1a8`. The naming-integrity and test-suite work
+below is committed and pushed to `origin/scraper`; the branch is not merged to `main`.
+
+**Three files are deliberately untracked and do not travel:** `LOGIC_GUIDE.md` (the
+reasoning behind the decisions recorded here), `spec.md` (in-flight working notes) and
+`.claude/settings.local.json` (machine-local). Every rule they justify is already in
+`CLAUDE.md` as a non-negotiable and in §2 below as record — read those, not for the
+missing files.
 
 ---
 
 ## 2. BUILT
+
+### 2026-08-24 — A test suite for the non-negotiables, and one slug rule for both namers
+
+`tests/` — 60 stdlib `unittest` tests, ~0.3s, no ffmpeg invoked. They guard the
+rules in `CLAUDE.md` that fail *silently*: a card leaking into `work_silent.mp4`
+puts an agent's phone number on the MLS and still produces a valid video, and a
+shuffled photo order was delivered once already with no symptom but the finished
+film. Run with `python3 -m unittest discover -s tests -t .`
+
+Three techniques, one per kind of rule. A fresh import under a temp cwd, because
+every `[cfg]` constant resolves from `config.json` at import time. A real
+`finish()` with `run()` stubbed, because the filtergraph *is* the deliverable and
+which overlay carries an `enable=` window is the whole of the card/branding rule.
+AST inspection of `main()`, because which stitch each `finish()` call is handed is
+wiring, not behaviour — there is nothing to assert on at runtime short of decoding
+frames.
+
+Each guard was verified to fail on the regression it names, not merely to pass on
+green: injecting a `photo_order` config key broke three tests, and pointing
+`tour_unbranded` at `branded_silent` produced *"tour_unbranded reads
+'branded_silent' -- the card-bearing stitch would put the agent's details on the
+MLS"*.
+
+**The two slug functions now agree on apostrophes.** Writing the tests surfaced a
+divergence: `scraper/zillow_photos.slugify` strips apostrophes before separating
+(it names the folders), while `make_tour._slug` mapped every non-alphanumeric to a
+separator (it names the files inside them). An agent called Sean O'Brien would
+have had `sean_obrien/` holding `sean_o_brien_tour_branded.mp4` — one name, two
+spellings, which is exactly the drift a single naming authority exists to prevent.
+`_slug` now drops both the straight and typographic apostrophe.
+
+*Impact on existing work: none.* No `agent_name` or `output_prefix` in any
+listing's `config.json` contains an apostrophe — the two that do carry one hold it
+in `brokerage`, which is card display text and never passes through a slugger. No
+delivered filename changes. The fix is preventive, and it was verified that way
+before it was made rather than assumed.
+
+**`status.py` no longer passes config-less folders silently.** The drift check
+keys on `agent_phone` out of `config.json`, so a folder that never had one
+produced no match and fell through — and "has no config.json" is the strongest
+available signal that a folder was never scaffolded by the scraper, i.e. the
+likeliest hand-named folder there is. The check skipped precisely the case it was
+built to catch, which is how `brewester/9_w_cedar` sat through the scrape-naming
+commit. It now reports those as *unverifiable*, and `next_action` stops telling
+them to rerun `zillow_photos.py` — there is no dump behind them to rerun, so the
+advice was a dead end. The phone match itself is unchanged and still runs on every
+folder, including ones whose name matches the scrape: a folder named for one lead
+row while its config carries another agent's phone is worse drift, not less.
+
+*Both legacy folders were left in place, deliberately.* `brewester/9_w_cedar` (17
+photos, 384–1440px, six cuts in the listing root rather than `out/`, no agent
+prefix, stale `work_silent.mp4` + `clips/`) and `corcoran/46_beacon_5` predate the
+`out/` convention and the prefix rule. The scrape cannot name a listing it has no
+row for, and hand-naming one is the second authority the rule exists to prevent.
+
+*Why they are still two functions:* `make_tour.py` runs with cwd set to a listing
+folder and nothing but ffmpeg on the path, so importing from `scraper/` would make
+a build depend on the scrape, which it otherwise never does. They also differ on
+the empty case deliberately — the scraper falls back to `listing` because a folder
+cannot be named `""`, while `_slug` returns `""` so a blank `agent_name` leaves the
+bare `tour_`/`sample_` names an older CLI folder already has. Both differences are
+pinned by tests so neither gets "tidied up".
 
 ### 2026-08-21 — Batch scraping, and hardening the repo for a private remote
 
@@ -147,6 +217,8 @@ scraper and there is nothing to derive their names from.
 
 **`status.py` re-checks folder names on every run** and prints the `mv` for anything
 that has drifted. A one-off rename fixes today; the check is what keeps it fixed.
+A folder with no lead row at all is listed separately as unverifiable — see
+2026-08-24, which closed the hole where those passed silently.
 
 **Scaffolding, written from the dump, never overwritten:**
 

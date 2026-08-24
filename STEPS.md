@@ -41,6 +41,12 @@ python3 status.py            # one line each: photo count, smallest photo, next 
 python3 status.py --long     # also show what each listing inherits
 ```
 
+Two lists can follow the table. **Folder name(s) do not match the scrape** prints
+an `mv` per folder — run it, the scrape is the naming authority. **Folder(s) have
+no lead row to check against** is not a rename instruction: those listings predate
+the scrape or their lead row is gone, so nothing can derive their names. Leave
+them, or re-scrape the listing.
+
 It writes nothing. It also re-checks every folder name against `leads.csv` and prints
 the `mv` for any that drifted.
 
@@ -378,7 +384,9 @@ Every filename is `<agent>_<family>_<shape>.mp4`. The `<agent>` part is
 `output_prefix`, or `agent_name` slugified when that is blank — six listings all
 writing `tour_branded.mp4` collide the moment the files leave `out/`. With both
 blank the bare names come back, so an older folder driven from the CLI is
-unchanged. Examples below use `jane_smith`.
+unchanged. The slug matches the one that named the folder: apostrophes drop
+rather than separate, so `Sean O'Brien` gets `sean_obrien_tour_branded.mp4`.
+Examples below use `jane_smith`.
 
 ### Delivery — `*_tour_*`, clean. Send **after** sign-off.
 

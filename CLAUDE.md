@@ -46,6 +46,7 @@ global_assets/music/
 global_assets/lower_thirds/
 scraper/                      Zillow dump -> leads.csv + a scaffolded listing
 status.py                     read-only: every listing and its one next action
+tests/                        stdlib unittest guards for the non-negotiables below
 ```
 
 `<brand>` and `<listing>` are **not named by hand.** Both are slugified straight from
@@ -100,7 +101,10 @@ Outputs **six** cuts to `out/`, in two families. Every name is prefixed with the
 agent's own name — `output_prefix`, or `agent_name` slugified when that is blank —
 because six listings all producing a `tour_branded.mp4` collide the moment the
 files leave `out/` for a downloads folder or an email thread. Both blank leaves the
-bare names, so a pre-existing folder built from the CLI is unchanged:
+bare names, so a pre-existing folder built from the CLI is unchanged. The slug is
+the folder rule applied to a filename — apostrophes drop rather than separate, so
+`Sean O'Brien` signs `sean_obrien_tour_branded.mp4` inside `sean_obrien/` and not
+`sean_o_brien_...`:
 
 **Delivery** — clean, what the client gets on sign-off:
 - `<agent>_tour_branded.mp4`   — card + lower third + top-left logo, for social /
@@ -255,9 +259,30 @@ measurement, not assumption.
   moment a brokerage is renamed. `coldwell_banker/2_comm_ave` sat beside a lead row
   reading `Coldwell Banker Realty - Boston` / `2 Commonwealth Ave` for exactly that
   reason. `status.py` prints the `mv` when a folder no longer matches its lead row.
+  A folder with **no** lead row behind it is reported separately as *unverifiable*,
+  not passed: the check keys on `agent_phone` out of `config.json`, so a folder
+  that never had a `config.json` — the strongest signal it was never scaffolded by
+  the scraper, and so the likeliest hand-named folder there is — used to fall
+  silently through the check built to catch it. `brewester/9_w_cedar` and
+  `corcoran/46_beacon_5` sat through the scrape-naming commit that way. They are
+  left alone deliberately: the scrape cannot name a listing it has no row for, and
+  hand-naming one is the second authority this rule exists to prevent.
 
 - **`brand.json` never carries `agent_name` or `agent_phone`.** A brokerage has many
   agents; the folder is keyed on the brokerage. See the `brand.json` note above.
+
+- **The two slug functions agree on apostrophes, and are still two functions.**
+  `scraper/zillow_photos.slugify` names the folders; `make_tour._slug` names the
+  files inside them. Both drop apostrophes rather than turning them into
+  separators, or one agent's name gets two spellings —
+  `sean_obrien/sean_o_brien_tour_branded.mp4`. They stay separate on purpose:
+  `make_tour.py` runs with cwd set to a listing folder and nothing but ffmpeg on
+  the path, so importing the scraper would make a build depend on the scrape,
+  which it otherwise never does. They also differ on the empty case on purpose —
+  the scraper falls back to `listing` because a folder cannot be named `""`,
+  while `_slug` returns `""` so a blank `agent_name` leaves the bare
+  `tour_`/`sample_` names. Change one apostrophe rule, change both;
+  `tests/test_naming.py` fails if they drift.
 
 - **Docs do not go stale.** Any change to `make_tour.py` or `tour.py` — new feature, flag, output,
   renamed constant, changed default — must be propagated to `CLAUDE.md`, `IDEA.md`,
@@ -272,6 +297,7 @@ python3 check_pii.py                  # before any push: no lead, phone or email
 python3 status.py                     # what every listing is waiting on
 python3 tour.py                       # the wizard: listing, questions, three rungs
 python3 tour.py --check-photos        # optional: Claude reads the contact sheet
+python3 -m unittest discover -s tests -t .   # the non-negotiables, ~0.5s, no ffmpeg
 ```
 
 `zillow_run.py` names the folders, downloads `photos/`, writes `brand.json` and

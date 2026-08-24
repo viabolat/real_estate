@@ -71,3 +71,17 @@ scraper/photos/
 agents.txt
 property_email.txt
 outreach/
+
+# ---------------------------------------------------------------------------
+# LOCAL WORKING NOTES AND MACHINE-LOCAL CONFIG — deliberately not pushed.
+#
+# reason: split by audience, not importance. The durable rules from these files
+# are already promoted into CLAUDE.md (non-negotiables) and PROGRESS.md (record),
+# which is what a second machine is told to read. These are the reasoning and the
+# in-flight scratch behind them, and settings.local.json is machine-local by its
+# own naming convention. tests/ is NOT here on purpose: a guard only guards if it
+# runs on a clone, and check_pii.py scans only what git would publish.
+# ---------------------------------------------------------------------------
+LOGIC_GUIDE.md
+spec.md
+.claude/settings.local.json

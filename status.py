@@ -13,7 +13,10 @@ lead list already covers five.
 
 It also re-checks every folder name against scraper/leads.csv -- the scrape is the
 naming authority for agents/<broker_name>/<address> -- and prints the mv for any
-folder that has drifted off it.
+folder that has drifted off it. A folder with no lead row behind it at all is
+reported separately as unverifiable rather than passing silently: the check keys
+on agent_phone out of config.json, so a folder that never had a config.json was
+exactly the hand-named case it could not see.
 
 Usage:
     python3 status.py
@@ -148,13 +151,25 @@ def photo_stats(listing_dir):
     return len(sizes), min(sizes), max(sizes)
 
 
-def next_action(listing_dir, cfg, n, worst, best):
-    """The one thing standing between this listing and a deliverable."""
+def next_action(listing_dir, cfg, n, worst, best, scraped=True):
+    """The one thing standing between this listing and a deliverable.
+
+    scraped: whether this folder's own name appears in leads.csv. A folder that
+    predates the scrape has no lead row behind it, and telling its operator to
+    rerun zillow_photos.py sends them to a script that has nothing to work with.
+    """
     if n == 0:
         return "no photos -- scrape it"
     if best and 1920.0 / best > HOPELESS_UPSCALE:
         return f"photos only {best}px -- get the originals, do not build"
     if not cfg:
+        # reason: "no config.json" used to send every case to zillow_photos.py,
+        # which scaffolds a listing from a dump keyed to a lead row. With no such
+        # row -- brewester/9_w_cedar and corcoran/46_beacon_5, both hand-named
+        # before the scrape became the naming authority -- there is no dump to
+        # rerun and the advice is a dead end. Name the actual situation instead.
+        if not scraped:
+            return "not in leads.csv -- hand-named, predates the scrape"
         return "no config.json -- rerun zillow_photos.py"
     if not resolves(listing_dir, cfg.get("logo")):
         return "logo blank/missing -- add it to brand.json"
@@ -177,6 +192,11 @@ def main():
     ap.add_argument("--long", action="store_true", help="also show inherited settings")
     args = ap.parse_args()
 
+    # reason: read once, up front -- next_action needs to know whether a folder
+    # is in leads.csv at all, and the drift report below needs the same table.
+    truth = scraped_names()
+    known = set(truth.values())
+
     rows = []
     for brand in _dirs(AGENTS):
         brand_dir = os.path.join(AGENTS, brand)
@@ -189,7 +209,9 @@ def main():
             cfg = _json(os.path.join(ld, "config.json"))
             n, worst, best = photo_stats(ld)
             rows.append((brand, listing, n, worst, best,
-                         next_action(ld, cfg, n, worst, best), bcfg, cfg))
+                         next_action(ld, cfg, n, worst, best,
+                                     scraped=(brand, listing) in known),
+                         bcfg, cfg))
 
     if not rows:
         print("No listings under agents/.")
@@ -212,18 +234,41 @@ def main():
         print(f"\n{len(brands_missing)} brokerage(s) need a logo or music set once: "
               f"{', '.join(brands_missing)}")
 
-    drift = []
-    truth = scraped_names()
+    # reason: the drift check matches on agent_phone out of config.json, so a
+    # folder with no config.json -- which is the strongest signal it was never
+    # scaffolded by the scraper, i.e. the likeliest hand-named folder there is --
+    # produced no match and fell silently through the check built to catch it.
+    # brewester/9_w_cedar sat through the scrape-naming commit that way. Report
+    # unverifiable separately rather than letting absence read as agreement.
+    drift, unverifiable = [], []
     for brand, listing, _n, _w, _b, _a, _bc, cfg in rows:
+        if listing == "-":                      # "no listings yet" placeholder
+            continue
+        # reason: the phone match is unchanged and still runs on every folder,
+        # including ones whose *name* matches the scrape -- a folder called
+        # gibson/169_k_st_1 carrying another agent's phone is worse drift, not
+        # less, and skipping it on the name alone would have hidden exactly that.
         want = truth.get(re.sub(r"\D", "", cfg.get("agent_phone") or ""))
         if want and (brand, listing) != want:
             drift.append((brand, listing, want))
+        elif not want and (brand, listing) not in known:
+            unverifiable.append((brand, listing, bool(cfg)))
     if drift:
         print(f"\n{len(drift)} folder name(s) do not match the scrape "
               f"(leads.csv is the naming authority):")
         for brand, listing, (tb, tl) in drift:
             print(f"  agents/{brand}/{listing}")
             print(f"    mv agents/{brand}/{listing} agents/{tb}/{tl}")
+    if unverifiable:
+        print(f"\n{len(unverifiable)} folder(s) have no lead row to check against "
+              f"(not renamed -- unverifiable):")
+        for brand, listing, has_cfg in unverifiable:
+            why = ("config.json has no agent_phone matching leads.csv"
+                   if has_cfg else "no config.json, so nothing to match on")
+            print(f"  agents/{brand}/{listing} -- {why}")
+        print("  These predate the scrape or their lead row is gone. The scrape "
+              "cannot name them; renaming by hand would invent a second "
+              "authority. Leave them, or re-scrape the listing.")
 
 
 if __name__ == "__main__":
