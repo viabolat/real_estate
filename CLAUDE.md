@@ -45,6 +45,7 @@ global_assets/logos/          shared branding, referenced by config.json
 global_assets/music/
 global_assets/lower_thirds/
 scraper/                      Zillow dump -> leads.csv + a scaffolded listing
+publish.py                    sample_ cuts -> the public review bucket. NEVER tour_
 status.py                     read-only: every listing and its one next action
 tests/                        stdlib unittest guards for the non-negotiables below
 ```
@@ -228,6 +229,46 @@ measurement, not assumption.
   before sign-off.** The two families exist to keep that boundary enforceable by
   filename. Do not add a flag that strips the watermark from a sample cut.
 
+- **Only `sample_` cuts publish, and `make_tour.py` never uploads.** The bucket
+  behind `/preview/` is public, so `publish.py` refuses anything that is not
+  `sample_*` — there is no `--force`, and `tests/test_publish_gate.py` fails if
+  `publishable()` grows an override. The obvious implementation, a
+  `for f in out/*.mp4` loop at the end of a build, would put the unwatermarked
+  `tour_branded.mp4` on a guessable public URL *before sign-off*: the exact
+  boundary the two families exist to hold. Publishing also stays out of
+  `make_tour.py` for three separate reasons — it is stdlib + ffmpeg only, it holds
+  `.build.lock` through a six-minute encode where a network timeout would fail a
+  good build, and it is contractually blind to the `agents/<brand>/<listing>`
+  layout that a collision-free remote path needs. The remote path is
+  `<brand>/<listing>/<file>`, never the bare filename: with `x-upsert` a flat
+  bucket lets one listing silently overwrite another's, which is the collision
+  `output_prefix` already solved locally.
+
+- **A publish verifies against the storage API, never the public URL.** Objects are
+  served through a CDN, so a `HEAD` on the `/preview/` link seconds after an upload
+  can hit an edge that has not replicated and report a correct upload as failed.
+  `publish.py` confirms with one authenticated `object/list` call against the
+  origin and compares sizes. Do not replace it with a fetch of the public link.
+
+- **A publish never deletes the local cut.** `out/` stays the copy of record after
+  an upload; a public bucket must not become the only place a deliverable exists,
+  and `config.json` is meant to still explain what shipped months later. Storage
+  pressure is a reason to prune old listings deliberately, never a reason for a
+  fresh delivery to remove itself. `tests/test_publish_gate.py` fails on an
+  `os.remove` anywhere in `publish.py`.
+
+- **A deploy is a second publishing boundary, and `.vercelignore` is its only
+  gate.** `check_pii.py` enumerates what *git* would publish; it has no view of
+  what the Vercel CLI uploads. And when a `.vercelignore` exists it takes
+  precedence over `.gitignore`, so adding one turned off the implicit protection
+  that had been keeping `.env`, `scraper/leads.csv` and the raw dumps out of a
+  deploy — gitignored is not deploy-ignored. `.env`, `.env.*`, `scraper/`,
+  `outreach/`, `agents.txt` and `property_email.txt` are listed there explicitly.
+  Anything new holding a key or a lead is added to **both** files, or it ships to
+  a third party on the next `npx vercel --prod`. Vercel hosts no video: the
+  deployment is a rewrite rule and nothing else, which is why `out/`, `agents/`,
+  `clips/` and `*.mp4` are excluded too.
+
 - **`vertical()` takes two sources per family, and that is not redundancy.** The
   blurred band comes from the *unbranded* cut, the centered frame from the
   *branded* one. Both layers used to come from the branded cut, and because the
@@ -307,6 +348,8 @@ python3 check_pii.py                  # before any push: no lead, phone or email
 python3 status.py                     # what every listing is waiting on
 python3 tour.py                       # the wizard: listing, questions, three rungs
 python3 tour.py --check-photos        # optional: Claude reads the contact sheet
+python3 publish.py --dry-run          # from a listing: what would go public, and where
+python3 publish.py                    # upload this listing's sample_ cuts
 python3 -m unittest discover -s tests -t .   # the non-negotiables, ~0.5s, no ffmpeg
 ```
 
@@ -316,6 +359,14 @@ verdict `make_tour.py`'s gate would give — before any of it is worth building.
 never overwrites an existing `brand.json` or `config.json`. Point it at one dump
 file, or let it default to every `*.txt` in `scraper/dumps/`. See
 `scraper/README.md`.
+
+`publish.py` needs `SUPABASE_URL` and `SUPABASE_SERVICE_KEY`, from the environment
+or from a `.env` beside it (see `.env.example`; an exported variable always wins).
+Missing either is **exit 2**, not a quiet no-op. `tour.py` offers it as an optional
+rung 4 after a delivery build, defaulting to *no*, and stays silent when no key is
+configured. Both paths print the file list, the remote paths and the resulting
+`/preview/` URLs before anything moves, and write the confirmed links to
+`outreach/links.csv`.
 
 Or straight from a listing folder — everything `tour.py` does, it does by
 running this. Three rungs, each costing what the question is worth:

@@ -26,6 +26,9 @@ What it looks for:
   2. Every real agent name, phone and email currently in scraper/leads.csv.
      The lead list is the ground truth for what must not escape, so it is the
      dictionary the scan is run against -- not a guess at what a name looks like.
+  3. A Supabase service key. It grants writes to the public review bucket, so a
+     leaked one lets a stranger replace a client's video or publish an
+     unwatermarked cut. That belongs in the same net as a phone number.
 
 It fails CLOSED. Without git, outside a repository, or when git enumerates no
 publishable files at all, it exits 2 rather than printing a clean result -- because
@@ -51,6 +54,21 @@ EMAIL = re.compile(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b')
 
 # Text that legitimately looks like an email but is documentation, not a lead.
 ALLOW = re.compile(r'@example\.|@2x|noreply@|your@|name@|@[A-Za-z]+\.(?:png|jpg|mp4|py|md)\b')
+
+# Credentials. A service key is not PII, but it is the one secret this repo can
+# now hold, and the cost of publishing it is someone else's video on a client's
+# preview link. .env is gitignored; this catches it pasted anywhere else.
+SECRETS = [
+    # reason: the value must look like a KEY, not a placeholder. Bare "=\S" flagged
+    # SUPABASE_SERVICE_KEY=<the service_role key> in STEPS.md and =from_file in a
+    # test fixture, and a check that cries wolf on its own documentation is a check
+    # people learn to skip.
+    ("supabase service key", re.compile(
+        r'SUPABASE_SERVICE_KEY\s*=\s*["\']?[A-Za-z0-9._-]{20,}')),
+    ("supabase secret key", re.compile(r'\bsb_secret_[A-Za-z0-9_-]{10,}')),
+    ("jwt-shaped token", re.compile(
+        r'\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}')),
+]
 
 # Binary and asset extensions -- nothing to read, and huge.
 SKIP_EXT = (".png", ".jpg", ".jpeg", ".webp", ".mp4", ".mp3", ".ico", ".pdf",
@@ -160,6 +178,10 @@ def main():
             for n in names:
                 if n in line:
                     hits.append((rel, i, "value from leads.csv", mask(n)))
+            for label, pat in SECRETS:
+                m = pat.search(line)
+                if m:
+                    hits.append((rel, i, label, mask(m.group())))
 
     scope = "staged" if args.staged else "publishable"
     print(f"Scanned {len(files)} {scope} file(s) against "

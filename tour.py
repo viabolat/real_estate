@@ -58,11 +58,13 @@ import subprocess
 import sys
 
 import make_tour
+import publish
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 LISTINGS_ROOT = os.path.join(ROOT, "agents")
 ASSETS_ROOT = os.path.join(ROOT, "global_assets")
 SCRIPT = os.path.join(ROOT, "make_tour.py")
+PUBLISH = os.path.join(ROOT, "publish.py")
 
 # kind -> (subdirectory of global_assets/, accepted extensions)
 KINDS = {
@@ -598,6 +600,40 @@ def outputs(listing_dir):
     return sorted(f for f in os.listdir(d) if f.endswith(".mp4"))
 
 
+# ---- rung 4: publish ---------------------------------------------------------
+
+def publish_rung(listing_dir):
+    """Offer to put the sample_ cuts on the review bucket. Optional, and silent
+    when there is no key configured.
+
+    reason: publishing leaves the machine, so it is the one rung that defaults to
+    NO. The gate itself lives in publish.py -- this only offers it, and asks the
+    uninformed half of the question ("do you want to do this at all"). publish.py
+    prints the file list, the exact remote paths and the URLs, then asks the
+    informed half. Two prompts is the right number when the second one is the
+    first sight of what actually goes public.
+
+    An operator with no Supabase key is not nagged about it on every build.
+    """
+    publish.load_dotenv()
+    if not (os.environ.get("SUPABASE_URL")
+            and os.environ.get("SUPABASE_SERVICE_KEY")):
+        return
+    cuts = [f for f in outputs(listing_dir) if publish.publishable(f)[0]]
+    if not cuts:
+        return
+    rule("4. Publish")
+    say("These are the watermarked review cuts. tour_ cuts never publish from "
+        "here --\nthe deliverable goes out after sign-off, by hand.")
+    for f in cuts:
+        say(f"  out/{f}")
+    if not confirm("\nPublish the sample cuts?", False):
+        say("Nothing was uploaded. Run publish.py from the listing folder any "
+            "time.")
+        return
+    subprocess.run([sys.executable, "-u", PUBLISH, listing_dir])
+
+
 # ---- the optional pair of eyes ----------------------------------------------
 
 CHECK_PROMPT = (
@@ -794,6 +830,8 @@ def main():
         say("\n_lowres means these were upscaled past what the photos hold. "
             "Watchable for\na review, not sharp enough for the MLS. See IDEA.md 4 "
             "for how to source better.")
+
+    publish_rung(listing_dir)
 
 
 if __name__ == "__main__":

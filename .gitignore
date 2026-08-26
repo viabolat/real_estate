@@ -85,3 +85,5 @@ outreach/
 # ---------------------------------------------------------------------------
 spec.md
 .claude/settings.local.json
+.vercel
+.env

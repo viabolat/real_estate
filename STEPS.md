@@ -50,6 +50,23 @@ them, or re-scrape the listing.
 It writes nothing. It also re-checks every folder name against `leads.csv` and prints
 the `mv` for any that drifted.
 
+### One-time: the publish credentials
+
+`publish.py` needs two values, and refuses to run without them:
+
+```
+SUPABASE_URL=https://<project-ref>.supabase.co
+SUPABASE_SERVICE_KEY=<the service_role key, not the anon key>
+```
+
+Put them in a `.env` beside `publish.py` — copy `.env.example` — or export them.
+An exported variable always beats the file, so a shell you set deliberately is
+never overridden by a stale `.env`. `.env` is gitignored, and `check_pii.py` now
+also refuses a service key pasted anywhere git would publish.
+
+**Exit 2 means the credentials are missing**, and is a refusal, not a pass. A
+publish that quietly does nothing reads exactly like one that worked.
+
 ### Before pushing
 
 ```bash
@@ -381,6 +398,67 @@ python3 make_tour.py --720p --allow-lowres --keep-work
 Checking pacing, ordering, or branding placement before the real photos arrive.
 See §5 before sending the result to anyone.
 
+### Send the client a review link
+```bash
+cd agents/<brand>/<listing>
+python3 ../../../publish.py --dry-run   # what would go public, and the exact URLs
+python3 ../../../publish.py             # the same, then asks, then uploads
+```
+`tour.py` offers this as rung 4 straight after a delivery build. It defaults to
+**no** — it is the one rung that leaves the machine — and is skipped in silence
+when no credentials are configured.
+
+**Only the three `sample_` cuts upload.** The `tour_` cuts are listed as *held
+back* and there is no flag that lifts it: the bucket behind `/preview/` is public,
+and the whole point of the two families is that the unwatermarked deliverable does
+not go out before sign-off. Send that one by hand, afterwards.
+
+The upload prints every filename, its size, the exact remote path
+(`<brand>/<listing>/<file>` — never the bare filename, or two listings collide)
+and the resulting URL, then asks. `--dry-run` stops there. A `_lowres` cut asks a
+second time: a prospect judges the quality of your work by the file you send them.
+
+Confirmed links are appended to `outreach/links.csv`. "Confirmed" means the storage
+API lists the object at the right size — not that the public URL answered, because
+the CDN edge may lag the upload by a few seconds. **A `/preview/` link that 404s
+immediately after a publish is usually a cold edge, not a failed upload.** Wait and
+retry before re-uploading.
+
+The local files in `out/` are never touched. `out/` stays the copy of record.
+
+---
+
+### Deploy the preview rewrite
+
+A `/preview/` link only answers once the rewrite is deployed. Vercel hosts **no
+video** — `vercel.json` is a single rewrite rule pointing `/preview/:path*` at the
+public bucket, and the bytes come from Supabase.
+
+```bash
+python3 check_pii.py       # exit 0, or do not push
+git push
+npx vercel --prod
+```
+
+`:path*`, not `:slug` — a remote object is `<brand>/<listing>/<file>`, three path
+segments, and `:slug` matches one.
+
+**`.vercelignore` is a second publishing boundary, and `check_pii.py` cannot see
+it.** That check enumerates what *git* would publish; the Vercel CLI uploads the
+working directory against `.vercelignore`, and when that file exists it takes
+precedence over `.gitignore` — so a path being gitignored does **not** keep it out
+of a deploy. `.env`, `scraper/`, `outreach/`, `agents.txt` and
+`property_email.txt` are listed there explicitly for that reason. Anything new
+holding a key or a lead has to be added there as well as to `.gitignore`.
+
+Reading a 404 from `/preview/`:
+
+| What you see | What it means |
+|---|---|
+| Vercel's branded `404: NOT_FOUND` page | The request never reached the rewrite — wrong path, or the deploy predates `vercel.json` |
+| Supabase JSON `{"statusCode":"404"}` | The rewrite worked; the object is not in the bucket |
+| A 404 for a few seconds, then it works | Cold CDN edge. `publish.py` already confirmed the object at the origin |
+
 ---
 
 ## 3. Outputs
@@ -614,6 +692,12 @@ back end. See `IDEA.md` §2.
 | Card text renders as boxes or the wrong face | `font` names a family fontconfig cannot resolve | `fc-list \| grep -i <family>`. Unset `font` to fall back to the default family |
 | Card ground is dark when you wanted light | The ground is picked from the logo's contrast | Set `card_theme` to `light` or `dark` to force it |
 | Card carries a logo you wanted left off | A logo resolved, so the logo layout won | Set `card_style` to `type` |
+| `REFUSING TO PUBLISH: SUPABASE_... not set` | No credentials in the environment or `.env` | See §0a. Exit 2 is a refusal, not a pass |
+| A `tour_` cut shows as *held back* | Working as designed | The deliverable never auto-publishes. Send it by hand after sign-off |
+| A `/preview/` link 404s right after publishing | CDN edge has not replicated yet | Wait, then retry. The run already confirmed the object at the origin |
+| `UNVERIFIED: <file> is absent at the origin` | Upload reported success but the object is not there | Nothing was written to `links.csv`. Re-run the publish |
+| `Uploads finished but the listing check could not run` | Network dropped between upload and verification | Treat as unverified — re-run rather than sending the link |
+| `HTTP 401`/`403` on upload | Anon key instead of the `service_role` key | See §0a. The anon key cannot write to the bucket |
 
 **A failed build keeps its intermediates on purpose** so you can inspect them. Only a
 successful run cleans up — which also means a failed delivery build leaves the draft

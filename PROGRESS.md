@@ -545,6 +545,9 @@ automatically**. Design agreed on that basis; not built.
    as `NEEDS_LINK_<agent>.eml` — the blocker rides in the filename, exactly like
    `_lowres`.
 2. The link lands in `outreach/links.csv`; `--render` fills the drafts in.
+   **As of 2026-08-26 `publish.py` writes that file** — one row per confirmed
+   upload, `brand,listing,cut,url,uploaded_at`. Its `sample_`-only gate is the
+   hard-coded rule below, enforced in code rather than left to `emails.py`.
 3. Output is `.eml` files to drag into a mail client. **No SMTP credentials in the
    repo.** Sending, if ever, is a separate deliberate decision — never a flag someone
    trips.
@@ -641,6 +644,17 @@ once volume justifies it, and is not a reason to delay.
   Changing a parser this load-bearing on synthetic vectors alone is how a
   plausible-looking wrong address gets shipped. Apply and verify the moment a real
   dump is available.
+- **Should a preview link be short?** As of 2026-08-26 a published cut is reachable
+  at `/preview/<brand>/<listing>/<agent>_sample_branded` — the bucket path, straight
+  through the `vercel.json` rewrite. It is honest and collision-free, and it is long
+  and ugly in a cold email. The case for a short alias: the link is the thing a
+  prospect clicks, and a 90-character URL reads as machine-generated. The case
+  against, and why nothing was built: an alias is a second name for an object that
+  already has one, and this project has a standing rule that two naming authorities
+  drift. Any short form has to be *derived* from the bucket path and stored
+  somewhere, and that store is the drift. Revisit only if a real recipient reacts to
+  the link.
+
 - **One real end-to-end smoke build in `tests/`, behind a flag.** The suite proves the
   wiring and the filtergraph without invoking ffmpeg, which is what keeps it at 0.3s
   and dependency-free. Nothing currently proves the resulting command actually

@@ -200,6 +200,78 @@ superseded one is marked, not deleted, or the record loses the thing it is for.
 
 ---
 
+### 2026-08-26 — Publishing is a fourth rung, not the tail of a build
+
+**What:** New `publish.py` uploads a listing's `sample_` cuts to the public Supabase
+bucket behind `/preview/`, records confirmed links in `outreach/links.csv`, and
+refuses everything else. `tour.py` offers it as an optional rung 4, defaulting to no.
+`make_tour.py` is untouched.
+
+**Why:** The delivery half of the pipeline already existed — `vercel.json` rewrites
+`/preview/` at the bucket — and there was no way to get a link in front of a prospect.
+
+The starting proposal was a loop at the end of `make_tour.py`: `for f in
+os.listdir("out")`, `if f.endswith(".mp4")`, upload, then `os.remove`. Every clause
+of that is a boundary this project has already written a rule about. The glob
+publishes `<agent>_tour_branded.mp4` — the unwatermarked, paid deliverable — to a
+guessable public URL at build time, before sign-off, which is precisely what the
+`tour_`/`sample_` split exists to prevent, and PROGRESS.md §5.1 had already settled
+the identical question for outreach ("it is a one-word difference in a filename").
+So the gate is `publishable()`, a pure function with one argument and no override,
+guarded by a test that fails if it ever grows a second one.
+
+**Alternatives rejected:**
+
+*Put it in `make_tour.py`.* Three independent reasons not to, any one sufficient:
+that file is stdlib + ffmpeg by contract and the `supabase` library is a dependency
+tree; it holds `.build.lock` through a six-minute encode, where a network timeout
+would fail an otherwise good build; and it is deliberately blind to
+`agents/<brand>/<listing>`, which is exactly the structure a collision-free remote
+path needs. Encoding and publishing are different failure domains and belong in
+different files.
+
+*`pip install supabase`.* Storage is a plain REST endpoint; `urllib` reaches it in
+about forty lines. Zero third-party dependencies is a property worth more than those
+lines, and it is stated in two docstrings and `CLAUDE.md`.
+
+*The bare filename as the remote path,* as proposed. Two listings by one agent both
+produce `sean_obrien_sample_branded.mp4`, and a listing with a blank `agent_name`
+produces a bare `sample_branded.mp4`; with `x-upsert: true` the second silently
+overwrites the first. This is the collision `output_prefix` already solved locally,
+and it has to be solved again at the bucket. Hence `<brand>/<listing>/<file>`, and a
+refusal when the folder is not under `agents/`.
+
+*`HEAD` the public URL to verify.* Caught in review before it shipped. Public objects
+are served through a CDN, so a request issued seconds after an upload can hit an edge
+that has not replicated and report a correct upload as failed — an intermittent false
+alarm on the one step whose job is to be trustworthy. Verification is one
+authenticated `object/list` call against the origin, comparing sizes. The public URL
+is still checked once by hand, after deploy, to prove the `:path*` rewrite.
+
+*Read credentials from `os.environ` only.* Also caught in review. The plan gitignored
+`.env` and documented putting the key there, while the code read only the
+environment — so an operator who followed the docs would get exit 2. The stdlib has
+no `.env` parser, so `publish.py` carries a fifteen-line one. It uses
+`os.environ.setdefault`, so a variable exported on purpose always beats a stale file.
+
+*`os.remove(local_path)` after upload.* Not implemented and not behind a prompt. It
+makes a public bucket the only copy of a deliverable and breaks
+`config.json`-as-a-record-of-what-shipped. Storage pressure is a reason to prune old
+listings deliberately, never a reason for a fresh delivery to delete itself. A test
+fails on `os.remove` anywhere in the file.
+
+**Accepted risks:** Preview URLs are long — `/preview/<brand>/<listing>/<file>` — and
+`vercel.json` needed `:slug` widened to `:path*` because `:slug` matches a single
+segment. A short alias would read better in a cold email, but it is a second naming
+authority over the same object, which is the thing the scrape-naming rule exists to
+prevent; it is parked in PROGRESS.md §6 rather than invented here. The bucket stays
+public, which is safe only for as long as the `sample_`-only gate holds — that is why
+the gate is the tested part. And `x-upsert: true` means re-publishing a listing
+replaces the object a client may already be looking at; that is the intended
+behaviour for a corrected cut, but there is no versioning behind it.
+
+---
+
 ### [YYYY-MM-DD] — [Decision Title]
 <!-- Template. Copy this stanza above for the next entry; leave this one empty. -->
 **What:**
