@@ -11,7 +11,7 @@ around that escaping.
 
 1. Open a Zillow listing page, select all, copy, and paste the full page
    text into `paste.txt` (overwriting whatever was there before).
-2. Run `zillow_run.py paste.txt` to record the listing/agent info *and*
+2. Run `run.py paste.txt` to record the listing/agent info *and*
    save its photos in one command. The photos land in
    `agents/<broker_name>/<address>/photos/`, ready for `make_tour.py`.
 3. Repeat from step 1 for the next listing.
@@ -22,18 +22,18 @@ of each field, so pasting two listings into the same file would silently
 mix data from both (e.g. listing #1's address with photos from both
 listings). Overwrite `paste.txt` fully before each run.
 
-## `zillow_run.py`
+## `run.py`
 
-Convenience wrapper — runs `zillow_lead.py` then `zillow_photos.py` against
+Convenience wrapper — runs `lead.py` then `photos.py` against
 the same dump as two subprocesses. No shared code, no coupling; it's just a
 shortcut for the two commands so you don't have to run them separately.
 
 Takes one dump, or a whole folder of them:
 
 ```
-python3 zillow_run.py                 # every *.txt in dumps/  (the default)
-python3 zillow_run.py dumps/          # same thing, said explicitly
-python3 zillow_run.py paste.txt       # just the one
+python3 run.py                 # every *.txt in dumps/  (the default)
+python3 run.py dumps/          # same thing, said explicitly
+python3 run.py paste.txt       # just the one
 ```
 
 - **One listing per file, always.** The parsers are first-match regexes over
@@ -54,16 +54,16 @@ python3 zillow_run.py paste.txt       # just the one
 - For the roll-up across every listing afterwards, run `python3 status.py` from
   the project root.
 
-Needs the `--full` or `--out-dir` flags? Run `zillow_lead.py` /
-`zillow_photos.py` directly instead — the wrapper doesn't expose them.
+Needs the `--full` or `--out-dir` flags? Run `lead.py` /
+`photos.py` directly instead — the wrapper doesn't expose them.
 
-## `zillow_lead.py`
+## `lead.py`
 
 Extracts the property summary and listing agent contact info.
 
 ```
-python3 zillow_lead.py paste.txt
-python3 zillow_lead.py paste.txt --full     # also writes beautified.txt
+python3 lead.py paste.txt
+python3 lead.py paste.txt --full     # also writes beautified.txt
 ```
 
 - Prints a report to the terminal: address/price/beds/baths/status, then
@@ -89,7 +89,7 @@ python3 zillow_lead.py paste.txt --full     # also writes beautified.txt
   and because duplicate detection needs a `zpid` it cannot recognise that
   row as a duplicate either — so every rerun appends another. It used to
   exit 0, which meant a batch run reported it as processed cleanly while
-  poisoning `leads.csv`. `zillow_photos.py` refuses the same dump for the
+  poisoning `leads.csv`. `photos.py` refuses the same dump for the
   same reason: with no photo URLs and no address it would create
   `agents/unknown_brokerage/listing/` complete with a `brand.json`, a
   folder the naming authority can never match.
@@ -105,13 +105,13 @@ against the real values in `leads.csv` and exits non-zero on a hit.
 Note that `leads.csv` therefore does **not** travel with a clone, and it is the
 naming authority for `agents/<broker>/<address>`. See `PROGRESS.md` §1.
 
-## `zillow_photos.py`
+## `photos.py`
 
 Downloads every photo for the listing at full resolution.
 
 ```
-python3 zillow_photos.py paste.txt
-python3 zillow_photos.py paste.txt --out-dir some/other/folder
+python3 photos.py paste.txt
+python3 photos.py paste.txt --out-dir some/other/folder
 ```
 
 - Reads the dump's `photoCount` field and every `uncropped_scaled_within_*`
@@ -119,7 +119,7 @@ python3 zillow_photos.py paste.txt --out-dir some/other/folder
   found), and downloads them in gallery order.
 - Saves to `agents/<broker_name>/<address>/photos/01.jpg`, `02.jpg`, ... by
   default — a sibling of `scraper/`, not a subfolder of it. Both folder names
-  are slugified from the same dump fields `zillow_lead.py` writes to the
+  are slugified from the same dump fields `lead.py` writes to the
   `broker_name` and `address` columns, so the folder and the CSV row always
   agree. That is exactly the working directory `make_tour.py` expects, so a
   scrape drops in ready to build with no moving or renaming.
@@ -180,10 +180,10 @@ python3 zillow_photos.py paste.txt --out-dir some/other/folder
 | Path | What it is |
 |---|---|
 | `paste.txt` | Input — the raw text dump of one Zillow listing page. Overwrite before each run. |
-| `zillow_run.py` | Wrapper — runs `zillow_lead.py` then `zillow_photos.py` in one command. |
-| `zillow_lead.py` | Extracts property + agent info from `paste.txt`. |
-| `zillow_photos.py` | Downloads all listing photos from `paste.txt`. |
-| `leads.csv` | Output — one row per listing ever processed by `zillow_lead.py`. Canonical data store. |
+| `run.py` | Wrapper — runs `lead.py` then `photos.py` in one command. |
+| `lead.py` | Extracts property + agent info from `paste.txt`. |
+| `photos.py` | Downloads all listing photos from `paste.txt`. |
+| `leads.csv` | Output — one row per listing ever processed by `lead.py`. Canonical data store. |
 | `leads.html` | Output — `leads.csv` rendered as a browser-viewable table. Regenerated every run; open it directly in a browser. |
 | `../agents/<broker>/<address>/photos/` | Output — numbered full-resolution `.jpg`s in gallery order, written into the build tree rather than under `scraper/`. |
 | `../agents/<broker>/brand.json` | Output — per-brokerage stub, created once. `logo` and `music` blank for you to fill in. Never overwritten. |

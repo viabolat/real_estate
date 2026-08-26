@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-zillow_lead.py
+lead.py
 
 Parses a raw Zillow HDP page-text dump (the __NEXT_DATA__ blob you copy/paste,
 which comes through with backslash-escaped JSON quotes, e.g.
@@ -12,8 +12,8 @@ from the listing agent on Premier Agent ad slots). Also appends a row to
 leads.csv and regenerates leads.html, a browser-viewable table of all leads.
 
 Usage:
-    python3 zillow_lead.py paste.txt
-    python3 zillow_lead.py paste.txt --full     # also writes beautified.txt
+    python3 lead.py paste.txt
+    python3 lead.py paste.txt --full     # also writes beautified.txt
 """
 
 import re

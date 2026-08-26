@@ -73,7 +73,7 @@ class TestUnimportedDumps(unittest.TestCase):
         self.assertEqual(len(self.tour.unimported_dumps()), 1)
 
     def test_a_dump_that_is_not_a_listing_is_not_offered(self):
-        """Mirrors zillow_photos' own refusal -- no urls and no address."""
+        """Mirrors photos.py's own refusal -- no urls and no address."""
         with open(os.path.join(self.dumps, "junk.txt"), "w") as f:
             f.write("this is just some text with no listing in it at all\n")
         self.assertEqual([p[0] for p in self.tour.unimported_dumps()],
@@ -90,7 +90,7 @@ class TestUnimportedDumps(unittest.TestCase):
         code and drops every comment.
         """
         for name in ("tour.py", "status.py", os.path.join("scraper",
-                                                          "zillow_run.py")):
+                                                          "run.py")):
             with open(os.path.join(helpers.REPO, name)) as f:
                 tree = ast.parse(f.read())
             for node in ast.walk(tree):

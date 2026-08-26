@@ -53,7 +53,7 @@ tests/                        stdlib unittest guards for the non-negotiables bel
 
 `<brand>` and `<listing>` are **not named by hand.** Both are slugified straight from
 the scrape — `broker_name` and `address` in `scraper/leads.csv` — by
-`scraper/zillow_photos.py`, so the folder and the lead row can never disagree. The
+`scraper/photos.py`, so the folder and the lead row can never disagree. The
 slug drops apostrophes rather than turning them into separators, so
 `Gibson Sotheby's International Realty` is `gibson_sothebys_international_realty`,
 not `gibson_sotheby_s_...`. `status.py` re-checks every folder against `leads.csv` on
@@ -385,7 +385,7 @@ measurement, not assumption.
   both.
 
 - **The two slug functions agree on apostrophes, and are still two functions.**
-  `scraper/zillow_photos.slugify` names the folders; `make_tour._slug` names the
+  `scraper/photos.slugify` names the folders; `make_tour._slug` names the
   files inside them. Both drop apostrophes rather than turning them into
   separators, or one agent's name gets two spellings —
   `sean_obrien/sean_o_brien_tour_branded.mp4`. They stay separate on purpose:
@@ -440,7 +440,7 @@ Everything below still runs standalone, unchanged, and is what the home screen
 runs for you:
 
 ```bash
-python3 scraper/zillow_run.py         # every dump in scraper/dumps/ -> leads + listings
+python3 scraper/run.py                # every dump in scraper/dumps/ -> leads + listings
 python3 status.py                     # what every listing is waiting on
 python3 check_pii.py                  # what the pre-push hook runs; exit 0 = safe
 python3 tour.py --check-photos        # optional: Claude reads the contact sheet
@@ -449,7 +449,7 @@ python3 publish.py                    # upload this listing's sample_ cuts
 python3 -m unittest discover -s tests -t .   # the non-negotiables, ~0.6s, no ffmpeg
 ```
 
-`zillow_run.py` names the folders, downloads `photos/`, writes `brand.json` and
+`run.py` names the folders, downloads `photos/`, writes `brand.json` and
 `config.json` from the dump, pins the watermark path, and prints the resolution
 verdict `make_tour.py`'s gate would give — before any of it is worth building. It
 never overwrites an existing `brand.json` or `config.json`. Point it at one dump

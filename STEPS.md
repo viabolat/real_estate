@@ -57,8 +57,8 @@ listing, before writing anything.
 Menu item **2** does this for you. The command behind it:
 
 ```bash
-python3 scraper/zillow_run.py            # every *.txt in scraper/dumps/
-python3 scraper/zillow_run.py one.txt    # or just the one
+python3 scraper/run.py            # every *.txt in scraper/dumps/
+python3 scraper/run.py one.txt    # or just the one
 ```
 
 Paste one listing per file into `scraper/dumps/`. **Never two in one file** — the

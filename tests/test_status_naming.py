@@ -36,18 +36,18 @@ class TestNextActionOnAConfiglessFolder(unittest.TestCase):
             return STATUS.next_action(d, {}, n, 384, best, scraped=scraped)
 
     def test_a_scraped_folder_is_sent_to_the_scraper(self):
-        self.assertIn("zillow_photos.py", self.action(scraped=True))
+        self.assertIn("photos.py", self.action(scraped=True))
 
     def test_a_folder_with_no_lead_row_is_not_sent_to_the_scraper(self):
         """There is no dump to rerun -- saying so is the whole fix."""
         action = self.action(scraped=False)
-        self.assertNotIn("zillow_photos.py", action)
+        self.assertNotIn("photos.py", action)
         self.assertIn("leads.csv", action)
 
     def test_the_default_stays_the_scraper_path(self):
         """An older caller that passes no flag behaves exactly as before."""
         with tempfile.TemporaryDirectory() as d:
-            self.assertIn("zillow_photos.py",
+            self.assertIn("photos.py",
                           STATUS.next_action(d, {}, 17, 384, 1440))
 
     def test_photo_checks_still_win_over_the_naming_verdict(self):

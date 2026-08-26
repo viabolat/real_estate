@@ -7,6 +7,32 @@ Do not defer updates to end-of-session.
 
 ## Entries
 
+### 2026-08-26 — The scripts lost the vendor prefix; the facts kept it
+**What:** `scraper/zillow_lead.py`, `zillow_photos.py` and `zillow_run.py` are now
+`lead.py`, `photos.py` and `run.py`, with all 112 references updated across code,
+tests and docs. The private import aliases went too — `status._zp` is `status._photos`,
+`publish.py`'s `_zp_publish` is `_photos_publish`.
+
+**Why the prefix went:** it named a vendor on a file whose job is not vendor-specific.
+`scraper/lead.py` extracts a lead from a page dump; the folder it lives in already says
+what layer it belongs to, and `scraper/zillow_photos.py` said "zillow" twice for a
+reader who is already inside `scraper/`.
+
+**Why 35 mentions of Zillow stayed:** they are statements about where the data actually
+comes from, not names of things in this repo — `photos.zillowstatic.com/fp/<hash>` is
+the live CDN host the regex matches, `zpid` is the field the parser keys on and the
+absence of which is how a non-listing dump is refused, and IDEA.md §4's ~1440px ceiling
+is a measured property of *Zillow's* CDN, not of scrapers in general. Renaming those
+would have made correct documentation wrong, which is a worse outcome than a vendor
+name in prose. The rule that came out of it: **the vendor may appear in a fact, never
+in a filename.**
+
+**What this cost:** one broken cross-module reference — `tour.py` called
+`status._zp.target_for()`, and renaming the alias in `status.py` and `publish.py`
+without grepping the tree left it dangling. Five tests caught it immediately, which is
+the argument for the suite existing. A private-looking `_name` is not private if
+another module reads it.
+
 ### 2026-08-26 — The link goes last, and the email drafts itself
 **What:** `outreach/links.csv` is now `uploaded_at,brand,listing,cut,url` with `\n`
 endings, and `record_links()` migrates an older file in place rather than appending a
@@ -42,7 +68,7 @@ bucket, restated one layer up where a human copies a link.
 
 ### 2026-08-24 — One apostrophe rule, two slug functions
 **What:** `make_tour._slug` now strips `'` and `’` before separating, matching
-`scraper/zillow_photos.slugify`. The two functions were **not** merged, and their
+`scraper/photos.slugify`. The two functions were **not** merged, and their
 empty-case behaviour still differs on purpose.
 
 **Why:** The scrape is the naming authority — `agents/<slug(broker_name)>/<slug(address)>`.
@@ -104,7 +130,7 @@ regression it names before being kept.
 **What:** `status.py` now classifies every listing folder into three buckets rather
 than two — agrees with the scrape, drifted off it, or *unverifiable*. `next_action`
 takes a `scraped` flag and stops sending config-less legacy folders to
-`zillow_photos.py`.
+`photos.py`.
 
 **Why:** The drift check matched on `agent_phone` read out of `config.json`. A folder
 with no `config.json` produced no match, and the code read "no match" as "no problem".
@@ -112,7 +138,7 @@ But *having no config.json is the strongest available signal that a folder was n
 scaffolded by the scraper* — the likeliest hand-named folder there is. The check
 skipped exactly the case it was written to catch, which is how `brewester/9_w_cedar`
 and `corcoran/46_beacon_5` sat through the scrape-naming commit untouched. Separately,
-the advice it gave them — "rerun `zillow_photos.py`" — pointed at a script that
+the advice it gave them — "rerun `photos.py`" — pointed at a script that
 scaffolds from a dump keyed to a lead row, and neither folder has one.
 
 **Alternatives rejected:**
@@ -160,7 +186,7 @@ contract in view:
   exists to make impossible. Branding degrades; the watermark refuses. The audit had
   no way to know that, which is the point — a generic remediation cannot see a
   project's boundaries.
-- *Fixing the `zillow_lead` comma truncation now.* Rejected on evidence, not on
+- *Fixing the `lead.py` comma truncation now.* Rejected on evidence, not on
   disagreement: `scraper/dumps/` holds only 0-byte files, so the parser that names
   every folder cannot be regression-tested against a single real input. Recorded in
   §6 with the exact patch, to apply when a dump exists.

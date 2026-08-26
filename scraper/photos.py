@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-zillow_photos.py
+photos.py
 
 Saves every listing photo straight out of a raw Zillow HDP page-text dump
-(the same __NEXT_DATA__ blob paste.txt already holds for zillow_lead.py).
+(the same __NEXT_DATA__ blob paste.txt already holds for lead.py).
 The dump already embeds every photo's full-resolution URL and a photoCount
 field, so there's no need to open a browser, log in, or click through the
 gallery -- just parse the text and download.
@@ -14,7 +14,7 @@ Photos land in the build tree, not beside this script:
 
 which is exactly the layout make_tour.py expects as its working directory, so a
 scrape drops in ready to build with no moving or renaming. Both folder names are
-slugified straight from the same dump fields zillow_lead.py writes to the
+slugified straight from the same dump fields lead.py writes to the
 broker_name and address columns, so the folder and the CSV row always agree -- the
 scrape is the naming authority and nothing renames these by hand. status.py
 re-checks it on every run.
@@ -27,8 +27,8 @@ pinned watermark path). Then prints the resolution verdict make_tour.py's gate
 would give, while the photos are already on disk and it costs nothing.
 
 Usage:
-    python3 zillow_photos.py paste.txt
-    python3 zillow_photos.py paste.txt --out-dir some/other/folder
+    python3 photos.py paste.txt
+    python3 photos.py paste.txt --out-dir some/other/folder
 """
 
 import re
@@ -48,10 +48,10 @@ PHOTO_PATTERN = re.compile(
 )
 
 
-# reason: field() was a byte-identical second copy of zillow_lead's. Two copies of a
+# reason: field() was a byte-identical second copy of lead.py's. Two copies of a
 # regex that has already been tightened twice (the (?![A-Za-z0-9_]) guard) is a drift
 # hazard, and both scripts run from the same folder off the same dump. One copy.
-from zillow_lead import field, extract_zip_city_state
+from lead import field, extract_zip_city_state
 
 
 def extract_photo_urls(text: str) -> list:
@@ -273,7 +273,7 @@ def main():
     # reason: the repo root is this script's parent -- agents/ is a sibling of
     # scraper/, not a child of it.
     repo_root = os.path.dirname(script_dir)
-    # reason: same guard as zillow_lead.py, and the same one tour.py's home
+    # reason: same guard as lead.py, and the same one tour.py's home
     # screen applies -- target_for() owns both the refusal and the folder names
     # so the two callers cannot disagree. Refuse before making any directory.
     target = target_for(text)

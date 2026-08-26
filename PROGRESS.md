@@ -61,7 +61,7 @@ Sorted by what they actually are, only one is a decision:
 | `npx vercel --prod` | one-time setup, not per listing | out of the recurring runbook |
 | `publish.py` | already rung 4 | also home-screen item 3 |
 | `status.py` | "where am I" | **is** the home screen |
-| `zillow_run.py` | a real action, but a *detectable* one | offered, not remembered |
+| `run.py` | a real action, but a *detectable* one | offered, not remembered |
 | `unittest` | developer-only | out of the operator runbook |
 | `make_tour.py` | the engine | documented escape hatch |
 | `tour.py` | the front door | stays |
@@ -138,7 +138,7 @@ screen calls it instead of its own copy -- that copy had already drifted, silent
 dropping the *"N brokerage(s) need a logo or music set once"* line, so the home
 screen was telling the operator to add a logo per listing and never saying it is
 set once per brand, which is the whole point of the Brand settings action beneath
-it. `scraper/zillow_photos.py` grew `target_for(text)`, the one function that turns
+it. `scraper/photos.py` grew `target_for(text)`, the one function that turns
 a dump into the folder it scaffolds *or refuses it*; `main()` and `tour.py`'s
 pending-dump scan both call it, so the folder-naming decision has one owner rather
 than two copies that could disagree about an already-imported listing. The two
@@ -147,7 +147,7 @@ screen no longer re-walks every photo, re-parses every dump and re-runs
 `check_pii.py` to reprint four lines after a mistyped menu key -- it recomputes
 after any action that writes, which is all of them.
 
-**One real bug surfaced by testing that refactor.** `scraper/zillow_photos.py` has
+**One real bug surfaced by testing that refactor.** `scraper/photos.py` has
 called `sys.exit(2)` on a non-listing dump since the refusal was added, and never
 imported `sys` -- so that path raised `NameError` and exited **1** with a traceback
 where the contract says 2. It wrote nothing and exited non-zero either way, which
@@ -289,7 +289,7 @@ runs `make_tour._slug` — already imported, so no third slug function — and s
 loud that a hand-named folder reads as unverifiable until it is scraped.
 
 **The resolution gates had nothing holding them together.** `GATE_1080P` / `GATE_720P`
-are hardcoded in `status.py` and `scraper/zillow_photos.py`, mirroring
+are hardcoded in `status.py` and `scraper/photos.py`, mirroring
 `int(OUT_W * ZOOM_MAX)` in `make_tour.py`. Importing across would make the scraper
 depend on the builder, which is rejected for the same reason the two sluggers stay
 separate — so the redundancy stays and a test holds it together instead.
@@ -332,7 +332,7 @@ green: injecting a `photo_order` config key broke three tests, and pointing
 MLS"*.
 
 **The two slug functions now agree on apostrophes.** Writing the tests surfaced a
-divergence: `scraper/zillow_photos.slugify` strips apostrophes before separating
+divergence: `scraper/photos.slugify` strips apostrophes before separating
 (it names the folders), while `make_tour._slug` mapped every non-alphanumeric to a
 separator (it names the files inside them). An agent called Sean O'Brien would
 have had `sean_obrien/` holding `sean_o_brien_tour_branded.mp4` — one name, two
@@ -352,7 +352,7 @@ available signal that a folder was never scaffolded by the scraper, i.e. the
 likeliest hand-named folder there is. The check skipped precisely the case it was
 built to catch, which is how `brewester/9_w_cedar` sat through the scrape-naming
 commit. It now reports those as *unverifiable*, and `next_action` stops telling
-them to rerun `zillow_photos.py` — there is no dump behind them to rerun, so the
+them to rerun `photos.py` — there is no dump behind them to rerun, so the
 advice was a dead end. The phone match itself is unchanged and still runs on every
 folder, including ones whose name matches the scrape: a folder named for one lead
 row while its config carries another agent's phone is worse drift, not less.
@@ -373,12 +373,12 @@ pinned by tests so neither gets "tidied up".
 
 ### 2026-08-21 — Batch scraping, and hardening the repo for a private remote
 
-**Batch scraping.** `zillow_run.py` now takes a single dump *or* a folder, defaulting
+**Batch scraping.** `run.py` now takes a single dump *or* a folder, defaulting
 to `scraper/dumps/`:
 
 ```bash
-python3 scraper/zillow_run.py            # every *.txt in scraper/dumps/
-python3 scraper/zillow_run.py one.txt    # unchanged single-dump path
+python3 scraper/run.py            # every *.txt in scraper/dumps/
+python3 scraper/run.py one.txt    # unchanged single-dump path
 ```
 
 *Why this shape:* one listing per file, never concatenated. The parsers are
@@ -431,7 +431,7 @@ committed. No `leads.csv`, no dumps, no `agents/`. **No history rewrite is neede
   CI log. Verified by planting a phone number and an email in `STEPS.md`: it fired,
   then passed once removed.
 - Two real agent names had leaked into text that would be pushed — one in `PROGRESS.md`
-  prose, one in the `zillow_lead.py` module docstring's example. Both replaced.
+  prose, one in the `lead.py` module docstring's example. Both replaced.
 
 *Why bother at all on a private repo:* a private repo is an access-control boundary,
 not a redaction one. It gets shared with a collaborator, cloned onto a second machine,
@@ -443,17 +443,17 @@ The pipeline used to start at a listing folder someone made by hand. It now star
 a copied Zillow page dump.
 
 ```bash
-python3 scraper/zillow_run.py scraper/paste.txt   # lead row + a scaffolded, buildable listing
+python3 scraper/run.py scraper/paste.txt   # lead row + a scaffolded, buildable listing
 python3 status.py                                 # every listing and its one next action
 ```
 
-**Photos land in the build tree.** `scraper/zillow_photos.py` writes to
+**Photos land in the build tree.** `scraper/photos.py` writes to
 `agents/<slug(broker_name)>/<slug(address)>/photos/`, a sibling of `scraper/`, not a
 subfolder. That is exactly the working directory `make_tour.py` expects, so a scrape
 drops in ready to build with no moving or renaming.
 
 **The scrape is the naming authority.** Both folder names are slugified from the same
-dump fields `zillow_lead.py` writes to the `broker_name` and `address` columns, so a
+dump fields `lead.py` writes to the `broker_name` and `address` columns, so a
 folder and its lead row cannot disagree. The slug drops apostrophes rather than
 turning them into separators (`gibson_sothebys_international_realty`, not
 `gibson_sotheby_s_...`).
@@ -548,13 +548,13 @@ listing. Fine at one brokerage; the lead list covers five.
 - `status.py` reported `brewester/9_w_cedar` as "no photos — scrape it" when it holds
   17. It only counted `.jpg`; Zillow serves `.webp`. Now mirrors `make_tour.py`'s
   `PHOTO_EXTS` with an ffprobe fallback for non-JPEG.
-- `zillow_photos.py` had a byte-identical second copy of `zillow_lead.field()`. Two
+- `photos.py` had a byte-identical second copy of `lead.field()`. Two
   copies of a regex that has already been tightened twice is a drift hazard; it now
   imports the one copy.
 
 **Docs updated in the same pass** (`CLAUDE.md` non-negotiable): `CLAUDE.md` layout +
 two new non-negotiables + Running it, `STEPS.md` §0a, `scraper/README.md`, and the
-module docstrings in `zillow_photos.py` and `status.py`.
+module docstrings in `photos.py` and `status.py`.
 
 ### Earlier — see `IDEA.md` §8.2
 
@@ -576,7 +576,7 @@ snapshot: `boston_advanced_realty/335_w_2nd_st_unit_8` -- the "photos too small,
 not build" row -- is no longer on disk. Its **lead row is still in `leads.csv`** and
 its brand folder still exists, so `status.py` reports
 `boston_advanced_realty/- ... no listings yet`. Deleting the folder was not recorded
-here at the time; re-running `zillow_run.py` on its dump would scaffold it again, and
+here at the time; re-running `run.py` on its dump would scaffold it again, and
 the photos would still be too small.
 
 | Listing | Photos | `config.json` | Cuts in `out/` |
@@ -614,7 +614,7 @@ a `draft.mp4`. No `work_draft.mp4` or `clips_draft/` remains.
 scripts refuse a dump with no `zpid` and no address, so `tour.py`'s home screen
 correctly reports **0** pending imports rather than offering an import that can only
 fail. Nothing on this machine exercises the dump parsers -- which is also why the
-`zillow_lead.field()` comma bug in section 6 stays unfixed.
+`lead.field()` comma bug in section 6 stays unfixed.
 
 `IDEA.md` section 6 "CURRENT STATE" is a **historical snapshot** of one folder from
 2026-08-19, kept for the sourcing argument it supports. This table supersedes it.
@@ -780,7 +780,7 @@ once volume justifies it, and is not a reason to delay.
   or keep them as the record of a pre-`out/` build — not decided. Note the new
   delivery-clears-draft sweep does **not** reach these: it only ever runs at the end
   of a successful build, and neither of these listings has had one.
-- **`zillow_lead.field()` truncates any value containing a comma.** Confirmed by
+- **`lead.field()` truncates any value containing a comma.** Confirmed by
   running it: the regex value class is `[^\\",]*`, so
   `\"streetAddress\":\"123 Main St, Apt A\"` parses as `123 Main St`, and
   `\"brokerName\":\"Compass, Inc.\"` as `Compass`. Both feed `leads.csv`, which is

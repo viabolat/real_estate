@@ -24,7 +24,7 @@ _counter = itertools.count()
 def scraper_module(name):
     """Import a scraper/ module by name, with scraper/ on the path.
 
-    reason: zillow_photos imports zillow_lead as a flat sibling, so the folder
+    reason: photos.py imports lead.py as a flat sibling, so the folder
     itself has to be importable -- there is no package.
     """
     import importlib

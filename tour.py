@@ -14,7 +14,7 @@ a short question set — where the photos are, what the card says, how long it r
 
 That rule was applied to the build and then not applied to the pipeline around
 it, which grew back to eight commands an operator had to keep straight —
-zillow_run, status, tour, publish, check_pii, make_tour, vercel, unittest — with
+run.py, status, tour, publish, check_pii, make_tour, vercel, unittest — with
 nothing saying which was a decision and which was a chore. Sorted by what they
 actually are, only one is a decision:
 
@@ -22,7 +22,7 @@ actually are, only one is a decision:
   npx vercel    is one-time setup, not per listing             -> out of the loop
   publish.py    was already rung 4 here                        -> also menu item 3
   status.py     is "where am I"                                -> the home screen
-  zillow_run.py is a real action, but a DETECTABLE one         -> offered, not
+  run.py        is a real action, but a DETECTABLE one         -> offered, not
                                                                   remembered
   make_tour.py  is the engine                                  -> escape hatch
   unittest      is developer-only                              -> out of the loop
@@ -759,20 +759,20 @@ def check_photos(listing_dir):
 # ---- the home screen ---------------------------------------------------------
 #
 # reason: the pipeline worked, but its SURFACE grew back into the thing tour.py
-# was built to kill. An operator had eight commands to remember -- zillow_run,
+# was built to kill. An operator had eight commands to remember -- run.py,
 # status, tour, publish, check_pii, make_tour, vercel, unittest -- and nothing
 # told them which was a decision and which was a chore. Sorted by what they
 # actually are, only one is a decision. check_pii is a gate, so it became a
 # pre-push hook. vercel is one-time setup, so it left the recurring runbook.
 # publish was already a rung. status is "where am I", so it is the screen this
-# opens on. zillow_run is a real action, but a DETECTABLE one. What is left is
+# opens on. run.py is a real action, but a DETECTABLE one. What is left is
 # one command, a roll-up and four choices. Nothing behind this screen changed:
 # every rung, prompt, default and refusal in the build flow is what it was, and
 # every script still runs standalone from the CLI.
 
 CHECK_PII = os.path.join(ROOT, "check_pii.py")
 DUMPS = os.path.join(ROOT, "scraper", "dumps")
-RUN_SCRAPER = os.path.join(ROOT, "scraper", "zillow_run.py")
+RUN_SCRAPER = os.path.join(ROOT, "scraper", "run.py")
 
 _STATUS = ()        # () = not tried yet; (module, None) or (None, why) after
 
@@ -782,7 +782,7 @@ def _sibling(name, relpath):
     path = os.path.join(ROOT, relpath)
     spec = importlib.util.spec_from_file_location(name, path)
     mod = importlib.util.module_from_spec(spec)
-    # reason: scraper/zillow_photos.py imports zillow_lead as a flat sibling --
+    # reason: scraper/photos.py imports lead as a flat sibling --
     # there is no package -- so its own folder has to be importable while it
     # executes. Same two lines status.py uses for the same reason.
     sys.path.insert(0, os.path.dirname(path))
@@ -822,7 +822,7 @@ def unimported_dumps():
     not, and that answer cannot go stale. It also means deleting a listing
     folder correctly re-offers its dump, which a marker file would not.
 
-    Names are not derived here at all: zillow_photos.target_for() is the one
+    Names are not derived here at all: photos.py's target_for() is the one
     function that turns a dump into the folder it scaffolds, and the scraper
     calls the same one. A second copy of that decision would be a second naming
     authority, and a near-miss would report an imported listing as pending
@@ -841,11 +841,11 @@ def unimported_dumps():
                 text = f.read()
         except OSError:
             continue
-        # reason: None IS zillow_photos' own refusal -- a dump with neither
+        # reason: None IS photos.py's own refusal -- a dump with neither
         # photo URLs nor an address is not a listing dump, both scraper scripts
         # exit non-zero on it, and counting it here would offer an import that
         # can only fail.
-        target = status._zp.target_for(text)
+        target = status._photos.target_for(text)
         if target is None:
             continue
         brand, listing = target
@@ -947,7 +947,7 @@ def roll_up(status):
 
 
 def import_dumps():
-    """Rung zero: turn the pending dumps into listings. zillow_run.py, as-is."""
+    """Rung zero: turn the pending dumps into listings. run.py, as-is."""
     pending = unimported_dumps()
     if not pending:
         say("\n  Nothing pending. Save a Zillow page dump as a .txt in "
@@ -1097,7 +1097,7 @@ def home():
             rule("Tour builder")
             if status is None:
                 say(f"  The listing roll-up is unavailable ({why}).")
-                say("  status.py loads scraper/zillow_photos.py at import, and "
+                say("  status.py loads scraper/photos.py at import, and "
                     "that is what failed.\n  Building is unaffected -- pick 1 "
                     "and the listing picker works as always.")
             else:
@@ -1191,7 +1191,7 @@ def choose_listing():
         # which is a real state with a real consequence, not a warning to bury.
         say("  Note: named by hand, so there is no leads.csv row behind it. "
             "status.py will list it as unverifiable until the listing is "
-            "scraped. Run scraper/zillow_run.py instead if you have the dump.")
+            "scraped. Run scraper/run.py instead if you have the dump.")
     return brand, listing_dir
 
 

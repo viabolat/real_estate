@@ -72,7 +72,7 @@ class TestOutputNaming(unittest.TestCase):
 class TestSlug(unittest.TestCase):
     """Two slug functions exist, and they must agree on the apostrophe rule.
 
-    scraper/zillow_photos.slugify names agents/<brand>/<listing> and is the
+    scraper/photos.slugify names agents/<brand>/<listing> and is the
     naming authority. make_tour._slug names the output files from agent_name.
     They are separate functions on purpose -- make_tour runs from a listing
     folder with nothing but ffmpeg on the path, so importing the scraper would
@@ -82,7 +82,7 @@ class TestSlug(unittest.TestCase):
     """
 
     def both(self):
-        return helpers.scraper_module("zillow_photos").slugify
+        return helpers.scraper_module("photos").slugify
 
     def test_scraper_slug_drops_apostrophes_rather_than_separating(self):
         """The folder-naming authority. CLAUDE.md documents exactly this."""

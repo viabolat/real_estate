@@ -237,7 +237,7 @@ def _slug(text):
     """Lowercase, underscore-joined, filename-safe. "" when nothing survives.
 
     reason: apostrophes are dropped rather than turned into separators, matching
-    scraper/zillow_photos.slugify -- the naming authority that already produced
+    scraper/photos.slugify -- the naming authority that already produced
     the agents/<brand>/ folder this listing sits in. The straight
     non-alphanumeric rule turned "Gibson Sotheby's International Realty" into
     gibson_sotheby_s_..., so an agent whose name carries an apostrophe signed his

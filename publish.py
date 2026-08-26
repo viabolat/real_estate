@@ -75,8 +75,8 @@ def _jpeg_size():
     since a missing size check must never block a publish that is otherwise fine."""
     try:
         import importlib.util
-        path = os.path.join(ROOT, "scraper", "zillow_photos.py")
-        spec = importlib.util.spec_from_file_location("_zp_publish", path)
+        path = os.path.join(ROOT, "scraper", "photos.py")
+        spec = importlib.util.spec_from_file_location("_photos_publish", path)
         mod = importlib.util.module_from_spec(spec)
         sys.path.insert(0, os.path.dirname(path))
         try:

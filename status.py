@@ -41,7 +41,7 @@ import sys
 ROOT = os.path.dirname(os.path.abspath(__file__))
 AGENTS = os.path.join(ROOT, "agents")
 
-# Mirrors make_tour.py's gate (OUT_W * ZOOM_MAX) -- see scraper/zillow_photos.py.
+# Mirrors make_tour.py's gate (OUT_W * ZOOM_MAX) -- see scraper/photos.py.
 GATE_1080P = 2150
 GATE_720P = 1433
 # Past this the photos are not worth a build at all, not even a sample cut.
@@ -51,10 +51,10 @@ HOPELESS_UPSCALE = 3.0
 def _load_scraper():
     """Borrow the scraper's pure-stdlib helpers rather than keeping a third copy of
     them, or shelling out to ffprobe once per photo."""
-    path = os.path.join(ROOT, "scraper", "zillow_photos.py")
-    spec = importlib.util.spec_from_file_location("_zp", path)
+    path = os.path.join(ROOT, "scraper", "photos.py")
+    spec = importlib.util.spec_from_file_location("_photos", path)
     mod = importlib.util.module_from_spec(spec)
-    sys.path.insert(0, os.path.dirname(path))     # zillow_photos imports zillow_lead
+    sys.path.insert(0, os.path.dirname(path))     # photos.py imports lead.py
     try:
         spec.loader.exec_module(mod)
     finally:
@@ -62,8 +62,8 @@ def _load_scraper():
     return mod
 
 
-_zp = _load_scraper()
-jpeg_size, slugify = _zp.jpeg_size, _zp.slugify
+_photos = _load_scraper()
+jpeg_size, slugify = _photos.jpeg_size, _photos.slugify
 
 
 def scraped_names():
@@ -171,21 +171,21 @@ def next_action(listing_dir, cfg, n, worst, best, scraped=True):
 
     scraped: whether this folder's own name appears in leads.csv. A folder that
     predates the scrape has no lead row behind it, and telling its operator to
-    rerun zillow_photos.py sends them to a script that has nothing to work with.
+    rerun photos.py sends them to a script that has nothing to work with.
     """
     if n == 0:
         return "no photos -- scrape it"
     if best and 1920.0 / best > HOPELESS_UPSCALE:
         return f"photos only {best}px -- get the originals, do not build"
     if not cfg:
-        # reason: "no config.json" used to send every case to zillow_photos.py,
+        # reason: "no config.json" used to send every case to photos.py,
         # which scaffolds a listing from a dump keyed to a lead row. With no such
         # row -- brewester/9_w_cedar and corcoran/46_beacon_5, both hand-named
         # before the scrape became the naming authority -- there is no dump to
         # rerun and the advice is a dead end. Name the actual situation instead.
         if not scraped:
             return "not in leads.csv -- hand-named, predates the scrape"
-        return "no config.json -- rerun zillow_photos.py"
+        return "no config.json -- rerun photos.py"
     if not resolves(listing_dir, cfg.get("logo")):
         return "logo blank/missing -- add it to brand.json"
     if not resolves(listing_dir, cfg.get("music")):

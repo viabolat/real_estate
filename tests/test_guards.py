@@ -190,7 +190,7 @@ class TestPiiGateFailsClosed(unittest.TestCase):
 
 
 class TestResolutionGatesDoNotDrift(unittest.TestCase):
-    """status.py and scraper/zillow_photos.py hardcode the gate that
+    """status.py and scraper/photos.py hardcode the gate that
     make_tour.py derives as int(OUT_W * ZOOM_MAX). Nothing linked them, so
     changing ZOOM_MAX silently made both report a threshold the build no longer
     applies. Importing across would make the scraper depend on the builder, so
@@ -206,12 +206,12 @@ class TestResolutionGatesDoNotDrift(unittest.TestCase):
 
     def test_scraper_gates_match_make_tour(self):
         from tests.helpers import scraper_module
-        zp = scraper_module("zillow_photos")
+        zp = scraper_module("photos")
         with listing(config={}) as (mod, tmp):
             for name, out_w in (("GATE_1080P", 1920), ("GATE_720P", 1280)):
                 if hasattr(zp, name):
                     self.assertEqual(getattr(zp, name), mod.gate_min(out_w),
-                                     f"zillow_photos.{name} has drifted")
+                                     f"photos.{name} has drifted")
 
 
 if __name__ == "__main__":
