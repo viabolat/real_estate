@@ -113,17 +113,27 @@ class TestUnimportedDumps(unittest.TestCase):
 
 
 class TestRollUpDegrades(unittest.TestCase):
-    """A missing roll-up is cosmetic. It must not take a build down."""
+    """A missing roll-up is cosmetic. It must not take a build down.
+
+    reason: these point tour.ROOT at an empty sandbox and delete it afterwards.
+    The mkdtemp() is deliberately OUTSIDE the try, and the finally deletes the
+    LOCAL, never tour.ROOT: assigning inside the try meant that if mkdtemp ever
+    raised -- no space, TMPDIR gone -- tour.ROOT would still hold the real repo
+    root when the finally ran, and `shutil.rmtree(tour.ROOT, ignore_errors=True)`
+    would silently delete the entire repository. A test must not be able to do
+    that on its worst day.
+    """
 
     def test_load_status_returns_a_reason_instead_of_raising(self):
         tour = helpers.tour_module()
         prev_root, prev_cache = tour.ROOT, tour._STATUS
+        sandbox = tempfile.mkdtemp(prefix="no_status_")
         try:
-            tour.ROOT = tempfile.mkdtemp(prefix="no_status_")
+            tour.ROOT = sandbox
             tour._STATUS = ()
             mod, why = tour.load_status()
         finally:
-            shutil.rmtree(tour.ROOT, ignore_errors=True)
+            shutil.rmtree(sandbox, ignore_errors=True)
             tour.ROOT, tour._STATUS = prev_root, prev_cache
         self.assertIsNone(mod)
         self.assertTrue(why, "a failed roll-up import must say why.")
@@ -131,12 +141,13 @@ class TestRollUpDegrades(unittest.TestCase):
     def test_dump_detection_degrades_with_it(self):
         tour = helpers.tour_module()
         prev_root, prev_cache = tour.ROOT, tour._STATUS
+        sandbox = tempfile.mkdtemp(prefix="no_status_")
         try:
-            tour.ROOT = tempfile.mkdtemp(prefix="no_status_")
+            tour.ROOT = sandbox
             tour._STATUS = ()
             self.assertEqual(tour.unimported_dumps(), [])
         finally:
-            shutil.rmtree(tour.ROOT, ignore_errors=True)
+            shutil.rmtree(sandbox, ignore_errors=True)
             tour.ROOT, tour._STATUS = prev_root, prev_cache
 
     def test_home_reaches_the_menu_without_a_roll_up(self):
@@ -146,15 +157,16 @@ class TestRollUpDegrades(unittest.TestCase):
         tour = helpers.tour_module()
         prev = (tour.ROOT, tour._STATUS, tour.ask, tour.gate_banner)
         buf = io.StringIO()
+        sandbox = tempfile.mkdtemp(prefix="no_status_")
         try:
-            tour.ROOT = tempfile.mkdtemp(prefix="no_status_")
+            tour.ROOT = sandbox
             tour._STATUS = ()
             tour.ask = lambda *a, **k: "q"
             tour.gate_banner = lambda: None
             with contextlib.redirect_stdout(buf):
                 tour.home()
         finally:
-            shutil.rmtree(tour.ROOT, ignore_errors=True)
+            shutil.rmtree(sandbox, ignore_errors=True)
             tour.ROOT, tour._STATUS, tour.ask, tour.gate_banner = prev
         out = buf.getvalue()
         self.assertIn("roll-up is unavailable", out)
@@ -168,11 +180,12 @@ class TestGateBanner(unittest.TestCase):
         """The file being committed says nothing about this clone."""
         tour = helpers.tour_module()
         prev = tour.ROOT
+        sandbox = tempfile.mkdtemp(prefix="no_hook_")
         try:
-            tour.ROOT = tempfile.mkdtemp(prefix="no_hook_")
+            tour.ROOT = sandbox
             wired, why = tour.hook_state()
         finally:
-            shutil.rmtree(tour.ROOT, ignore_errors=True)
+            shutil.rmtree(sandbox, ignore_errors=True)
             tour.ROOT = prev
         self.assertFalse(wired)
         self.assertIn("pre-push", why)

@@ -46,7 +46,8 @@ global_assets/music/
 global_assets/lower_thirds/
 scraper/                      Zillow dump -> leads.csv + a scaffolded listing
 publish.py                    sample_ cuts -> the public review bucket. NEVER tour_
-status.py                     read-only: every listing and its one next action
+status.py                     read-only: every listing and its one next action.
+                              Names the run each is on -- see the two-run rule
 hooks/pre-push                runs check_pii.py. Arm per clone -- see Running it
 tests/                        stdlib unittest guards for the non-negotiables below
 ```
@@ -91,7 +92,7 @@ tool that edits files the operator is not looking at.
 | `xfade_seconds` | `0.5` | forces a full rebuild when changed |
 | `brand_persistent` | `true` | `false` = lower third only inside the window below. `tour.py` defaults it to `false` when a card is carrying the same three lines — see below |
 | `brand_in` / `brand_out` | `0.8` / `6.5` | only read when not persistent; out > in |
-| `lower_third` / `logo` / `music` / `watermark` | the plain filenames | repo-relative paths into `global_assets/` |
+| `lower_third` / `logo` / `music` / `watermark` | the plain filenames | repo-relative paths into `global_assets/`. `tour.py`'s `DEFAULTS` pins `watermark` to `global_assets/logos/viabolat.png` — the bare filename does not resolve from a listing folder, and a watermark that will not resolve now refuses the sample build |
 | `address` / `agent_name` / `agent_phone` | `""` | the lower third's three lines, and the card's body. Any may be blank |
 | `brokerage` | `""` | card only, and only when there is no logo |
 | `output_prefix` | `""` | what leads the output filenames. Blank derives it from `agent_name`; blank both leaves the bare `tour_`/`sample_` names. `tour.py` writes the brand folder here when `agent_name` is blank — `make_tour.py` must never learn the `agents/<brand>/<listing>` layout itself |
@@ -101,7 +102,9 @@ tool that edits files the operator is not looking at.
 | `card_theme` | `"auto"` | measures the logo against both grounds, takes the higher contrast |
 | `accent` / `font` / `scrim` | `#C8A24A` / `Liberation Sans` / `black@0.55` | rule and phone line / any installed family / the lower third's panel |
 
-Outputs **six** cuts to `out/`, in two families. Every name is prefixed with the
+Outputs **six** cuts to `out/`, in two families — but not in one run. `tour.py`
+builds the `sample_` trio first and the `tour_` trio only after the client signs
+off; see the two-run rule below. Every name is prefixed with the
 agent's own name — `output_prefix`, or `agent_name` slugified when that is blank —
 because six listings all producing a `tour_branded.mp4` collide the moment the
 files leave `out/` for a downloads folder or an email thread. Both blank leaves the
@@ -121,6 +124,42 @@ what the client reviews before paying:
 - `<agent>_sample_branded.mp4`
 - `<agent>_sample_unbranded.mp4`
 - `<agent>_sample_vertical.mp4`
+
+### Two runs, and how the tool knows which one it is on
+
+`--samples-only` and `--delivery-only` build one family instead of both. A bare
+`make_tour.py` still builds all six, unchanged; the staging is `tour.py`'s. The two
+flags are opposites and passing both **exits 2** — "build neither family" is not a
+request.
+
+| Run | What it writes | Cost |
+|---|---|---|
+| 1 — proofing | the three `sample_` cuts | full build, ~6 min |
+| 2 — after sign-off | the three `tour_` cuts | `--finish-only`, ~1 min |
+
+The `tour_` trio is the paid deliverable and only ever leaves after sign-off, so
+building it during cold outreach spends half a six-minute encode, and ~200 MB, on a
+listing that may never reply.
+
+**The stage is derived from `out/`, and is never recorded.** Nothing built → run 1;
+`sample_` cuts alone → run 2 is next; any `tour_` cut → delivered. Same rule as the
+photo order: a marker file beside the artifacts drifts out of sync with them and is
+then wrong in a way nothing detects. There is no stage key in `config.json` and
+there must never be one.
+
+**`.last_build.json` gains no new rung, and that is the point.** Its top-level key
+names the *intermediate lineage* — `draft` ↔ `work_draft.mp4`, `delivery` ↔
+`work_silent.mp4` — not the cut family. Both runs write `delivery`, so run 2 finds
+run 1's record with preset, pacing, card and `photo_state()` unchanged and takes
+`--finish-only`. Change the photos or the pacing in between and `rebuild_reason()`
+correctly forces a full rebuild. Two orthogonal questions, two mechanisms that
+already existed: `out/` answers *which run is this*, `.last_build.json` answers
+*can the stitch be reused*. Splitting the rung per family would leave run 2 with no
+record and re-stitch photos that never moved.
+
+Staging is a default, never a restriction: `build_choice()` keeps *all six now* and
+a rebuild of either family reachable from every stage, because a client who has
+already paid should not have to build a proof first.
 
 A build from photos that miss the resolution gate names all six exactly the same
 way. The shortfall is reported to the console — at preflight, and again once the
@@ -235,6 +274,18 @@ measurement, not assumption.
   introduces the property, clears, and the card closes. A `lower_third.png`
   someone authored says something the card does not, so it is exempt. The default
   is stated out loud and still overridable.
+
+- **A subset build must be structurally incapable of crossing families.** The
+  `--samples-only` / `--delivery-only` guards in `main()` are the `sample_`/`tour_`
+  boundary expressed as build wiring, upstream of the one `publishable()` holds at
+  the bucket. Each of the six call sites stays exactly where it was and is only
+  *nested*: `tests/test_card_isolation.py` walks `main()` with `ast.walk` and
+  asserts **four** `finish()` calls with a `cuts[...]` target and **two**
+  `vertical()` calls — that is the guard keeping the card off the MLS, and deleting
+  or restructuring a call site breaks it. `tests/test_build_stage.py` reads the
+  guards themselves and fails if a `tour_` cut is reachable under `--samples-only`.
+  Do not reach for `argparse` here either: unrecognised argv is silently ignored
+  today, and argparse would start rejecting it.
 
 - **Never send a `sample_` file as a deliverable, and never send a `tour_` file
   before sign-off.** The two families exist to keep that boundary enforceable by
@@ -352,6 +403,18 @@ measurement, not assumption.
   left alone deliberately: the scrape cannot name a listing it has no row for, and
   hand-naming one is the second authority this rule exists to prevent.
 
+- **A folder with no lead row still gets a start line.** Provenance is a fact about
+  a folder, not a blocker on it. `next_action()` used to test `if not cfg:` *before*
+  it looked at readiness, so a listing with photos and no `config.json` reported
+  `not in leads.csv` forever and could never read as ready — while `tour.py`'s
+  picker already offered it and its question set already wrote the config. The
+  roll-up was refusing to say what the tool would happily do. The fact now travels
+  as a suffix on the real next action instead of replacing it. A **scraped** folder
+  with no config is still sent back to `photos.py`, because there the scrape can
+  fill in the address, agent, phone and watermark path properly. Nothing about the
+  naming authority moves: the folder is not renamed, `audit()` is untouched, and it
+  keeps reporting as *unverifiable*.
+
 - **`brand.json` never carries `agent_name` or `agent_phone`.** A brokerage has many
   agents; the folder is keyed on the brokerage. See the `brand.json` note above.
   `tour.py` enforced this at neither end for a while: `BRAND_KEYS` listed both
@@ -409,6 +472,29 @@ One command. Everything else is a gate, a one-time setup step, or an escape hatc
 ```bash
 python3 tour.py                       # the home screen: roll-up, then four choices
 ```
+
+`status.py`'s out/ states name the **family**, not just a count — a first run
+writes three cuts on purpose, so a bare `built, 3 cuts` was indistinguishable from
+a six-cut build that died halfway:
+
+| State | Means |
+|---|---|
+| `ready to build` | nothing in `out/` yet |
+| `sample built -- publish the review link` | run 1 done |
+| `sample published -- awaiting sign-off` | a cut is on the review bucket |
+| `delivered, N cuts` | a `tour_` cut exists |
+
+*Published* is derived from `outreach/links.csv`, which `publish.py` already writes
+on every confirmed upload, read **by header name** — no marker file is invented to
+hold it, and a missing file means "nothing published" exactly as a missing
+`leads.csv` means "nothing scraped". `publish.family()` is the single owner of
+which prefix means what; `status.py` and `tour.py` both ask it rather than testing
+the prefix themselves, because a second implementation of that boundary would drift
+and the drift would be an unwatermarked deliverable counted as a proof. The
+soft-photo verdict rides along on every state and is still measured from `photos/`.
+`next_action()` also merges `brand.json` **under** the listing's `config.json`
+before the asset checks, mirroring `tour.load_config()` — without it a listing that
+inherits its logo, which is the normal case, reported `logo blank/missing` forever.
 
 It opens on `status.py`'s roll-up — every listing and its one next action, plus
 the scrape-naming drift report — then offers: **1** build a tour, **2** import the
@@ -483,10 +569,12 @@ running this. Three rungs, each costing what the question is worth:
 cd agents/corcoran/46_beacon_5
 python3 ../../../make_tour.py --contact-sheet  # ~1s   is the order right?
 python3 ../../../make_tour.py --draft          # ~1min does the edit feel right?
-python3 ../../../make_tour.py                  # ~6min ship it
+python3 ../../../make_tour.py --samples-only   # ~6min the client's proofing copy
+python3 ../../../make_tour.py --delivery-only  # ~1min after sign-off
 ```
 
-Only the third produces deliverables. `--contact-sheet` writes
+Only the last two produce cuts, and only `--delivery-only` produces deliverables;
+a bare `make_tour.py` still writes all six in one go. `--contact-sheet` writes
 `contact_sheet.png` — a numbered grid of `photos/` in build order — and exits
 before encoding *and before the resolution gate*, since "are these in the right
 order" is worth answering on photos that are not yet good enough to build with.
@@ -502,6 +590,8 @@ python3 ../../../make_tour.py --allow-lowres   # build anyway; names are unchang
 python3 ../../../make_tour.py --no-music       # silent build
 python3 ../../../make_tour.py --keep-work      # keep clips/ + work_silent.mp4
 python3 ../../../make_tour.py --finish-only    # reuse work_silent, redo branding
+python3 ../../../make_tour.py --samples-only   # run 1: the 3 sample_ cuts only
+python3 ../../../make_tour.py --delivery-only  # run 2: the 3 tour_ cuts only
 ```
 
 `--finish-only` implies `--keep-work` — it falls back to a full build if
@@ -518,12 +608,26 @@ See `STEPS.md` for the full runbook — every scenario, flag, and failure mode.
   indistinguishable in the output and opposite in meaning. `require_git()` and the
   empty-file-list check both exit 2 rather than let that read as clean. Do not add a
   flag that downgrades either to a warning.
-- **A broken watermark stops the build; broken branding does not.** An unreadable
-  logo or lower third costs a cosmetic layer, so it warns and drops out rather than
-  killing a build that is already minutes deep. The proofing watermark is the only
-  thing separating a `sample_` cut from a deliverable, so a watermark that will not
-  render is a hard refusal — degrading it silently writes exactly the unmarked proof
-  the `tour_`/`sample_` split exists to prevent.
+- **A broken *or missing* watermark stops the build; broken branding does not.** An
+  unreadable logo or lower third costs a cosmetic layer, so it warns and drops out
+  rather than killing a build that is already minutes deep. The proofing watermark is
+  the only thing separating a `sample_` cut from a deliverable, so a watermark that
+  will not render is a hard refusal — degrading it silently writes exactly the
+  unmarked proof the `tour_`/`sample_` split exists to prevent. That refusal now
+  covers an **absent** file too: `use_wm = bool(watermark and os.path.exists(...))`
+  meant a present-but-corrupt watermark refused while a missing one was skipped in
+  silence. Every `config.json` the scraper writes pins the path, so the hole only
+  opened on folders that were never scraped — exactly the hand-placed ones `tour.py`
+  now admits — and the bare `viabolat.png` fallback does not resolve from a listing
+  folder. The result was an unwatermarked `sample_` cut that `publish.py` then
+  uploaded on the strength of its name. `tour.py`'s `DEFAULTS` carries
+  `watermark: global_assets/logos/viabolat.png` so every listing it writes pins it,
+  matching `scraper/photos.py`. A `--delivery-only` run needs no watermark and is
+  unaffected. The refusal fires at **preflight** — before the lock, the clips and
+  the stitch — via `require_watermark()`, and again inside `finish()` as the last
+  gate before the pixels. Refusing at minute five over something known at second
+  one is this repo's own stated failure shape; it is what the resolution gate was
+  fixed for, and the same mistake was not worth repeating here.
 
 ## Known constraints
 

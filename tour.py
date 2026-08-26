@@ -37,6 +37,27 @@ There is no marker file and no manifest, for the same reason photo order lives i
 the filename prefix: a record kept beside the artifacts drifts out of sync with
 them and is then wrong in a way nothing detects.
 
+Which RUN a listing is on is derived the same way, from out/:
+
+    nothing in out/     -> run 1: build the three watermarked sample_ cuts,
+                           publish the review link, send the draft email
+    sample_ cuts only   -> run 2, once the client says yes: the three tour_
+                           deliverables, off the stitch run 1 left behind
+    any tour_ cut       -> delivered; either family can still be rebuilt
+
+That staging is a default and never a restriction -- a client who has already paid
+can take all six in one go from the same menu. It exists because the tour_ trio is
+the paid deliverable, and building it before anyone has asked spends half a
+six-minute encode on a listing that may never reply.
+
+Both runs write the same .last_build.json rung, "delivery", because that key names
+the intermediate lineage and not the cut family. That is what makes run 2 cheap:
+it finds run 1's record with preset, pacing, card and photo_state() unchanged and
+takes --finish-only, about a minute. Change the photos or the pacing in between
+and rebuild_reason() correctly forces a full rebuild off the current photos. Two
+orthogonal questions, two mechanisms that already existed: out/ answers "which run
+is this", .last_build.json answers "can the stitch be reused".
+
 It runs make_tour.py as a subprocess, exactly as the dashboard did, so the script's
 contract is untouched: it reads the working directory and knows nothing about the
 agents/<brand>/<listing> layout. Locking stays make_tour.py's job -- it takes
@@ -71,6 +92,16 @@ Two things this file does that make_tour.py cannot:
   exactly like the gate passing. The home screen checks the wiring and shouts,
   and runs check_pii.py's own scan regardless, because libgit2-based clients do
   not run git hooks at all.
+
+  A start line for a folder the scrape never named. A listing with photos and
+  no config.json -- one that was downloaded by hand, or predates the scrape --
+  used to read "not in leads.csv" in the roll-up forever and could never show as
+  ready, although the picker already offered it and the question set already
+  wrote its config. Provenance is a fact about the folder, not a blocker on it:
+  it is reported beside the real next action, and again when the folder is
+  picked. The folder is NOT renamed and status.py still reports it as
+  unverifiable -- the scrape stays the only naming authority, and it cannot name
+  a listing it has no row for.
 
   The resolution verdict. When neither preset clears, this used to REFUSE, at the
   end of a run, after the question set and a draft had already been paid for,
@@ -130,6 +161,13 @@ DEFAULTS = {
     "brokerage": "",
     "address": "",
     "output_prefix": "",
+    # reason: DEFAULTS had no watermark key, questions() never asked for one, and
+    # the bare fallback "viabolat.png" resolves nowhere -- the file lives only in
+    # global_assets/logos/. Any listing whose config.json was not written by the
+    # scraper therefore shipped UNWATERMARKED sample_ cuts, silently, and
+    # publish.py uploads on the filename alone. The scraper already pins this
+    # exact path (scraper/photos.py); this is the same pin for the other door in.
+    "watermark": "global_assets/logos/viabolat.png",
 }
 # What a brand sets once and every listing under it inherits. The address is
 # per-property and never inherited -- and neither is the agent.
@@ -391,7 +429,8 @@ def check_assets(listing_dir, cfg):
     rows.append(("music", music, "" if music else "the tour will be silent"))
     wm = resolve(listing_dir, cfg.get("watermark") or "viabolat.png")
     rows.append(("sample watermark", wm, "" if wm else
-                 "sample_ cuts will NOT be watermarked -- fix before proofing"))
+                 "MISSING -- the sample build will refuse. Point 'watermark' at "
+                 "global_assets/logos/viabolat.png"))
     return rows
 
 
@@ -613,8 +652,16 @@ def rebuild_reason(listing_dir, cfg, preset, rung, silent_name):
     return None
 
 
-def delivery_flags(listing_dir, cfg, preset, lowres=False):
-    """(flags, full_rebuild_reason or None) for the six-cut delivery build.
+def delivery_flags(listing_dir, cfg, preset, lowres=False, cuts="both"):
+    """(flags, full_rebuild_reason or None) for a full-quality build.
+
+    cuts: "sample" | "delivery" | "both" -- which output family to write. The
+    stitch is the same either way, which is what makes the second run cheap: a
+    sample-only run has no record yet and takes --keep-work, so work_silent.mp4
+    and work_branded.mp4 survive; the delivery run that follows finds that same
+    "delivery" record unchanged and takes --finish-only. The rung key names the
+    intermediate lineage, not the cut family -- so it stays "delivery" for both,
+    and no new state is invented to hold the difference.
 
     reason: --allow-lowres permits the build and changes nothing about the encode
     or the output names, so it is deliberately absent from the state's preset
@@ -626,12 +673,44 @@ def delivery_flags(listing_dir, cfg, preset, lowres=False):
         flags.append("--allow-lowres")
     if not resolve(listing_dir, cfg.get("music") or "music.mp3"):
         flags.append("--no-music")
+    if cuts == "sample":
+        flags.append("--samples-only")
+    elif cuts == "delivery":
+        flags.append("--delivery-only")
     reason = rebuild_reason(listing_dir, cfg, preset, "delivery",
                             "work_silent.mp4")
     # reason: --finish-only reuses the stitched cut, so it can only ever apply
     # branding, music and timing. Anything upstream of the stitch needs a full run.
     flags.append("--keep-work" if reason else "--finish-only")
     return flags, reason
+
+
+def build_choice(st):
+    """Which family to write now -- "sample" | "delivery" | "both" -- or None.
+
+    reason: this is the confirm for rung 3, not an extra prompt on top of one.
+    The stage derived from out/ picks the default; every other route stays
+    reachable, because a client who has already paid should not have to build a
+    proof first, and a rebuild of either family must remain possible.
+    """
+    if st == "sample":
+        return pick("No cuts built yet.", [
+            ("sample", "Sample cuts -- the 3 watermarked cuts the client reviews"),
+            ("both", "All six now -- sample and delivery together"),
+            (None, "Not now"),
+        ], default=0)
+    if st == "delivery":
+        return pick("The sample cuts are built. Has the client signed off?", [
+            ("delivery", "Yes -- build the 3 tour_ deliverables"),
+            ("sample", "No -- rebuild the sample cuts"),
+            (None, "Not now"),
+        ], default=0)
+    return pick("All six cuts exist. Rebuild which?", [
+        (None, "Nothing -- leave them"),
+        ("sample", "The 3 sample_ cuts"),
+        ("delivery", "The 3 tour_ deliverables"),
+        ("both", "All six"),
+    ], default=0)
 
 
 def draft_flags(listing_dir, cfg):
@@ -663,6 +742,40 @@ def outputs(listing_dir):
     if not os.path.isdir(d):
         return []
     return sorted(f for f in os.listdir(d) if f.endswith(".mp4"))
+
+
+def cut_families(listing_dir):
+    """{"sample": [...], "tour": [...]} -- what is already in out/.
+
+    publish.family() is the single authority on which prefix means what. Asking
+    it rather than testing the prefix here keeps one implementation of the
+    sample_/tour_ boundary, which is the boundary the whole two-family split
+    exists to hold.
+    """
+    fams = {"sample": [], "tour": []}
+    for f in outputs(listing_dir):
+        kind = publish.family(f)
+        if kind in fams:
+            fams[kind].append(f)
+    return fams
+
+
+def stage(listing_dir):
+    """"sample" | "delivery" | "delivered" -- which run this listing is on.
+
+    Derived from out/ and nothing else. No marker file, no stage key in
+    config.json: the cuts on disk ARE the record of what has been built, the same
+    way the photo order is the filename prefix and nothing else. .last_build.json
+    answers a different question -- whether the STITCH can be reused -- and its
+    rung key names the intermediate lineage, not the cut family. The two stay
+    orthogonal on purpose.
+    """
+    fams = cut_families(listing_dir)
+    if fams["tour"]:
+        return "delivered"
+    if fams["sample"]:
+        return "delivery"
+    return "sample"
 
 
 # ---- rung 4: publish ---------------------------------------------------------
@@ -1160,8 +1273,28 @@ def _new_folder_name(raw, what):
     return slug
 
 
+def listing_actions():
+    """({(brand, listing): next_action}, {scraped names}) -- never raises.
+
+    reason: the picker used to list bare folder names, so a folder holding 39
+    photos and one holding none looked identical and the operator had to guess
+    which was worth opening. status.py already computes the one next action per
+    listing; showing it here costs one survey() and means the picker and the
+    home screen can never disagree about what a listing is waiting on.
+    """
+    mod, _ = load_status()
+    if mod is None:
+        return {}, None
+    try:
+        rows, _truth, known = mod.survey()
+    except Exception:
+        return {}, None
+    return {(r[0], r[1]): r[5] for r in rows if r[1] != "-"}, known
+
+
 def choose_listing():
     """(brand, listing_dir), creating either inline."""
+    actions, known = listing_actions()
     bs = brands()
     brand = pick("Brand", [(b, b) for b in bs] or [], default=0,
                  extra=("+", "+ New brand")) if bs else "+"
@@ -1175,7 +1308,9 @@ def choose_listing():
         os.makedirs(os.path.join(LISTINGS_ROOT, brand), exist_ok=True)
 
     ls = listings(brand)
-    name = pick("Listing", [(x, x) for x in ls] or [], default=0,
+    labelled = [(x, f"{x}   -- {actions[(brand, x)]}" if (brand, x) in actions
+                 else x) for x in ls]
+    name = pick("Listing", labelled or [], default=0,
                 extra=("+", "+ New listing")) if ls else "+"
     if name == "+":
         raw = ask("New listing folder name (e.g. 46_beacon_5)").strip()
@@ -1185,6 +1320,15 @@ def choose_listing():
         made_by_hand = True
     listing_dir = os.path.join(LISTINGS_ROOT, brand, name)
     os.makedirs(os.path.join(listing_dir, "photos"), exist_ok=True)
+    # reason: the note below used to fire only for a folder created in THIS
+    # session, so picking an existing hand-named one said nothing and the state
+    # first surfaced in status.py's audit long afterwards. Picking it is the
+    # moment the operator can act on it.
+    if not made_by_hand and known is not None and (brand, name) not in known:
+        say(f"  Note: no leads.csv row behind {brand}/{name}, so status.py lists "
+            f"it as\n  unverifiable. It builds normally -- the question set will "
+            f"ask for the address,\n  agent and phone. The folder name is left "
+            f"alone: the scrape is what names folders.")
     if made_by_hand:
         # reason: say it once, here, rather than letting status.py be the first
         # thing that mentions it. A hand-named folder has no lead row behind it,
@@ -1264,7 +1408,13 @@ def build_flow(args):
         cfg = questions(listing_dir, brand, load_config(listing_dir, brand))
 
     # ---- rung 3: ship it (~6min) ----
-    rule("3. Deliver")
+    # reason: the rung is named for what this run actually writes. A listing with
+    # nothing in out/ is being proofed, not delivered, and calling that step
+    # "Deliver" is how the tour_ cuts got built for every listing that never
+    # replied. The stage is derived from out/ -- see stage().
+    st = stage(listing_dir)
+    rule({"sample": "3. Sample", "delivery": "3. Deliver",
+          "delivered": "3. Rebuild"}[st])
     # reason: this used to refuse outright when the photos missed 720p, at the END
     # of a run, after the question set and a draft had already been paid for. The
     # verdict was known at preflight, second one. Refusing late threw away the work
@@ -1280,20 +1430,27 @@ def build_flow(args):
         say(f"These photos are below par: {n_bad} of {n_all} miss 720p. "
             f"Worst {os.path.basename(worst[0])}\nat {worst[1]}, upscaled "
             f"{worst[2]:.1f}x.")
-        say("The six cuts will build at 720p and will be soft. Nothing in their "
+        say("The cuts will build at 720p and will be soft. Nothing in their "
             "names says\nso -- do not send these to the MLS. Reshoot or get the "
             "originals first.")
-    n = len(photos(listing_dir))
-    say(f"Six cuts at {preset}{' (below par)' if lowres else ''}, "
-        f"about {runtime(n, cfg):.0f}s each. This takes a few minutes.")
-    if not confirm("Build the delivery?", True):
+    what = build_choice(st)
+    if what is None:
         return
-    flags, reason = delivery_flags(listing_dir, cfg, preset, lowres)
+    n = len(photos(listing_dir))
+    n_cuts = 6 if what == "both" else 3
+    say(f"\n{n_cuts} cuts at {preset}{' (below par)' if lowres else ''}, "
+        f"about {runtime(n, cfg):.0f}s each. This takes a few minutes.")
+    flags, reason = delivery_flags(listing_dir, cfg, preset, lowres, cuts=what)
     if reason:
         say(f"  Full rebuild: {reason}.")
+    else:
+        say("  Reusing the stitch from the last build -- branding only.")
     if run_build(listing_dir, flags) != 0:
         say("\nThe build failed. The intermediates were kept for inspection.")
         return
+    # reason: the rung key names the stitch lineage, not the cut family, so a
+    # sample-only run records "delivery" too -- that is exactly what lets the
+    # delivery run that follows take --finish-only off the same intermediates.
     save_state(listing_dir, "delivery", cfg, preset)
 
     rule("Done")
@@ -1301,13 +1458,23 @@ def build_flow(args):
         say(f"  out/{f}")
     say("\nsample_ cuts carry the proofing watermark -- those are what the client "
         "reviews.\ntour_ cuts are the delivery, and only after sign-off.")
+    if what == "sample":
+        say("The tour_ deliverables are not built yet. Run this again once the "
+            "client says\nyes -- it reuses this stitch and takes about a minute.")
     if lowres:
         say(f"\nBELOW PAR: built at {preset} from photos that do not reach it, so "
             f"these were\nupscaled past what the photos hold. Watchable for a "
             f"review, not sharp enough\nfor the MLS, and the filenames do not say "
             f"so. See IDEA.md 4 for how to source\nbetter.")
 
-    publish_rung(listing_dir)
+    # reason: only offer the bucket when this run actually wrote a sample. After a
+    # delivery-only run the sample cuts are still sitting in out/ from last time,
+    # and offering to publish them again reads as though something new is ready.
+    if what == "delivery":
+        say("\nThe deliverables are in out/. Send those three by hand -- nothing "
+            "here uploads\na tour_ cut, and publish.py refuses to.")
+    else:
+        publish_rung(listing_dir)
 
 
 if __name__ == "__main__":

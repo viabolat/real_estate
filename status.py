@@ -23,6 +23,22 @@ a directory named 01_front.jpg, an unreadable or truncated photo, a broken symli
 Those are dropped from the photo count rather than raising and killing the whole
 report over one bad entry -- the count itself is what surfaces the loss.
 
+The out/ states name the FAMILY, not just a count. A first run writes three cuts
+on purpose now, so a bare "built, 3 cuts" was indistinguishable from a six-cut
+build that died halfway, exactly where the operator needs to know which run is
+next:
+
+    ready to build                          nothing in out/ yet
+    sample built -- publish the review link  the three sample_ cuts exist
+    sample published -- awaiting sign-off    a cut is on the review bucket
+    delivered, N cuts                        a tour_ cut exists
+
+"Published" is derived from outreach/links.csv, which publish.py already writes on
+every confirmed upload -- no marker file is invented to hold it, and a missing file
+means "nothing published" exactly as a missing leads.csv means "nothing scraped".
+The soft-photo verdict rides along on all of them and is measured from photos/,
+never read off a filename.
+
 Usage:
     python3 status.py
     python3 status.py --long     # also show what each listing inherits
@@ -64,6 +80,25 @@ def _load_scraper():
 
 _photos = _load_scraper()
 jpeg_size, slugify = _photos.jpeg_size, _photos.slugify
+
+
+def _load_publish():
+    """publish.py, or None. It owns the sample_/tour_ boundary and links.csv.
+
+    reason: this module needs two facts publish.py already holds -- which family
+    a cut in out/ belongs to, and which listings have had a link sent. Asking it
+    keeps one implementation of each; re-deriving them here is the drift the
+    naming rules exist to prevent. Guarded the same way the scraper is, because
+    status.py is the read-only overview and must survive a partial tree.
+    """
+    try:
+        import publish
+        return publish
+    except Exception:
+        return None
+
+
+_publish = _load_publish()
 
 
 def scraped_names():
@@ -166,43 +201,93 @@ def photo_stats(listing_dir):
     return len(sizes), min(sizes), max(sizes)
 
 
-def next_action(listing_dir, cfg, n, worst, best, scraped=True):
+def built_families(listing_dir):
+    """({"sample": n, "tour": n}, total mp4s) for what is in out/.
+
+    reason: this used to be a bare len(os.listdir(out)), which counted build.log
+    as a cut and -- now that a first run writes only the three sample_ cuts --
+    reported "built, 3 cuts", indistinguishable from a six-cut build that died
+    halfway. The families are the whole point of the two-run split, so the count
+    has to name them. publish.family() is the authority on which prefix is which.
+    """
+    out = os.path.join(listing_dir, "out")
+    if not os.path.isdir(out):
+        return {"sample": 0, "tour": 0}, 0
+    names = [f for f in sorted(os.listdir(out))
+             if f.endswith(".mp4") and os.path.isfile(os.path.join(out, f))]
+    counts = {"sample": 0, "tour": 0}
+    for f in names:
+        kind = _publish.family(f) if _publish else None
+        if kind in counts:
+            counts[kind] += 1
+    return counts, len(names)
+
+
+def published(brand, listing):
+    """Has a cut for this listing been confirmed onto the review bucket?
+
+    Derived from outreach/links.csv, which publish.py already writes on every
+    confirmed upload -- no marker file is invented to hold it. A missing file is
+    "nothing published", exactly as a missing leads.csv is "nothing scraped".
+    """
+    if not _publish:
+        return False
+    try:
+        return (brand, listing) in _publish.published_listings()
+    except Exception:
+        return False
+
+
+def next_action(listing_dir, cfg, n, worst, best, scraped=True, bcfg=None):
     """The one thing standing between this listing and a deliverable.
 
     scraped: whether this folder's own name appears in leads.csv. A folder that
     predates the scrape has no lead row behind it, and telling its operator to
     rerun photos.py sends them to a script that has nothing to work with.
+
+    bcfg: the brand.json one level up. tour.py layers it UNDER the listing's own
+    config.json, so the asset checks below have to see the same two layers or a
+    listing that inherits its logo reads as missing one.
     """
+    # reason: a config-less folder with NO lead row used to end the ladder here,
+    # reporting its provenance as though provenance were the blocker. It is not:
+    # there is no dump to rerun, tour.py's question set writes the config.json,
+    # and photos are what make a listing buildable. So the fact travels as a
+    # suffix on whatever the real next action is, and the folder can reach "ready
+    # to build" like any other. A SCRAPED folder still goes back to photos.py --
+    # there the scrape can fill in the address, agent, phone and watermark path
+    # properly, which beats retyping them. The folder name is never touched
+    # either way, and audit() still reports the folder as unverifiable.
+    origin = "" if cfg or scraped else "   [no leads.csv row]"
     if n == 0:
-        return "no photos -- scrape it"
+        return "no photos -- scrape it" + origin
     if best and 1920.0 / best > HOPELESS_UPSCALE:
-        return f"photos only {best}px -- get the originals, do not build"
-    if not cfg:
-        # reason: "no config.json" used to send every case to photos.py,
-        # which scaffolds a listing from a dump keyed to a lead row. With no such
-        # row -- brewester/9_w_cedar and corcoran/46_beacon_5, both hand-named
-        # before the scrape became the naming authority -- there is no dump to
-        # rerun and the advice is a dead end. Name the actual situation instead.
-        if not scraped:
-            return "not in leads.csv -- hand-named, predates the scrape"
+        return f"photos only {best}px -- get the originals, do not build{origin}"
+    if not cfg and scraped:
         return "no config.json -- rerun photos.py"
-    if not resolves(listing_dir, cfg.get("logo")):
-        return "logo blank/missing -- add it to brand.json"
-    if not resolves(listing_dir, cfg.get("music")):
-        return "music blank/missing -- add it to brand.json"
-    if not resolves(listing_dir, cfg.get("watermark") or "viabolat.png"):
-        return "watermark will not resolve -- sample cuts would ship unmarked"
-    out = os.path.join(listing_dir, "out")
-    cuts = sorted(f for f in os.listdir(out)) if os.path.isdir(out) else []
-    if not cuts:
-        tag = f" (soft: photos {best}px)" if best and best < GATE_1080P else ""
-        return f"ready to build{tag}"
+    merged = dict(bcfg or {})
+    merged.update(cfg or {})
+    if not resolves(listing_dir, merged.get("logo")):
+        return "logo blank/missing -- add it to brand.json" + origin
+    if not resolves(listing_dir, merged.get("music")):
+        return "music blank/missing -- add it to brand.json" + origin
+    if not resolves(listing_dir, merged.get("watermark") or "viabolat.png"):
+        return "watermark will not resolve -- the sample build will refuse" + origin
+    counts, total = built_families(listing_dir)
     # reason: the output filenames used to carry a _lowres suffix and this read it
     # back off them. They no longer say anything about resolution, so the verdict
     # is measured from photos/ -- the same place it was always measured from.
-    if best and best < GATE_720P:
-        return f"built, {len(cuts)} cuts -- soft ({best}px photos), sample only"
-    return f"built, {len(cuts)} cuts"
+    soft = " -- soft ({}px photos)".format(best) if best and best < GATE_720P else ""
+    if not counts["sample"] and not counts["tour"]:
+        tag = f" (soft: photos {best}px)" if best and best < GATE_1080P else ""
+        return f"ready to build{tag}{origin}"
+    if counts["tour"]:
+        return f"delivered, {total} cuts{soft}{origin}"
+    brand = os.path.basename(os.path.dirname(listing_dir))
+    listing = os.path.basename(listing_dir)
+    if published(brand, listing):
+        return f"sample published -- awaiting sign-off{soft}{origin}"
+    return f"sample built -- publish the review link{soft}{origin}"
 
 
 def survey():
@@ -232,7 +317,8 @@ def survey():
             n, worst, best = photo_stats(ld)
             rows.append((brand, listing, n, worst, best,
                          next_action(ld, cfg, n, worst, best,
-                                     scraped=(brand, listing) in known),
+                                     scraped=(brand, listing) in known,
+                                     bcfg=bcfg),
                          bcfg, cfg))
     return rows, truth, known
 

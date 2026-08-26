@@ -181,11 +181,21 @@ below — the steps are what it does, not an alternative to it.
    deliverable and never enters `out/`.
 5. Run without `--allow-lowres`, from the listing folder:
    ```bash
-   python3 ../../../make_tour.py
+   python3 ../../../make_tour.py --samples-only    # run 1: the proofing cuts
+   python3 ../../../make_tour.py --delivery-only   # run 2: after sign-off
    ```
    Or let `tour.py` do it — it derives the preset from what the photos can actually
    feed, and drops to 720p + `--allow-lowres` only when neither preset clears, after
-   naming the shortfall.
+   naming the shortfall. It also picks which of the two runs you are on, from what
+   is already in `out/`.
+
+   The split is a cost decision and changes nothing about the pixels: the `tour_`
+   trio is only sent after the client signs off, so building it during cold outreach
+   spends half a six-minute encode on a listing that may never reply. Run 2 reuses
+   run 1's stitch and takes about a minute. A bare `make_tour.py` still builds all
+   six. **Neither run makes a soft photo any sharper** — a sample cut the client
+   approves is the same upscale the deliverable will be, so the table in §4 is
+   answered at step 1, not deferred to run 2.
 6. If it exits with the resolution table, go back to step 1. A build made with the
    flag is a review copy to keep the job moving, not the answer to the table.
 

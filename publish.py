@@ -15,6 +15,18 @@ settled the same question for outreach: it is a one-word difference in a
 filename. So publishable() refuses anything that is not sample_, and there is no
 flag that lifts it.
 
+family() is the one place that decides which prefix means what, and publishable()
+is written on top of it. status.py and tour.py both ask it rather than testing the
+prefix themselves -- tour.py to derive which run a listing is on, status.py to name
+the state -- so the sample_/tour_ boundary has a single implementation. A second
+one would drift, and the drift would be an unwatermarked deliverable counted as a
+proof.
+
+published_listings() reads back the (brand, listing) pairs this script has already
+confirmed onto the bucket, so "awaiting sign-off" is derived from the record of
+what was published rather than from a marker file. It reads links.csv BY HEADER
+NAME: that file has been migrated once already for exactly this kind of reason.
+
 Why this is not in make_tour.py:
 
   make_tour.py is stdlib + ffmpeg and nothing else, it holds .build.lock for the
@@ -189,6 +201,29 @@ def credentials():
 
 # ---- the gate ---------------------------------------------------------------
 
+def family(name):
+    """"sample" | "tour" | None -- which family a cut in out/ belongs to.
+
+    reason: the sample_/tour_ boundary is the one this file exists to hold, and
+    it now has a second reader: tour.py derives which run a listing is on from
+    what is in out/, and status.py reports it. Both ask here rather than growing
+    their own prefix test, because two implementations of this boundary is
+    exactly the drift the boundary exists to prevent. publishable() is still the
+    gate; this is only the naming half of it, so the two can never disagree.
+
+    The prefix appears twice because output_prefix leads every filename with the
+    agent's own name -- sean_obrien_sample_branded.mp4 -- and is blank on a
+    listing that never set one.
+    """
+    if not name.endswith(".mp4"):
+        return None
+    if name.startswith("tour_") or "_tour_" in name:
+        return "tour"
+    if name.startswith("sample_") or "_sample_" in name:
+        return "sample"
+    return None
+
+
 def publishable(name):
     """(ok, reason). The one rule this file exists to enforce.
 
@@ -198,10 +233,11 @@ def publishable(name):
     """
     if not name.endswith(".mp4"):
         return False, "not an mp4"
-    if name.startswith("tour_") or "_tour_" in name:
+    kind = family(name)
+    if kind == "tour":
         return False, ("tour_ cuts are the signed-off deliverable and never "
                        "auto-publish")
-    if name.startswith("sample_") or "_sample_" in name:
+    if kind == "sample":
         return True, ""
     return False, "not a recognised cut"
 
@@ -349,6 +385,29 @@ def record_links(rows):
             w.writeheader()
         for r in rows:
             w.writerow(r)
+
+
+def published_listings():
+    """{(brand, listing)} that have had a cut confirmed onto the review bucket.
+
+    reason: status.py needs to tell "sample built, not sent" from "sample sent,
+    waiting on the client", and links.csv already records every confirmed
+    publish. That makes the answer derivable, so no new marker file is invented
+    for it -- the same reason photo order lives in the filename prefix.
+
+    Read by header name, never by column position: the url moved to the end of
+    the row once already, and a positional reader would have silently followed
+    it. A missing file is an empty set, exactly as a missing leads.csv is.
+    """
+    if not os.path.isfile(LINKS):
+        return set()
+    try:
+        with open(LINKS, newline="", encoding="utf-8") as f:
+            rows = list(csv.DictReader(f))
+    except OSError:
+        return set()
+    return {(r["brand"].strip(), r["listing"].strip()) for r in rows
+            if (r.get("brand") or "").strip() and (r.get("listing") or "").strip()}
 
 
 # ---- the draft --------------------------------------------------------------

@@ -28,6 +28,12 @@ npx vercel --prod
 **Step 4.** Open the Zillow listing page, select all, copy, and paste it into a new
 file in `scraper/dumps/`. One listing per file.
 
+> Already have a folder of photos that never came from a scrape? Drop it in as
+> `agents/<brand>/<listing>/photos/` and skip to **Step 8** — `tour.py` will offer
+> it and ask for the address, agent and phone itself. The roll-up marks it
+> *unverifiable* and nothing renames it: the scrape is the only thing that names
+> folders, and it cannot name a listing it has no row for.
+
 **Step 5.** Start the tool:
 
 ```bash
@@ -46,7 +52,10 @@ python3 tour.py
 
 1. Contact sheet — check the photo order.
 2. Draft — watch `draft.mp4`.
-3. Delivery — the six cuts land in `out/`.
+3. Build — take the default, **Sample cuts**. The three watermarked `sample_`
+   cuts land in `out/`. The `tour_` deliverables are run 2, after sign-off — this
+   is a cold email, and building them now spends half a six-minute encode on a
+   client who may never reply.
 
 **Step 11.** At the publish prompt, answer **yes**. Review the file list and the
 URLs, and confirm.
@@ -54,22 +63,31 @@ URLs, and confirm.
 **Step 12.** Open `outreach/drafts/<brand>__<listing>.txt`, read it, and paste it
 into your mail client. The link is already in it. Send.
 
+`python3 status.py` now reads `sample published -- awaiting sign-off` for this
+listing. If the client never replies, nothing further is spent on it.
+
 ---
 
 ## After sign-off
 
-**Step 13.** Send the client `out/<agent>_tour_branded.mp4`,
+**Step 13.** Run `python3 tour.py` again and pick the same listing. Rung 3 now
+asks whether the client has signed off; answer **yes** and it builds the three
+`tour_` deliverables — about a minute, not six, because it reuses the stitch run 1
+left behind. The `sample_` cuts stay where they are.
+
+**Step 14.** Send the client `out/<agent>_tour_branded.mp4`,
 `out/<agent>_tour_unbranded.mp4` and `out/<agent>_tour_vertical.mp4` by hand.
+Never a `sample_` file.
 
 ---
 
 ## Before pushing code
 
-**Step 14.** Run the checks:
+**Step 15.** Run the checks:
 
 ```bash
 python3 check_pii.py
 python3 -m unittest discover -s tests -t .
 ```
 
-**Step 15.** Commit and push.
+**Step 16.** Commit and push.

@@ -7,7 +7,9 @@ PII gate that prints "Safe to push" because it scanned nothing at all.
 """
 import contextlib
 import io
+import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -123,6 +125,94 @@ class TestZeroDimensionAssets(unittest.TestCase):
                     mod.finish("work_silent.mp4", None, None, "out/x.mp4",
                                branded=False, watermark="viabolat.png")
             self.assertIn("watermark", str(cm.exception).lower())
+
+    def test_a_missing_watermark_stops_the_build_too(self):
+        """A watermark that is not there is a watermark that will not render.
+
+        reason: this used to be `use_wm = bool(watermark and exists(watermark))`
+        -- a present-but-unreadable file refused, an ABSENT one was skipped in
+        silence. Every config.json the scraper writes pins the path, so the hole
+        only opened on folders that were never scraped: exactly the hand-placed
+        ones tour.py now admits, and the bare "viabolat.png" fallback does not
+        resolve from a listing folder. The result was an unwatermarked
+        sample_ cut that publish.py then uploaded on the strength of its name.
+        """
+        with listing(config={}) as (mod, tmp):
+            mod.run = lambda cmd: None
+            mod.duration = lambda path: 60.0
+            self.assertFalse(os.path.exists(os.path.join(tmp, "viabolat.png")))
+            with self.assertRaises(SystemExit) as cm:
+                with contextlib.redirect_stdout(io.StringIO()):
+                    mod.finish("work_silent.mp4", None, None, "out/x.mp4",
+                               branded=False, watermark="viabolat.png")
+            self.assertIn("watermark", str(cm.exception).lower())
+
+    def test_a_cut_that_asks_for_no_watermark_is_unaffected(self):
+        """The refusal is scoped to the sample family. A --delivery-only run
+        passes watermark=None and must build exactly as it always has."""
+        with listing(config={}) as (mod, tmp):
+            cmds = []
+            mod.run = lambda cmd: cmds.append(cmd)
+            mod.duration = lambda path: 60.0
+            with contextlib.redirect_stdout(io.StringIO()):
+                mod.finish("work_silent.mp4", None, None, "out/x.mp4",
+                           branded=False, logo=None)
+            self.assertTrue(cmds, "a delivery cut needs no watermark to build")
+
+
+class TestTheWatermarkRefusalIsCheap(unittest.TestCase):
+    """Knowing at second one and refusing at minute five is the repo's own
+    stated failure shape -- it is what the resolution gate was fixed for.
+
+    So the watermark is checked at preflight, before the lock, the clips and the
+    stitch. finish() keeps its own check as the last gate before the pixels.
+    """
+
+    def build(self, *flags, watermark="does_not_exist.png"):
+        d = tempfile.mkdtemp(prefix="wm_gate_")
+        self.addCleanup(shutil.rmtree, d, True)
+        os.mkdir(os.path.join(d, "photos"))
+        for i in range(2):
+            # reason: a real jpeg is not needed -- the refusal must land before
+            # anything tries to decode these.
+            open(os.path.join(d, "photos", f"0{i}_a.jpg"), "wb").close()
+        with open(os.path.join(d, "config.json"), "w") as f:
+            json.dump({"watermark": watermark}, f)
+        r = subprocess.run(
+            [sys.executable, os.path.join(REPO, "make_tour.py"),
+             "--720p", "--allow-lowres", "--no-music", *flags],
+            cwd=d, capture_output=True, text=True, timeout=120)
+        return r, d
+
+    def test_a_sample_build_refuses_before_taking_the_lock(self):
+        r, d = self.build("--samples-only")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("REFUSING TO BUILD", r.stdout + r.stderr)
+        self.assertFalse(os.path.exists(os.path.join(d, ".build.lock")),
+                         "the lock was taken before the refusal")
+
+    def test_the_refusal_leaves_no_intermediates_behind(self):
+        _r, d = self.build("--samples-only")
+        for leftover in ("out", "clips", "work_silent.mp4"):
+            self.assertFalse(os.path.exists(os.path.join(d, leftover)),
+                             f"{leftover} was written before the refusal")
+
+    def test_a_default_build_refuses_too(self):
+        """A bare run writes the sample family, so it needs the watermark."""
+        r, _d = self.build()
+        self.assertNotEqual(r.returncode, 0)
+
+    def test_a_delivery_only_build_needs_no_watermark(self):
+        """The scope of the refusal. Run 2 applies no watermark at all, so a
+        broken one must not stop the client's paid deliverable from building."""
+        r, d = self.build("--delivery-only")
+        self.assertNotIn("REFUSING TO BUILD", r.stdout + r.stderr)
+
+    def test_the_message_names_the_way_out(self):
+        r, _d = self.build("--samples-only")
+        out = r.stdout + r.stderr
+        self.assertIn("does_not_exist.png", out)
+        self.assertIn("global_assets/logos/viabolat.png", out)
 
 
 class TestPhotoListingSurvivesBadEntries(unittest.TestCase):

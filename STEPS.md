@@ -130,7 +130,11 @@ name or phone would put one agent's details on the other's card, lower third and
 output filenames across every listing that brokerage owns, and it would do it
 silently, because `brand.json` is layered *under* the listing's `config.json`.
 
-Then the three rungs, confirming between each — contact sheet, draft, delivery —
+Then the three rungs, confirming between each — contact sheet, draft, build —
+where the third asks which family to write and defaults to what `out/` says is
+next: the three watermarked `sample_` cuts on a listing with nothing built, the
+three `tour_` deliverables once the client has signed off. All six in one go stays
+one keystroke away. See §3 —
 with the delivery built at 720p even when the photos do not clear it, after it
 names the count and the worst file — and again when the cuts are done. Nothing in
 the filenames records that; the console does. It picks the build
@@ -166,7 +170,10 @@ cd agents/<brand>/<listing>
 python3 ../../../publish.py --dry-run   # what would go public, and the exact URLs
 python3 ../../../publish.py             # the same, then asks, then uploads
 ```
-`tour.py` offers this as rung 4 straight after a delivery build. It defaults to
+`tour.py` offers this as rung 4 straight after a **sample** build — that is the
+run whose whole purpose is to be reviewed. After a delivery-only run it prints the
+send-by-hand line instead, since the sample cuts sitting in `out/` were published
+weeks earlier and re-offering them would be noise. It defaults to
 **no** — it is the one rung that leaves the machine — and is skipped in silence
 when no credentials are configured, so an operator without a key is not nagged on
 every delivery. Choosing **3. Publish a review link** from the home screen says
@@ -353,8 +360,15 @@ commands shown in the scenarios below.
 | `--no-music` | Silent build. Outputs still carry a silent audio track. |
 | `--keep-work` | Keep `clips/`, `work_silent.mp4` and `work_branded.mp4` so `--finish-only` can reuse them. Applies to the rung being run — a delivery build clears the draft lineage either way. |
 | `--finish-only` | Reuse the stitches, redo music + branding only. Implies `--keep-work`. Restitches `work_branded.mp4` from the kept clips if it is gone; falls back to a full build if the clips are gone too. |
+| `--samples-only` | Write only the three `sample_` cuts — run 1, the client's proofing copy. |
+| `--delivery-only` | Write only the three `tour_` cuts — run 2, after sign-off. Needs no watermark. |
 
 Flags combine freely: `python3 make_tour.py --720p --no-music --keep-work`
+
+`--samples-only` and `--delivery-only` are opposites and passing both **exits 2** —
+"build neither family" is not a request. Passing neither builds all six, which is
+what a bare CLI run has always done; `tour.py` is what stages them across two runs.
+See §3.
 
 `--contact-sheet` ignores everything else and exits. `--draft` forces 720p, so
 `--720p` is redundant with it and `--allow-lowres` is implied by intent — a draft
@@ -501,11 +515,19 @@ To change the file it uses, edit `SAMPLE_WATERMARK` at `make_tour.py:165`, or se
 
 ### Build without the sample cuts
 ```bash
-mv viabolat.png viabolat.png.off
-python3 make_tour.py --finish-only
+python3 make_tour.py --delivery-only --finish-only
 ```
-The `sample_` files are still written, just without a watermark — which makes them
-duplicates of the `tour_` files. Delete them, or keep the watermark in place.
+Moving `viabolat.png` out of the way does **not** do this: a watermark that will
+not resolve is a hard refusal, not a skipped layer, because a `sample_` cut without
+one is an unwatermarked deliverable wearing a proofing filename. It refuses at
+preflight, in under a second, before the lock or any encoding — not five minutes in.
+Ask for the delivery family instead and no watermark is needed.
+
+### Build only the sample cuts
+```bash
+python3 make_tour.py --samples-only
+```
+Run 1. Three watermarked cuts, and the stitch is kept for run 2.
 
 ### Swap the music
 ```bash
@@ -579,7 +601,34 @@ See §5 before sending the result to anyone.
 
 ## 3. Outputs
 
-Six files land in `out/`, overwritten on every run. Two families, same edit.
+Six files land in `out/`, overwritten on every run. Two families, same edit — or
+one family at a time, which is how `tour.py` drives it.
+
+**Two runs per listing.** The `tour_` trio is the paid deliverable and is only sent
+after the client signs off, so building it up front spends half a six-minute encode,
+and its share of ~200 MB, on a cold-outreach listing that may never reply. So:
+
+| Run | Flag | Writes | Cost |
+|---|---|---|---|
+| 1 — proofing | `--samples-only` | the three `sample_` cuts | full build, ~6 min |
+| 2 — after sign-off | `--delivery-only` | the three `tour_` cuts | `--finish-only`, ~1 min |
+
+Run 2 is cheap because both families come off the **same stitch**, which run 1 left
+behind. `.last_build.json`'s rung key names that intermediate lineage — `draft` /
+`delivery` — not the cut family, so both runs record `delivery` and run 2 finds the
+record unchanged. Change the photos or the pacing in between and it correctly does
+a full rebuild instead.
+
+**Which run a listing is on is derived from `out/`**, never recorded: nothing there
+means run 1, `sample_` cuts alone mean run 2 is next, any `tour_` cut means
+delivered. That is the same rule that keeps photo order in the filename prefix — a
+marker file beside the artifacts drifts out of sync with them. `status.py` names
+the state (`sample built -- publish the review link`, `sample published -- awaiting
+sign-off`, `delivered, N cuts`).
+
+A bare `python3 make_tour.py` still writes all six, and `tour.py` offers *All six
+now* from the same menu for a client who has already paid. The staging is a
+default, not a restriction.
 
 Every filename is `<agent>_<family>_<shape>.mp4`. The `<agent>` part is
 `output_prefix`, or `agent_name` slugified when that is blank — six listings all
@@ -752,7 +801,7 @@ that would clear it, and `--allow-lowres`. With the flag it builds and prints:
   like any other build; the shortfall is restated when the build finishes.
 ```
 
-and, once the six cuts exist:
+and, once the cuts exist:
 
 ```
   BELOW PAR. 17 of 17 photos are under 2150px, so every cut
@@ -763,7 +812,7 @@ and, once the six cuts exist:
 ```
 
 `tour.py` never dead-ends. When neither preset clears it says so, quotes the count
-and the worst file, drops to 720p + `--allow-lowres`, and builds all six. It used
+and the worst file, drops to 720p + `--allow-lowres`, and builds. It used
 to refuse at the *end* of a run — after the question set and a draft — despite
 having known at preflight, which threw the work away and named no numbers. The gate
 still measures exactly the same thing; it now **reports** rather than refusing or

@@ -76,7 +76,18 @@ def tour_module():
 
 def source():
     """make_tour.py as text, for the wiring assertions."""
-    with open(MAKE_TOUR) as f:
+    return repo_source("make_tour.py")
+
+
+def repo_source(relpath):
+    """Any repo script as text, for the wiring assertions.
+
+    reason: several guards read the *structure* of a function rather than
+    running it -- which stitch a call is handed, which flag gates a call site.
+    Those tests need the file as text, and each one opening it inline leaked a
+    handle and drifted on encoding.
+    """
+    with open(os.path.join(REPO, relpath), encoding="utf-8") as f:
         return f.read()
 
 

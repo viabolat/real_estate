@@ -13,6 +13,8 @@ Three rungs, each costing what the question is worth:
     python3 make_tour.py --allow-lowres  # build even from undersized photos
     python3 make_tour.py --720p          # 1280x720, for sources under 2150px
     python3 make_tour.py --keep-work     # keep intermediates so --finish-only works
+    python3 make_tour.py --samples-only  # the 3 sample_ cuts only  (run 1)
+    python3 make_tour.py --delivery-only # the 3 tour_ cuts only    (run 2)
 
 --contact-sheet writes contact_sheet.png -- one numbered grid of photos/ in build
 order -- and exits. It encodes nothing and runs before the resolution gate, since
@@ -62,7 +64,12 @@ Every image asset is probed before it is composited. A logo or lower third that
 is present but unreadable -- 0 bytes, truncated, not actually an image -- is
 dropped with a warning and the build continues without that layer; a card falls
 back to its type layout. The WATERMARK is the exception and refuses the build
-outright, because a sample_ cut without it is not a sample.
+outright, because a sample_ cut without it is not a sample. That refusal covers a
+watermark that is MISSING as well as one that is unreadable: an absent file used
+to be skipped in silence, which wrote an unmarked sample_ cut that publish.py then
+uploaded on the strength of its name. It is checked at PREFLIGHT -- before the
+lock, the clips and the stitch -- and again in finish(). A --delivery-only run
+needs no watermark and is unaffected.
     config.json      optional per-listing overrides -- see below.
 
 Run it from the folder holding photos/. That is normally a listing folder such as
@@ -145,6 +152,22 @@ Sean O'Brien signs sean_obrien_tour_branded.mp4, not sean_o_brien_...:
 
     DRAFT (--draft only, never a deliverable)
     draft.mp4                         listing root, NOT out/
+
+--samples-only and --delivery-only build one family instead of both. A bare run
+still builds all six, exactly as it always has -- the staging is tour.py's, and a
+CLI run in an older folder is unchanged. The two flags are opposites and passing
+both exits 2, since "build neither family" is not a request.
+
+The point is cost. The tour_ trio is the paid deliverable and is only sent after
+the client signs off, so on a cold-outreach pipeline building it up front spends
+half of a six-minute encode, and its share of ~200 MB, on a listing that may never
+reply. Run 1 writes the three watermarked sample_ cuts the client reviews; run 2,
+after sign-off, writes the three tour_ deliverables. Both families come off the
+SAME stitch, so run 2 is a --finish-only pass of about a minute rather than six --
+which is why .last_build.json's rung key names the intermediate lineage
+("draft" / "delivery") and not the cut family. Which run a listing is on is
+derived by tour.py from what is already in out/; nothing here records it, and no
+marker file is invented to hold it.
 
 A build made from photos that miss the resolution gate -- only reachable with
 --allow-lowres -- is named exactly like any other build. The shortfall is reported
@@ -300,6 +323,22 @@ SAMPLE_WM_OPACITY = 0.35         # 0-1. Readable, still see-through.
 # is pinned to the cheap preset and a fast encoder regardless of what the delivery
 # build will use. Measured on 8 photos: delivery 5m50s, draft ~45s.
 DRAFT = "--draft" in sys.argv
+
+# Which of the two output families this run writes. Both default to on, so a bare
+# run still builds all six exactly as it always has -- tour.py is what stages them.
+# reason: the tour_ trio is the paid deliverable and is only ever sent after the
+# client signs off, so building it up front spends half a six-minute encode on a
+# listing that may never reply. The families are independent at the output stage
+# (vertical() reads only its own family's two landscape cuts), so either trio can
+# be built alone off the same stitch. Which run a listing is on is derived from
+# what is already in out/ -- see tour.py's stage() -- never recorded in a file.
+SAMPLES_ONLY = "--samples-only" in sys.argv
+DELIVERY_ONLY = "--delivery-only" in sys.argv
+if SAMPLES_ONLY and DELIVERY_ONLY:
+    print("--samples-only and --delivery-only are opposites; passing both asks "
+          "for\nnothing. Drop one, or pass neither to build all six.",
+          file=sys.stderr)
+    sys.exit(2)
 
 # 1080p needs 2150px sources; 720p needs 1434px. Pick the one your photos can
 # actually feed -- a crisp downscale beats a soft upscale every time.
@@ -1005,6 +1044,37 @@ def build_cards(logo):
     return intro, outro
 
 
+def require_watermark(watermark):
+    """Refuse the build unless the proofing watermark will actually render.
+
+    reason: this is the only thing separating a sample_ cut from a deliverable,
+    so unlike the logo and the lower third it is NOT degraded to a warning. It
+    covers a MISSING file as well as an unreadable one -- the old
+    `bool(watermark and os.path.exists(...))` skipped an absent watermark in
+    silence and wrote an unmarked proof, which publish.py then uploaded on the
+    strength of its filename.
+
+    Called from preflight as well as from finish(), because knowing at second
+    one and refusing at minute five is this repo's own stated failure shape --
+    it is what the resolution gate used to do. finish() keeps its check: it is
+    the last gate before the pixels, and a caller that reaches it with a broken
+    watermark must still not get a cut.
+    """
+    if not os.path.exists(watermark):
+        sys.exit(f"REFUSING TO BUILD: {watermark} does not exist.\nThe proofing "
+                 f"watermark is the boundary between a sample and a deliverable; "
+                 f"a cut\nwithout it is not a sample. Point 'watermark' in "
+                 f"config.json at a valid image --\nthe shared one is "
+                 f"global_assets/logos/viabolat.png.\n"
+                 f"A --delivery-only build needs no watermark.")
+    if not image_ok(watermark):
+        sys.exit(f"REFUSING TO BUILD: {watermark} is unreadable or has no "
+                 f"dimensions.\nThe proofing watermark is the boundary between a "
+                 f"sample and a deliverable; a cut without it is not a sample.\n"
+                 f"Replace the file, or point 'watermark' in config.json at a "
+                 f"valid image.")
+
+
 def finish(silent, music, brand, out, branded=True, logo=None, watermark=None,
            cards=(0.0, 0.0)):
     dur = duration(silent)
@@ -1047,13 +1117,15 @@ def finish(silent, music, brand, out, branded=True, logo=None, watermark=None,
     # the two above. It is the only thing separating a sample_ cut from a
     # deliverable, so silently dropping it writes an unmarked proof -- the exact
     # file CLAUDE.md forbids sending. A broken watermark stops the build.
-    if watermark and os.path.exists(watermark) and not image_ok(watermark):
-        sys.exit(f"REFUSING TO BUILD: {watermark} is unreadable or has no "
-                 f"dimensions.\nThe proofing watermark is the boundary between a "
-                 f"sample and a deliverable; a cut without it is not a sample.\n"
-                 f"Replace the file, or point 'watermark' in config.json at a "
-                 f"valid image.")
-    use_wm = bool(watermark and os.path.exists(watermark))
+    # reason: a MISSING watermark used to fall through to use_wm=False and write
+    # an unmarked sample_ cut in silence -- publish.py then uploads it on the
+    # filename alone. A watermark that is absent is a watermark that will not
+    # render, which is the same refusal as one that will not decode. This fires
+    # only when a caller asked for a watermark, so --delivery-only, which asks
+    # for none, is unaffected.
+    if watermark:
+        require_watermark(watermark)
+    use_wm = bool(watermark)
 
     # reason: the lower third carries per-listing agent info, the logo is the
     # constant brokerage mark. They are separate inputs so changing one does not
@@ -1378,6 +1450,15 @@ def main():
                  "Drop in a track you are licensed to use, or rerun with "
                  "--no-music to build silent versions.")
 
+    # reason: the watermark is a hard refusal, so it is checked HERE -- before
+    # the lock, the clips and the stitch -- and not only at the moment a sample
+    # cut is composited. Discovering it at minute five, after the encode has been
+    # paid for, is exactly what the resolution gate was fixed for. Only the runs
+    # that actually apply one are gated: --delivery-only needs no watermark, a
+    # draft does carry it.
+    if DRAFT or not DELIVERY_ONLY:
+        require_watermark(SAMPLE_WATERMARK)
+
     acquire_lock()
     if not DRAFT:
         os.makedirs("out", exist_ok=True)
@@ -1470,9 +1551,13 @@ def main():
                                          duration(branded_silent)))
     # reason: every overlay is silently optional, which made a typo'd filename look
     # like a working build with no branding. Say what is actually applied.
-    for name, path in (("lower third", brand_plate), ("logo", LOGO),
-                       ("sample watermark", SAMPLE_WATERMARK)):
+    for name, path in (("lower third", brand_plate), ("logo", LOGO)):
         print(f"  {name}: {path if os.path.exists(path) else 'not found - skipped'}")
+    # reason: branding is cosmetic and says "skipped"; the watermark is not, and
+    # a missing one now refuses the build rather than quietly writing an unmarked
+    # sample. Say which of the two this is before minutes are spent stitching.
+    print(f"  sample watermark: {SAMPLE_WATERMARK}"
+          f"{'' if os.path.exists(SAMPLE_WATERMARK) else ' - MISSING, sample cuts will refuse'}")
 
     # reason: one cut, and it is the watermarked branded one -- that single file
     # shows the running order, the pacing, the lower third, the logo and the music
@@ -1502,27 +1587,42 @@ def main():
             ("tour_branded", "tour_unbranded", "tour_vertical",
              "sample_branded", "sample_unbranded", "sample_vertical")}
 
-    print(f"  {os.path.basename(cuts['tour_branded'])}...")
-    finish(branded_silent, music, brand_plate,
-           cuts["tour_branded"], branded=True, logo=LOGO, cards=spans)
-    print(f"  {os.path.basename(cuts['tour_unbranded'])}...")
-    finish(silent, music, None,
-           cuts["tour_unbranded"], branded=False, logo=None)
+    if SAMPLES_ONLY:
+        print("Building the sample_ cuts only -- the client's proofing copy. The "
+              "tour_\ndeliverables are a second run, after sign-off.")
+    elif DELIVERY_ONLY:
+        print("Building the tour_ cuts only -- the signed-off deliverables. The "
+              "sample_\ncuts already in out/ are left where they are.")
+
+    # reason: every call site below stays exactly where it was and is only
+    # nested. tests/test_card_isolation.py walks main() and asserts FOUR finish()
+    # calls with a cuts[...] target and TWO vertical() calls -- that is the guard
+    # keeping the card off the MLS cut, and it reads the wiring, not the run.
+    if not SAMPLES_ONLY:
+        print(f"  {os.path.basename(cuts['tour_branded'])}...")
+        finish(branded_silent, music, brand_plate,
+               cuts["tour_branded"], branded=True, logo=LOGO, cards=spans)
+        print(f"  {os.path.basename(cuts['tour_unbranded'])}...")
+        finish(silent, music, None,
+               cuts["tour_unbranded"], branded=False, logo=None)
 
     # reason: sample cuts are the client proofing copy -- identical edit, plus a
     # centered watermark so an unapproved tour cannot be used as-is. The tour_
     # files are the delivery once they sign off.
-    print(f"  {os.path.basename(cuts['sample_branded'])}...")
-    finish(branded_silent, music, brand_plate, cuts["sample_branded"],
-           branded=True, logo=LOGO, watermark=SAMPLE_WATERMARK, cards=spans)
-    print(f"  {os.path.basename(cuts['sample_unbranded'])}...")
-    finish(silent, music, None, cuts["sample_unbranded"],
-           branded=False, logo=None, watermark=SAMPLE_WATERMARK)
+    if not DELIVERY_ONLY:
+        print(f"  {os.path.basename(cuts['sample_branded'])}...")
+        finish(branded_silent, music, brand_plate, cuts["sample_branded"],
+               branded=True, logo=LOGO, watermark=SAMPLE_WATERMARK, cards=spans)
+        print(f"  {os.path.basename(cuts['sample_unbranded'])}...")
+        finish(silent, music, None, cuts["sample_unbranded"],
+               branded=False, logo=None, watermark=SAMPLE_WATERMARK)
 
     print("Building vertical cuts...")
-    vertical(cuts["tour_unbranded"], cuts["tour_branded"], cuts["tour_vertical"])
-    vertical(cuts["sample_unbranded"], cuts["sample_branded"],
-             cuts["sample_vertical"])
+    if not SAMPLES_ONLY:
+        vertical(cuts["tour_unbranded"], cuts["tour_branded"], cuts["tour_vertical"])
+    if not DELIVERY_ONLY:
+        vertical(cuts["sample_unbranded"], cuts["sample_branded"],
+                 cuts["sample_vertical"])
 
     # reason: measure before cleanup() deletes the stitches these read from.
     runtime, plain = duration(branded_silent), duration(silent)
