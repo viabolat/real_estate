@@ -131,8 +131,9 @@ output filenames across every listing that brokerage owns, and it would do it
 silently, because `brand.json` is layered *under* the listing's `config.json`.
 
 Then the three rungs, confirming between each — contact sheet, draft, delivery —
-with the delivery built as `_lowres` when the photos do not clear 720p, after it
-names the count and the worst file. It picks the build
+with the delivery built at 720p even when the photos do not clear it, after it
+names the count and the worst file — and again when the cuts are done. Nothing in
+the filenames records that; the console does. It picks the build
 mode for you: `--finish-only` when only branding, music or timing changed since the
 last build of that rung, a full `--keep-work` build when the photos, the pacing, the
 card or the output preset changed. Draft and delivery keep separate records in
@@ -179,14 +180,32 @@ not go out before sign-off. Send that one by hand, afterwards.
 
 The upload prints every filename, its size, the exact remote path
 (`<brand>/<listing>/<file>` — never the bare filename, or two listings collide)
-and the resulting URL, then asks. `--dry-run` stops there. A `_lowres` cut asks a
-second time: a prospect judges the quality of your work by the file you send them.
+and the resulting `https://real-estate.viabolat.com/preview/...` URL, then asks.
+`--dry-run` stops there. If the listing's photos
+miss the 720p gate it says so — measured from `photos/`, not read off a filename —
+and asks a second time: a prospect judges the quality of your work by the file you
+send them.
 
-Confirmed links are appended to `outreach/links.csv`. "Confirmed" means the storage
-API lists the object at the right size — not that the public URL answered, because
-the CDN edge may lag the upload by a few seconds. **A `/preview/` link that 404s
-immediately after a publish is usually a cold edge, not a failed upload.** Wait and
-retry before re-uploading.
+Confirmed links are appended to `outreach/links.csv` as
+`uploaded_at,brand,listing,cut,url`. The URL is the **last** field on the line so
+that nothing can be swallowed into it when you copy it. "Confirmed" means the
+storage API lists the object at the right size — not that the public URL answered,
+because the CDN edge may lag the upload by a few seconds. **A `/preview/` link
+that 404s immediately after a publish is usually a cold edge, not a failed
+upload.** Wait and retry before re-uploading.
+
+**The email writes itself.** Every confirmed publish also leaves a ready-to-send
+draft at `outreach/drafts/<brand>__<listing>.txt` — the wording from
+`outreach/template.txt`, the agent's first name and the address from the listing's
+`config.json`, and the `sample_branded` link. Open it, read it, paste it into your
+mail client. `--dry-run` prints the draft instead of writing it, so you can see
+exactly what it would say before anything uploads.
+
+Two things it will not do. It never quotes a `tour_` link — cold outreach sends
+the watermarked cut, and the difference is one word in a filename. And it never
+sends: there is no SMTP credential in this repo and no flag that adds one. If a
+field is blank in `config.json` the draft keeps the `{placeholder}` visible and
+the console tells you which — fill it in before you send.
 
 The local files in `out/` are never touched. `out/` stays the copy of record.
 
@@ -252,9 +271,13 @@ publish that quietly does nothing reads exactly like one that worked.
 
 ### Deploy the preview rewrite
 
-A `/preview/` link only answers once the rewrite is deployed. Vercel hosts **no
+A preview link only answers once the rewrite is deployed. Vercel hosts **no
 video** — `vercel.json` is a single rewrite rule pointing `/preview/:path*` at the
-public bucket, and the bytes come from Supabase.
+public bucket, and the bytes come from Supabase. The published link is absolute,
+`https://real-estate.viabolat.com/preview/<brand>/<listing>/<cut>`, so it works
+where it is actually used: pasted into an email. The host lives in one place,
+`PREVIEW_HOST` in `publish.py`, and must match the domain attached to this
+deployment.
 
 ```bash
 python3 check_pii.py       # exit 0, or do not push
@@ -326,7 +349,7 @@ commands shown in the scenarios below.
 | `--draft` | 720p at a fast preset, **one** cut: `draft.mp4` in the listing root, branded and watermarked. ~1min. Never a deliverable — see §3. |
 | *(none)* | 1920x1080. Requires photos >= 2150px wide. |
 | `--720p` | 1280x720. Requires photos >= 1433px wide. |
-| `--allow-lowres` | Build from photos that miss the gate. Names every cut `..._lowres.mp4` — see §5. |
+| `--allow-lowres` | Build from photos that miss the gate. Output names are unchanged; the shortfall is printed before and after the build — see §5. |
 | `--no-music` | Silent build. Outputs still carry a silent audio track. |
 | `--keep-work` | Keep `clips/`, `work_silent.mp4` and `work_branded.mp4` so `--finish-only` can reuse them. Applies to the rung being run — a delivery build clears the draft lineage either way. |
 | `--finish-only` | Reuse the stitches, redo music + branding only. Implies `--keep-work`. Restitches `work_branded.mp4` from the kept clips if it is gone; falls back to a full build if the clips are gone too. |
@@ -582,12 +605,14 @@ Examples below use `jane_smith`.
 | `jane_smith_sample_unbranded.mp4` | the unbranded tour + centered watermark |
 | `jane_smith_sample_vertical.mp4` | the vertical tour + centered watermark |
 
-### `_lowres` — the photos missed the gate
+### When the photos missed the gate
 
-A build made with `--allow-lowres` suffixes all six:
-`jane_smith_tour_unbranded_lowres.mp4`. The edit is identical; the pixels are an
-upscale. It is watchable for a review and **not** MLS-ready. `tour.py` prints the
-count, the worst file and its upscale factor before it builds one. See §5.
+A build made with `--allow-lowres` produces the same six names as any other build.
+The edit is identical; the pixels are an upscale. It is watchable for a review and
+**not** MLS-ready, and **the filename will not tell you that** — `tour.py` prints
+the count, the worst file and its upscale factor before it builds one and again
+with the finished list, `status.py` marks the listing `soft (NNNpx photos)`, and
+`publish.py` asks twice. See §5.
 
 The client watches a `sample_` cut to decide. On approval, deliver the matching
 `tour_` file. The watermark sits centered at 45% of frame and 35% opacity —
@@ -723,15 +748,27 @@ From the bare CLI it then exits, naming the pixel target, the smaller preset if
 that would clear it, and `--allow-lowres`. With the flag it builds and prints:
 
 ```
-  --allow-lowres set: building anyway. Every cut will be named _lowres.
+  --allow-lowres set: building anyway at 1920x1080. The cuts are named
+  like any other build; the shortfall is restated when the build finishes.
+```
+
+and, once the six cuts exist:
+
+```
+  BELOW PAR. 17 of 17 photos are under 2150px, so every cut
+  above is a 1920x1080 upscale -- worst 02_exterior_street.png at 384x288,
+  upscaled 5.6x.
+  Watchable, not sharp. Rebuild from the photographer's originals before this
+  goes to the MLS. Nothing in the filenames records this -- see IDEA.md 4.
 ```
 
 `tour.py` never dead-ends. When neither preset clears it says so, quotes the count
-and the worst file, drops to 720p + `--allow-lowres`, and builds all six as
-`_lowres`. It used to refuse at the *end* of a run — after the question set and a
-draft — despite having known at preflight, which threw the work away and named no
-numbers. The gate still measures exactly the same thing; it now decides what the
-files are **called** instead of whether they exist.
+and the worst file, drops to 720p + `--allow-lowres`, and builds all six. It used
+to refuse at the *end* of a run — after the question set and a draft — despite
+having known at preflight, which threw the work away and named no numbers. The gate
+still measures exactly the same thing; it now **reports** rather than refusing or
+renaming, everywhere the question comes up: preflight, the build confirmation, the
+finished file list, `status.py`, and `publish.py`.
 
 | Preset | Output | Minimum source width |
 |---|---|---|
@@ -742,12 +779,13 @@ The minimum is output width x `ZOOM_MAX` — the zoom crops *into* the photo, so
 pipeline needs more pixels than the final frame.
 
 **`--allow-lowres` does not improve anything.** Upscaling a 384px photo to 1920px
-smears what's there; there is no detail to recover. The `_lowres` tag is the
+smears what's there; there is no detail to recover. The console output is the
 warning, not permission.
 
-> **Never send a `_lowres` cut to a client or the MLS. If a build needs the flag,
-> the photos are not ready.** Stripping the tag means renaming the file by hand,
-> which is deliberately a two-hand act.
+> **Never send a soft cut to a client or the MLS. If a build needs the flag, the
+> photos are not ready.** The filename is silent on this by design — the check is
+> re-run from `photos/` by `status.py` and `publish.py`, so it survives long after
+> the build log has scrolled away.
 
 The fix is always better sources — the listing photographer's originals or the MLS
 back end. See `IDEA.md` §2.

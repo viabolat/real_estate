@@ -147,9 +147,10 @@ Sean O'Brien signs sean_obrien_tour_branded.mp4, not sean_o_brien_...:
     draft.mp4                         listing root, NOT out/
 
 A build made from photos that miss the resolution gate -- only reachable with
---allow-lowres -- names all six ..._lowres.mp4. The tag travels with the file
-because the console line that warned about it does not: a soft cut sitting in a
-downloads folder three weeks later still says what it is.
+--allow-lowres -- is named exactly like any other build. The shortfall is reported
+at preflight and again at the end of the run, with the count, the worst file and
+its upscale factor, so the resolution is stated where it can be read rather than
+carried in the filename.
 
 The watermark is NOT gated on branding -- it is the reason a sample exists, so it
 appears on the unbranded sample too. Never send a sample_ file as a deliverable
@@ -500,16 +501,17 @@ def gate_failures(photos, out_w=None, out_h=None):
 
 
 def check_resolution(photos, allow_lowres=False):
-    """Report photos too small to fill the frame. Returns True when any are.
+    """Report photos too small to fill the frame. Returns the offending list.
 
     reason: 384x288 sources were upscaled 5x to 1080p, which no crf/preset setting
     can fix. Fail at second zero instead of after a 5-minute render. The return
-    value is what names the output _lowres when the caller builds anyway -- the
-    console line scrolls away, the filename does not.
+    value carries the offenders so the end-of-build reminder can restate the
+    resolution -- the count, the worst file, its upscale factor -- rather than
+    encoding the verdict in the output filenames.
     """
     bad = gate_failures(photos)
     if not bad:
-        return False
+        return []
     worst = max(bad, key=lambda r: r[2])
     print(f"\n{len(bad)} of {len(photos)} photos are below {MIN_PHOTO_W}px on the "
           f"long edge, which is what {OUT_W}x{OUT_H} needs:")
@@ -527,23 +529,23 @@ def check_resolution(photos, allow_lowres=False):
         sys.exit(f"\nThese will look soft at {OUT_W}x{OUT_H}. Re-export at "
                  f"{MIN_PHOTO_W}px+ on the long edge -- 3000px+ if you can get "
                  f"the photographer's originals -- {step_down}rerun with "
-                 f"--allow-lowres to build anyway, which names every cut "
-                 f"_lowres so the shortfall travels with the file.")
-    print("  --allow-lowres set: building anyway. Every cut will be named "
-          "_lowres.\n")
-    return True
+                 f"--allow-lowres to build anyway.")
+    print(f"  --allow-lowres set: building anyway at {OUT_W}x{OUT_H}. The cuts "
+          f"are named\n  like any other build; the shortfall is restated when "
+          f"the build finishes.\n")
+    return bad
 
 
-def out_path(name, lowres=False):
-    """out/<agent>_<name>[_lowres].mp4 -- delivery naming, in one place.
+def out_path(name):
+    """out/<agent>_<name>.mp4 -- delivery naming, in one place.
 
     reason: the tour_/sample_ token is the boundary that stops a watermarked proof
     being sent as a deliverable, so it stays in the name whatever prefixes it.
-    _lowres is a suffix for the same reason the watermark is burned in: a soft cut
-    that has already been emailed on has no console log attached to it any more.
+    Nothing else is encoded in the filename: the resolution verdict is reported to
+    the console at preflight and at the end of the build instead.
     """
     prefix = f"{OUTPUT_PREFIX}_" if OUTPUT_PREFIX else ""
-    return f"out/{prefix}{name}{'_lowres' if lowres else ''}.mp4"
+    return f"out/{prefix}{name}.mp4"
 
 
 def music_span(path):
@@ -1366,7 +1368,8 @@ def main():
                  f"({BRAND_IN}). Fix {CONFIG_FILE} and rerun.")
     print(f"Output preset: {OUT_W}x{OUT_H} "
           f"(needs photos >= {MIN_PHOTO_W}px on the long edge)")
-    lowres = check_resolution(photos, allow_lowres="--allow-lowres" in sys.argv)
+    shortfall = check_resolution(photos,
+                                 allow_lowres="--allow-lowres" in sys.argv)
 
     no_music = "--no-music" in sys.argv
     music = None if no_music else MUSIC
@@ -1495,7 +1498,7 @@ def main():
     # unbranded cuts read the photos-only stitch. That split is what keeps an
     # agent's name and phone number off the MLS/IDX file. With no card the two
     # are the same object and nothing extra was encoded.
-    cuts = {n: out_path(n, lowres) for n in
+    cuts = {n: out_path(n) for n in
             ("tour_branded", "tour_unbranded", "tour_vertical",
              "sample_branded", "sample_unbranded", "sample_vertical")}
 
@@ -1532,11 +1535,14 @@ def main():
     print(f"\nDone. Runtime {runtime:.1f}s{extra}")
     for f in sorted(glob.glob("out/*.mp4")):
         print(f"  {f}  ({os.path.getsize(f)/1e6:.1f} MB)")
-    if lowres:
-        print(f"\n  BELOW PAR. The photos do not reach {MIN_PHOTO_W}px, so every "
-              f"cut above is\n  a {OUT_W}x{OUT_H} upscale and is named _lowres. "
-              f"It is watchable, not sharp.\n  Rebuild from the photographer's "
-              f"originals before this goes to the MLS.")
+    if shortfall:
+        worst = max(shortfall, key=lambda r: r[2])
+        print(f"\n  BELOW PAR. {len(shortfall)} of {len(photos)} photos are under "
+              f"{MIN_PHOTO_W}px, so every cut\n  above is a {OUT_W}x{OUT_H} "
+              f"upscale -- worst {os.path.basename(worst[0])} at {worst[1]}, "
+              f"upscaled {worst[2]:.1f}x.\n  Watchable, not sharp. Rebuild from "
+              f"the photographer's originals before this\n  goes to the MLS. "
+              f"Nothing in the filenames records this -- see IDEA.md 4.")
 
 
 if __name__ == "__main__":

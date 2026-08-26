@@ -528,7 +528,7 @@ way.
 > Investigated and rejected: the `d_d` CDN variant serves 800x532 for that same photo.
 > PSNR against the honest 346px bicubic-upscaled to 800 is **42.11 dB** — identical.
 > It is a server-side upscale with no added detail. Taking it would inflate dimensions
-> past the gate while adding nothing, defeating the `_lowres` tag and violating
+> past the gate while adding nothing, defeating the resolution verdict and violating
 > `IDEA.md` §3. The scraper keeps the honest variant and reports the true number.
 
 **`status.py` is new** — read-only, writes/encodes/downloads nothing. One line per
@@ -583,12 +583,12 @@ the photos would still be too small.
 |---|---|---|---|
 | `brewester/9_w_cedar` | 17 | **no** | -- predates the scraper, *unverifiable* |
 | `coldwell_banker_realty_boston/2_commonwealth_ave` | 28 | yes | 6 |
-| `coldwell_banker_realty_boston/8_dartmouth_st_5` | 20 | yes | 6 -- `_lowres`, sample only |
+| `coldwell_banker_realty_boston/8_dartmouth_st_5` | 20 | yes | 6 -- soft (1024px photos), sample only |
 | `coldwell_banker_realty_waltham/284_sumner_st_3` | 38 | yes | -- needs a brand logo |
 | `compass/12_adella_pl` | 22 | yes | -- needs a brand logo |
 | `corcoran/46_beacon_5` | 8 | **no** | -- predates the scraper, *unverifiable* |
-| `gibson_sothebys_international_realty/169_k_st_1` | 13 | yes | -- ready to build, would be `_lowres` |
-| `gibson_sothebys_international_realty/260_262_commonwealth_ave_1b` | 31 | yes | 6 -- `_lowres`, sample only |
+| `gibson_sothebys_international_realty/169_k_st_1` | 13 | yes | -- ready to build, would be soft |
+| `gibson_sothebys_international_realty/260_262_commonwealth_ave_1b` | 31 | yes | 6 -- soft (1024px photos), sample only |
 | `re_max_partners_relocation/407_w_1st_st_unit_101` | 39 | yes | -- needs a brand logo |
 | `serhant/267_old_colony_606` | 36 | yes | -- needs a brand logo |
 | `serhant/99_sumner_st_penthouse_621` | 40 | yes | -- needs a brand logo |
@@ -673,21 +673,36 @@ the daily path and the awkwardness only shows on direct CLI use.
 ### 5.1 Cold-outreach email generation
 
 The operator is wary of automated sending and **explicitly does not want mail going out
-automatically**. Design agreed on that basis; not built.
+automatically**. Design agreed on that basis. **The per-upload half is built as of
+2026-08-26**; the multi-lead sweep is not.
 
-**Two phases, no send path in the code at all:**
+**Built — `publish.py`, one draft per confirmed upload:**
 
-1. `emails.py --draft` reads `leads.csv`, finds each listing's finished cuts, and writes
-   one file per lead into `outreach/drafts/`. A lead with no video link yet is written
-   as `NEEDS_LINK_<agent>.eml` — the blocker rides in the filename, exactly like
-   `_lowres`.
-2. The link lands in `outreach/links.csv`; `--render` fills the drafts in.
-   **As of 2026-08-26 `publish.py` writes that file** — one row per confirmed
-   upload, `brand,listing,cut,url,uploaded_at`. Its `sample_`-only gate is the
-   hard-coded rule below, enforced in code rather than left to `emails.py`.
-3. Output is `.eml` files to drag into a mail client. **No SMTP credentials in the
-   repo.** Sending, if ever, is a separate deliberate decision — never a flag someone
-   trips.
+- `outreach/template.txt` holds the wording with `{agent_first}`, `{address}` and
+  `{url}`. It is the **only committed file under `outreach/`** — it carries no lead
+  data, only the sender's own name — via `outreach/*` plus `!outreach/template.txt`
+  in `.gitignore`, because git does not descend into an excluded directory and a
+  negation under a bare `outreach/` matches nothing.
+- Every confirmed publish renders it to `outreach/drafts/<brand>__<listing>.txt`
+  from the listing's `config.json` and the `sample_branded` link. `--dry-run`
+  prints it rather than writing it. A blank field leaves its `{placeholder}`
+  visible and the console names it.
+- `outreach/links.csv` is `uploaded_at,brand,listing,cut,url` — **url last**, `\n`
+  endings. It used to be `brand,listing,cut,url,uploaded_at`, and anything that
+  grabbed the link took the timestamp with it and 404'd. `record_links()` migrates
+  an older file in place.
+- Guarded by `tests/test_outreach_draft.py`: url stays the last column, the draft
+  never quotes a `tour_` cut, and `smtplib` / `sendmail` / `SMTP(` / `starttls`
+  may not appear in `publish.py`.
+
+**Still unbuilt — `emails.py`, the multi-lead sweep:** read `leads.csv`, find each
+listing's finished cuts, and draft for every lead at once, including the ones with
+no link yet (`NEEDS_LINK_<agent>` — the blocker rides in a drafting artefact's
+filename, never a deliverable's). Everything above is per-listing and only fires
+where a publish already happened.
+
+**No SMTP credentials in the repo**, in either half. Sending, if ever, is a separate
+deliberate decision — never a flag someone trips.
 
 **One rule it must hard-code:** cold outreach sends the **`sample_`** cut. That is what
 the watermarked family is for. Grabbing the `tour_` file gives away the paid
@@ -782,8 +797,8 @@ once volume justifies it, and is not a reason to delay.
   plausible-looking wrong address gets shipped. Apply and verify the moment a real
   dump is available.
 - **Should a preview link be short?** As of 2026-08-26 a published cut is reachable
-  at `/preview/<brand>/<listing>/<agent>_sample_branded` — the bucket path, straight
-  through the `vercel.json` rewrite. It is honest and collision-free, and it is long
+  at `https://real-estate.viabolat.com/preview/<brand>/<listing>/<agent>_sample_branded`
+  — the bucket path, straight through the `vercel.json` rewrite. It is honest and collision-free, and it is long
   and ugly in a cold email. The case for a short alias: the link is the thing a
   prospect clicks, and a 90-character URL reads as machine-generated. The case
   against, and why nothing was built: an alias is a second name for an object that

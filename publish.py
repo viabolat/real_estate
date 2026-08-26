@@ -36,6 +36,17 @@ object/list endpoint reads the origin and has no such race.
 Local files are never deleted. A public bucket must not become the only copy of a
 deliverable, and config.json is supposed to still explain what shipped months
 later.
+
+Every confirmed publish also writes one email draft to outreach/drafts/ --
+outreach/template.txt filled in with the agent's first name and the address from
+the listing's config.json, and the sample_branded link. It quotes the watermarked
+cut and never the tour_ file. Nothing is sent, and there is no SMTP credential
+anywhere in this repo: PROGRESS.md 5.1 settled that mail leaving the machine is a
+separate, deliberate act, never a flag someone trips.
+
+The link written to outreach/links.csv is the LAST field on its line, and the file
+is written with \n endings. It used to sit mid-row, so anything that grabbed the
+link took the uploaded_at timestamp with it and the URL 404'd.
 """
 
 import argparse
@@ -51,12 +62,48 @@ import urllib.parse
 import urllib.request
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
+
+PHOTO_EXT = (".jpg", ".jpeg", ".png")
+# Mirrors make_tour.py's 720p gate (1280 * ZOOM_MAX) -- see status.py.
+GATE_720P = 1433
+
+
+def _jpeg_size():
+    """Borrow the scraper's pure-stdlib header reader rather than keeping another
+    copy of it, or shelling out to ffprobe once per photo. status.py does the
+    same. Returns a callable; falls back to a no-op when the scraper is absent,
+    since a missing size check must never block a publish that is otherwise fine."""
+    try:
+        import importlib.util
+        path = os.path.join(ROOT, "scraper", "zillow_photos.py")
+        spec = importlib.util.spec_from_file_location("_zp_publish", path)
+        mod = importlib.util.module_from_spec(spec)
+        sys.path.insert(0, os.path.dirname(path))
+        try:
+            spec.loader.exec_module(mod)
+        finally:
+            sys.path.pop(0)
+        return mod.jpeg_size
+    except Exception:
+        return lambda path: (None, None)
+
+
+jpeg_size = _jpeg_size()
 DOTENV = os.path.join(ROOT, ".env")
 LINKS = os.path.join(ROOT, "outreach", "links.csv")
-LINK_COLUMNS = ["brand", "listing", "cut", "url", "uploaded_at"]
+# reason: url is LAST and uploaded_at FIRST. With the link mid-row, anything that
+# grabbed it took ",2026-08-26T16:58:12" along and the URL 404'd. Nothing follows
+# the last field, so nothing can be swallowed into it.
+LINK_COLUMNS = ["uploaded_at", "brand", "listing", "cut", "url"]
+TEMPLATE = os.path.join(ROOT, "outreach", "template.txt")
+DRAFTS = os.path.join(ROOT, "outreach", "drafts")
 
 BUCKET = "listing-media"
-PREVIEW_BASE = "/preview"          # the rewrite in vercel.json
+# The live host, plus the rewrite in vercel.json. Absolute on purpose: this string
+# is what gets pasted into a cold email and written to outreach/links.csv, and a
+# site-relative /preview/... path is not a link once it leaves this machine.
+PREVIEW_HOST = "https://real-estate.viabolat.com"
+PREVIEW_BASE = f"{PREVIEW_HOST}/preview"
 TIMEOUT = 300                      # a 72 MB cut over a slow line
 ATTEMPTS = 3
 PRIMARY_CUT = "sample_branded"     # the one that gets quoted in an email
@@ -185,6 +232,12 @@ def public_url(base, path):
 
 
 def preview_url(path):
+    """The public link for a remote path: PREVIEW_HOST/preview/<brand>/<listing>/<cut>.
+
+    reason: the .mp4 is dropped because vercel.json's rewrite appends it to the
+    destination -- keeping it here would resolve to <cut>.mp4.mp4 and 404. The host
+    is included because this is the string that reaches a client.
+    """
     stem = path[:-4] if path.endswith(".mp4") else path
     return f"{PREVIEW_BASE}/{urllib.parse.quote(stem)}"
 
@@ -262,16 +315,82 @@ def list_objects(base, key, prefix):
 
 # ---- the record -------------------------------------------------------------
 
+def migrate_links():
+    """Rewrite an existing links.csv into the current column order, once.
+
+    reason: the url used to sit mid-row, and csv's default \r\n put a trailing
+    carriage return on the last field for anything reading the file by hand. The
+    file is gitignored, so it never travels and a one-off fix here would not reach
+    any other clone -- the repair belongs in the code that writes it.
+    """
+    if not os.path.isfile(LINKS):
+        return
+    with open(LINKS, newline="", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    if not rows or list(rows[0].keys()) == LINK_COLUMNS:
+        return
+    with open(LINKS, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=LINK_COLUMNS, lineterminator="\n")
+        w.writeheader()
+        for r in rows:
+            w.writerow({k: (r.get(k) or "").strip() for k in LINK_COLUMNS})
+
+
 def record_links(rows):
     """Append to outreach/links.csv -- the file PROGRESS.md 5.1's emails.py reads."""
     os.makedirs(os.path.dirname(LINKS), exist_ok=True)
+    migrate_links()
     new = not os.path.isfile(LINKS)
     with open(LINKS, "a", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=LINK_COLUMNS)
+        # reason: lineterminator="\n" -- csv defaults to \r\n, which glues a \r
+        # onto the url now that url is the last field on the line.
+        w = csv.DictWriter(f, fieldnames=LINK_COLUMNS, lineterminator="\n")
         if new:
             w.writeheader()
         for r in rows:
             w.writerow(r)
+
+
+# ---- the draft --------------------------------------------------------------
+
+def draft_text(listing_dir, url):
+    """(rendered email, [placeholders still unfilled]) from outreach/template.txt.
+
+    reason: the wording lived in property_email.txt with three <angle bracket>
+    blanks filled in by hand on every send, from a CSV whose link was the thing
+    that broke. The template is committed -- it holds no lead data, only the
+    sender's own name -- so a clone can draft; the values come from the listing's
+    config.json, which is already the single record of what produced the build.
+    """
+    with open(TEMPLATE, encoding="utf-8") as f:
+        body = f.read()
+    cfg = {}
+    try:
+        with open(os.path.join(listing_dir, "config.json"), encoding="utf-8") as f:
+            cfg = json.load(f)
+    except (OSError, ValueError):
+        pass
+    name = (cfg.get("agent_name") or "").strip()
+    fields = {"agent_first": name.split()[0] if name else "",
+              "address": (cfg.get("address") or "").strip(),
+              "url": url}
+    # reason: a blank field leaves its {placeholder} visible instead of rendering
+    # "Hi ," -- a gap you can see beats one silently filled with nothing.
+    missing = sorted(k for k, v in fields.items() if not v)
+    for k, v in fields.items():
+        if v:
+            body = body.replace("{" + k + "}", v)
+    return body, missing
+
+
+def write_draft(listing_dir, brand, listing, url):
+    """Write the draft and return (path, missing). Overwrites: it is derived."""
+    text, missing = draft_text(listing_dir, url)
+    os.makedirs(DRAFTS, exist_ok=True)
+    path = os.path.join(DRAFTS, f"{brand}__{listing}.txt")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+    return path, missing
 
 
 # ---- the run ----------------------------------------------------------------
@@ -294,6 +413,32 @@ def confirm(question, default=False):
         if a in ("n", "no"):
             return False
         print("  Answer y or n.")
+
+
+def smallest_photo(listing_dir):
+    """Longest edge of the smallest photo in photos/, or None if unmeasurable.
+
+    reason: the soft-cut warning used to read a _lowres suffix off the filenames.
+    Nothing is encoded in a filename any more, so it is measured here instead --
+    from photos/, which is where the gate measures it too. jpeg_size comes from
+    the scraper rather than a fourth copy of the header parser, exactly as
+    status.py borrows it.
+    """
+    photo_dir = os.path.join(listing_dir, "photos")
+    if not os.path.isdir(photo_dir):
+        return None
+    edges = []
+    for name in sorted(os.listdir(photo_dir)):
+        path = os.path.join(photo_dir, name)
+        if not os.path.isfile(path) or not name.lower().endswith(PHOTO_EXT):
+            continue
+        try:
+            w, h = jpeg_size(path)
+        except Exception:
+            continue
+        if w and h:
+            edges.append(max(w, h))
+    return min(edges) if edges else None
 
 
 def survey(listing_dir):
@@ -350,15 +495,34 @@ def main():
         for name, why in refused:
             print(f"  {name}  --  {why}")
 
-    if any("_lowres" in n for n, _, _ in files):
-        print("\n_lowres means these were upscaled past what the photos hold. "
-              "They are soft.\nA prospect judges the quality of your work by "
-              "this file. See IDEA.md 4.")
+    smallest = smallest_photo(listing_dir)
+    if smallest and smallest < GATE_720P:
+        print(f"\nBELOW PAR: the smallest photo in this listing is {smallest}px, "
+              f"so these cuts\nwere upscaled past what the photos hold. They are "
+              f"soft, and nothing in their\nnames says so. A prospect judges the "
+              f"quality of your work by this file.\nSee IDEA.md 4.")
         if not args.dry_run and not confirm("Publish soft cuts anyway?", False):
             print("Nothing was uploaded.")
             return
 
     if args.dry_run:
+        # reason: the draft is the point of a publish now, so a dry run has to
+        # show it. Rendering it here exercises the template and the config the
+        # same way a real run does, without touching the bucket.
+        primary = next((p for n, _, p in files if PRIMARY_CUT in n), None)
+        if primary:
+            text, missing = draft_text(listing_dir, preview_url(primary))
+            brand, listing = remote_path(listing_dir, "x.mp4").split("/")[:2]
+            print(f"\nThe draft this would write to "
+                  f"{os.path.relpath(DRAFTS, ROOT)}/{brand}__{listing}.txt:\n")
+            print("\n".join("  " + l for l in text.splitlines()))
+            if missing:
+                print(f"\n  {len(missing)} placeholder(s) left unfilled "
+                      f"({', '.join(missing)}) -- config.json has no value for "
+                      f"them.")
+        else:
+            print(f"\nNo {PRIMARY_CUT} cut here, so no email draft: the outreach "
+                  f"link is always\nthe watermarked branded sample.")
         print("\n--dry-run: nothing was uploaded.")
         return
     if not confirm(f"\nUpload these {len(files)} file(s)?", False):
@@ -405,12 +569,19 @@ def main():
             failed.append(name)
             continue
         confirmed.append((name, path))
-        rows.append({"brand": brand, "listing": listing,
-                     "cut": name, "url": preview_url(path),
-                     "uploaded_at": stamp})
+        rows.append({"uploaded_at": stamp, "brand": brand, "listing": listing,
+                     "cut": name, "url": preview_url(path)})
 
+    draft, missing = None, []
     if rows:
         record_links(rows)
+        # reason: cold outreach quotes the sample_branded cut and nothing else --
+        # PROGRESS.md 5.1's hard rule. The tour_ file is the paid deliverable and
+        # is a one-word difference in a filename.
+        primary = next((p for n, p in confirmed if PRIMARY_CUT in n), None)
+        if primary:
+            draft, missing = write_draft(listing_dir, brand, listing,
+                                         preview_url(primary))
 
     print(f"\n{len(confirmed)} of {len(files)} confirmed at the origin.")
     for name, path in confirmed:
@@ -420,6 +591,17 @@ def main():
         print("\nThese are served through a CDN, so a link can 404 for a few "
               "seconds\nbefore the edge catches up. That is not a failed upload.")
         print(f"Recorded in {os.path.relpath(LINKS, ROOT)}.")
+    if draft:
+        print(f"\nEmail draft: {os.path.relpath(draft, ROOT)}")
+        if missing:
+            print(f"  {len(missing)} placeholder(s) left unfilled "
+                  f"({', '.join(missing)}) -- fill them in or add them to "
+                  f"config.json.")
+        print("  Nothing is sent. Copy it into your mail client when you are "
+              "ready.")
+    elif confirmed:
+        print(f"\nNo {PRIMARY_CUT} cut was confirmed, so no email draft was "
+              f"written.")
     print("\nThe local cuts in out/ were not touched.")
 
     if failed:

@@ -70,7 +70,8 @@ scraper/photos/
 # delivery URLs for work already sold.
 agents.txt
 property_email.txt
-outreach/
+outreach/*
+!outreach/template.txt
 
 # ---------------------------------------------------------------------------
 # IN-FLIGHT SCRATCH AND MACHINE-LOCAL CONFIG — deliberately not pushed.

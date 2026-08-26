@@ -29,7 +29,7 @@ class TestTheGate(unittest.TestCase):
     def test_every_tour_cut_is_refused(self):
         for name in ("tour_branded.mp4", "tour_unbranded.mp4",
                      "tour_vertical.mp4", "sean_obrien_tour_branded.mp4",
-                     "sean_obrien_tour_vertical_lowres.mp4"):
+                     "sean_obrien_tour_vertical.mp4"):
             ok, why = publish.publishable(name)
             self.assertFalse(ok, f"{name} would have been published")
             self.assertIn("signed-off", why)
@@ -37,7 +37,7 @@ class TestTheGate(unittest.TestCase):
     def test_every_sample_cut_is_allowed(self):
         for name in ("sample_branded.mp4", "sample_unbranded.mp4",
                      "sample_vertical.mp4", "sean_obrien_sample_branded.mp4",
-                     "sean_obrien_sample_vertical_lowres.mp4"):
+                     "sean_obrien_sample_vertical.mp4"):
             self.assertTrue(publish.publishable(name)[0], name)
 
     def test_anything_unrecognised_is_refused(self):
@@ -91,9 +91,14 @@ class TestRemotePath(unittest.TestCase):
             with self.assertRaises(ValueError, msg=bad):
                 publish.remote_path(bad, "x.mp4")
 
-    def test_preview_url_drops_the_extension(self):
+    def test_preview_url_is_absolute_and_drops_the_extension(self):
+        """reason: the link is pasted into a cold email and written to links.csv,
+        so it must carry the host. The .mp4 comes back from vercel.json's rewrite."""
         url = publish.preview_url("corcoran/46_beacon_5/sample_branded.mp4")
-        self.assertEqual(url, "/preview/corcoran/46_beacon_5/sample_branded")
+        self.assertEqual(
+            url,
+            "https://real-estate.viabolat.com/preview/corcoran/46_beacon_5/"
+            "sample_branded")
 
 
 class TestCredentials(unittest.TestCase):

@@ -195,10 +195,13 @@ def next_action(listing_dir, cfg, n, worst, best, scraped=True):
     out = os.path.join(listing_dir, "out")
     cuts = sorted(f for f in os.listdir(out)) if os.path.isdir(out) else []
     if not cuts:
-        tag = " (would be _lowres)" if best and best < GATE_1080P else ""
+        tag = f" (soft: photos {best}px)" if best and best < GATE_1080P else ""
         return f"ready to build{tag}"
-    if any("_lowres" in c for c in cuts):
-        return f"built, {len(cuts)} cuts -- _lowres, sample only"
+    # reason: the output filenames used to carry a _lowres suffix and this read it
+    # back off them. They no longer say anything about resolution, so the verdict
+    # is measured from photos/ -- the same place it was always measured from.
+    if best and best < GATE_720P:
+        return f"built, {len(cuts)} cuts -- soft ({best}px photos), sample only"
     return f"built, {len(cuts)} cuts"
 
 

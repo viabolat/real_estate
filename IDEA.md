@@ -77,10 +77,12 @@ It invents detail that is not in the room. On a property listing that is
 misrepresentation, not a quality fix — and it becomes a problem precisely when a deal
 goes sideways. Upscalers routinely fabricate fixtures, window views, and trim detail.
 
-### ❌ Sending a `_lowres` cut to the MLS
-`--allow-lowres` builds; it does not fix. Every cut it produces is named
-`..._lowres.mp4` precisely so that this stays visible after the console has
-scrolled away. See §4.
+### ❌ Sending a soft cut to the MLS
+`--allow-lowres` builds; it does not fix. The cuts it produces are named like any
+others — the filename will not stop you, and it was never meant to. The console
+does: at preflight, before the delivery is confirmed, and again with the finished
+file list. `status.py` and `publish.py` re-measure `photos/` and say it again days
+later. See §4.
 
 ### ❌ Re-encoding through chat apps, Google Photos "storage saver", or email compression
 Every hop downsamples. Move files with a zip, a drive link, or a USB stick.
@@ -101,14 +103,22 @@ the exact upscale factor each file would need, plus the worst offender:
 ```
 
 From the bare CLI it then exits, naming the pixel target and the way out.
-With `--allow-lowres` it builds — and **names every cut `..._lowres.mp4`.**
+With `--allow-lowres` it builds, and repeats the verdict when the cuts exist:
+
+```
+  BELOW PAR. 17 of 17 photos are under 1433px, so every cut
+  above is a 1280x720 upscale -- worst 02_exterior_street.png at 384x288,
+  upscaled 3.7x.
+  Watchable, not sharp. Rebuild from the photographer's originals before this
+  goes to the MLS. Nothing in the filenames records this -- see IDEA.md 4.
+```
 
 **The working rule:**
 
-> A `_lowres` cut is a review copy. Never send one to a client or the MLS.
+> A soft cut is a review copy. Never send one to a client or the MLS.
 > **If a build needs the flag, the photos are not ready.**
 
-### Why the gate marks instead of refusing
+### Why the gate reports instead of refusing
 
 It used to refuse, full stop — including in `tour.py`, at the *end* of a run, after
 the question set and a draft had already been paid for, despite having computed the
@@ -116,15 +126,14 @@ identical verdict at preflight in the first second. That failed twice over: it t
 away ten minutes of the operator's work, and the refusal text named no count, no
 size and no target, so there was nothing to act on.
 
-The gate is unchanged as a *measurement*. What changed is the consequence: it now
-decides what the files are **called**. That is a stronger boundary, not a weaker one
-— a console refusal protects nothing once the operator reaches for the flag, whereas
-`jane_smith_tour_unbranded_lowres.mp4` still says what it is three weeks later in
-somebody's downloads folder. `tour.py` states the count, the worst offender and its
-upscale factor *before* it builds, and says plainly that the result is not MLS-ready.
-
-Stripping the tag is a deliberate two-hand act — rename the file yourself — which is
-the point.
+The gate is unchanged as a *measurement*. What changed is the consequence: it
+reports, in every place the question comes up, and it does not touch the filenames.
+`tour.py` states the count, the worst offender and its upscale factor at preflight,
+again before the delivery build is confirmed, and again with the finished file list.
+`status.py` prints `soft (NNNpx photos)` for every listing it applies to, and
+`publish.py` re-measures `photos/` and asks a second time before a soft cut goes to
+a client. The verdict outlives the console because it is re-derived from the photos,
+which is the only place it was ever true.
 
 ---
 
@@ -134,8 +143,9 @@ the point.
 creates the listing, copies the photos in, offers the prefixes, prints the preflight
 (order, which presets the photos clear, which assets and text fields are missing)
 **before** anything encodes, asks the handful of questions that actually vary, and
-then walks the three rungs. Photos that fail the gate still build — at 720p, named
-`_lowres`, after it has told you the count, the worst file and its upscale factor.
+then walks the three rungs. Photos that fail the gate still build — at 720p, after
+it has told you the count, the worst file and its upscale factor, and told you again
+when the cuts are done.
 It writes the answers into `config.json` and runs the exact commands spelled out
 below — the steps are what it does, not an alternative to it.
 
@@ -176,12 +186,13 @@ below — the steps are what it does, not an alternative to it.
    Or let `tour.py` do it — it derives the preset from what the photos can actually
    feed, and drops to 720p + `--allow-lowres` only when neither preset clears, after
    naming the shortfall.
-6. If it exits with the resolution table, go back to step 1. A `_lowres` build is a
-   review copy to keep the job moving, not the answer to the table.
+6. If it exits with the resolution table, go back to step 1. A build made with the
+   flag is a review copy to keep the job moving, not the answer to the table.
 
 The gate is a property of the photos, not of the interface. `tour.py` runs the same
-script and measures the same wall; what it will not do is hand you a `_lowres` file
-without saying so, or let one lose the tag on its way out.
+script and measures the same wall; what it will not do is hand you a soft file
+without saying so — before the build, after it, and every time `status.py` or
+`publish.py` looks at the listing again.
 
 ---
 

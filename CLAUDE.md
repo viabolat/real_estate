@@ -122,8 +122,10 @@ what the client reviews before paying:
 - `<agent>_sample_unbranded.mp4`
 - `<agent>_sample_vertical.mp4`
 
-A build from photos that miss the resolution gate names all six `..._lowres.mp4`.
-See the `_lowres` non-negotiable below.
+A build from photos that miss the resolution gate names all six exactly the same
+way. The shortfall is reported to the console — at preflight, and again once the
+cuts exist — and never written into a filename. See the resolution non-negotiable
+below.
 
 Plus one more, only from `--draft`, and deliberately outside `out/`:
 
@@ -170,18 +172,24 @@ measurement, not assumption.
 
 ## Non-negotiables
 
-- **Below-par photos build, and the shortfall rides in the filename.** The gate no
-  longer refuses — it decides what the files are *called*. A build that needs
-  `--allow-lowres` names every cut `..._lowres.mp4`, and `tour.py` passes the flag
-  only after stating the count, the worst offender and its upscale factor. It used
-  to refuse outright at the *end* of a run, after the question set and a draft had
-  already been paid for, having known the verdict at preflight — second one. That
-  threw the work away and gave the operator nothing to act on. A console refusal is
-  a boundary that survives nothing; a filename is a boundary that survives being
-  emailed. Do not restore the refusal, and do not add a flag that drops the tag.
-- **A `_lowres` cut is not MLS-ready.** The tag is the warning, not permission. If
-  a delivery needs it, the photos are not ready — get the photographer's originals.
-  See `IDEA.md` §4.
+- **Below-par photos build, and the shortfall is reported, never encoded in a
+  filename.** The gate does not refuse and does not rename: it measures and says
+  so, out loud, more than once. A build that needs `--allow-lowres` produces the
+  same six names as any other build, and `tour.py` passes the flag only after
+  stating the count, the worst offender and its upscale factor. The verdict is
+  printed at preflight, restated before the delivery build is confirmed, and
+  restated again with the finished file list. It used to refuse outright at the
+  *end* of a run, after the question set and a draft had already been paid for,
+  having known the verdict at preflight — second one. That threw the work away and
+  gave the operator nothing to act on. Do not restore the refusal, and do not
+  reintroduce a filename suffix: `out_path()` takes the cut name and nothing else,
+  and `tests/test_naming.py` fails if any cut grows a resolution tag.
+- **A soft cut is not MLS-ready, and its name will not tell you.** The console is
+  the warning. `status.py` and `publish.py` both re-measure `photos/` rather than
+  reading a verdict off a filename, so the reminder still arrives weeks after the
+  build — `status.py` prints `soft (NNNpx photos)` and `publish.py` asks a second
+  time before a soft cut goes to a client. If a delivery is soft, the photos are
+  not ready — get the photographer's originals. See `IDEA.md` §4.
 - **No AI upscaling of listing photos.** It fabricates detail that is not in the
   room, which on a property listing is misrepresentation. See `IDEA.md` §3.
 - **Photo order lives in the filename prefix and nowhere else.** No sidecar file, no
@@ -259,6 +267,28 @@ measurement, not assumption.
   pressure is a reason to prune old listings deliberately, never a reason for a
   fresh delivery to remove itself. `tests/test_publish_gate.py` fails on an
   `os.remove` anywhere in `publish.py`.
+
+- **The recorded link is the last field on its line, and nothing is ever appended
+  after it.** `outreach/links.csv` used to read
+  `brand,listing,cut,url,uploaded_at`, so anything that grabbed the link took
+  `,2026-08-26T16:58:12` with it and the URL 404'd — and `csv`'s default `\r\n`
+  glued a carriage return onto the last field by a second route. `LINK_COLUMNS`
+  now ends in `url`, `record_links()` writes `lineterminator="\n"`, and it
+  migrates an older file in place rather than appending a second shape into it —
+  the file is gitignored, so a fix applied once here would never reach another
+  clone. `tests/test_outreach_draft.py` fails if a column is added after `url`.
+
+- **The draft is written automatically; the send is not, and never becomes a
+  flag.** `PROGRESS.md` §5.1 settled that mail leaving the machine is a
+  deliberate act. There is no SMTP credential anywhere in this repo and
+  `tests/test_outreach_draft.py` fails on `smtplib`, `sendmail`, `SMTP(` or
+  `starttls` appearing in `publish.py`. The draft also quotes the
+  `sample_branded` cut and only that — `PRIMARY_CUT` — because a cold email
+  linking a `tour_` file is the paid deliverable given away in a one-word
+  filename difference, the same boundary `publishable()` holds at the bucket.
+  A blank `agent_name` or `address` leaves the `{placeholder}` visibly in the
+  file and says so on the console: a gap you can see beats one silently filled
+  with an empty string.
 
 - **A deploy is a second publishing boundary, and `.vercelignore` is its only
   gate.** `check_pii.py` enumerates what *git* would publish; it has no view of
@@ -394,11 +424,17 @@ screen when you already know the listing.
 git config core.hooksPath hooks       # arms hooks/pre-push -> check_pii.py
 ```
 
-**Once per project**, to make the `/preview/` links resolve:
+**Once per project**, to make the preview links resolve:
 
 ```bash
 npx vercel --prod                     # deploys vercel.json's rewrite. No video.
 ```
+
+The links `publish.py` prints and records are absolute —
+`https://real-estate.viabolat.com/preview/<brand>/<listing>/<cut>` — because that
+string is pasted into a cold email, where a site-relative `/preview/...` path is
+not a link at all. The host is `PREVIEW_HOST` in `publish.py`; it must stay the
+domain pointed at the deployment that carries `vercel.json`'s rewrite.
 
 Everything below still runs standalone, unchanged, and is what the home screen
 runs for you:
@@ -427,9 +463,18 @@ rung 4 after a delivery build, defaulting to *no*, and stays silent when no key 
 configured — silent there only, because an operator with no key should not be
 nagged on every delivery. Reached deliberately from the home screen's **Publish a
 review link** it says what is missing instead, since silence in answer to a
-request reads as success. Both paths print the file list, the remote paths and the resulting
-`/preview/` URLs before anything moves, and write the confirmed links to
-`outreach/links.csv`.
+request reads as success. Both paths print the file list, the remote paths and the
+resulting `https://real-estate.viabolat.com/preview/...` URLs before anything moves,
+and write those same absolute links to `outreach/links.csv` as
+`uploaded_at,brand,listing,cut,url` — **`url` last, `uploaded_at` first**, with
+`\n` endings. Every confirmed publish also renders one email draft to
+`outreach/drafts/<brand>__<listing>.txt` from `outreach/template.txt`, filled in
+with the agent's first name and the address out of the listing's `config.json` and
+the `sample_branded` link. `--dry-run` prints it instead of writing it. Nothing is
+sent. `outreach/template.txt` is the only committed thing under `outreach/` —
+`.gitignore` uses the directory-contents form `outreach/*` plus
+`!outreach/template.txt`, because git does not descend into an excluded directory
+and a negation under a bare `outreach/` would match nothing.
 
 Or straight from a listing folder — everything `tour.py` does, it does by
 running this. Three rungs, each costing what the question is worth:
@@ -453,7 +498,7 @@ The rest:
 ```bash
 python3 ../../../make_tour.py                  # 1920x1080, needs photos >= 2150px
 python3 ../../../make_tour.py --720p           # 1280x720, needs photos >= 1433px
-python3 ../../../make_tour.py --allow-lowres   # build anyway; names every cut _lowres
+python3 ../../../make_tour.py --allow-lowres   # build anyway; names are unchanged
 python3 ../../../make_tour.py --no-music       # silent build
 python3 ../../../make_tour.py --keep-work      # keep clips/ + work_silent.mp4
 python3 ../../../make_tour.py --finish-only    # reuse work_silent, redo branding

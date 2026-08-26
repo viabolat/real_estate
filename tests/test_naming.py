@@ -1,8 +1,8 @@
 """The output filename is a boundary that survives being emailed.
 
 Guards CLAUDE.md: "Never send a sample_ file as a deliverable, and never send a
-tour_ file before sign-off", "the shortfall rides in the filename", and
-"draft.mp4 is not a deliverable and does not go in out/".
+tour_ file before sign-off", "the resolution verdict is reported, never encoded in
+a filename", and "draft.mp4 is not a deliverable and does not go in out/".
 """
 import os
 import sys
@@ -32,18 +32,17 @@ class TestOutputNaming(unittest.TestCase):
             for path in paths:
                 self.assertTrue(path.startswith("out/"), path)
 
-    def test_lowres_is_a_suffix_and_only_when_asked(self):
-        with helpers.listing(config={"agent_name": "Jane Doe"}) as (m, _):
-            self.assertTrue(m.out_path("tour_branded", True).endswith(
-                "_lowres.mp4"))
-            self.assertNotIn("_lowres", m.out_path("tour_branded", False))
-
-    def test_lowres_tag_cannot_be_dropped_by_config(self):
-        """No config key may suppress the tag -- it is the warning, not a flag."""
-        with helpers.listing(config={"agent_name": "Jane Doe",
-                                     "output_prefix": "custom"}) as (m, _):
-            self.assertTrue(m.out_path("sample_vertical", True).endswith(
-                "_lowres.mp4"))
+    def test_no_cut_is_tagged_with_a_resolution_verdict(self):
+        """reason: the verdict is console output, not a filename. out_path takes
+        the cut name and nothing else, so no caller can reintroduce a suffix."""
+        for cfg in ({"agent_name": "Jane Doe"},
+                    {"agent_name": "Jane Doe", "output_prefix": "custom"},
+                    {}):
+            with helpers.listing(config=cfg) as (m, _):
+                for cut in CUTS:
+                    self.assertTrue(m.out_path(cut).endswith(f"{cut}.mp4"),
+                                    m.out_path(cut))
+                    self.assertNotIn("lowres", m.out_path(cut))
 
     def test_output_prefix_overrides_agent_name(self):
         with helpers.listing(config={"agent_name": "Jane Doe",

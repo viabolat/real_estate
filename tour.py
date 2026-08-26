@@ -76,10 +76,9 @@ Two things this file does that make_tour.py cannot:
   end of a run, after the question set and a draft had already been paid for,
   having computed the identical answer at preflight in the first second. It now
   states the count, the worst file and its upscale factor, then builds all six at
-  720p named _lowres. The gate is unchanged as a measurement; what changed is that
-  it decides what the files are CALLED rather than whether they exist. A console
-  refusal survives nothing once the operator reaches for the flag; a filename
-  survives being emailed.
+  720p. The gate is unchanged as a measurement; what changed is that it reports
+  rather than decides. The verdict is stated at preflight, before the build and
+  again after it -- it is not carried in the output filenames.
 """
 
 import glob
@@ -427,10 +426,10 @@ def preflight(listing_dir, cfg):
             say(f"  ... and {len(report['720p']) - 5} more")
         say(f"  Worst: {os.path.basename(worst[0])} at {worst[1]}, "
             f"upscaled {worst[2]:.1f}x.")
-        say("  These will still build, at 720p, named _lowres so the shortfall "
-            "travels\n  with the file. They will be soft. To fix it properly you "
-            "need the\n  photographer's originals or the MLS back end -- see "
-            "IDEA.md 4.")
+        say("  These will still build, at 720p, and they will be soft. The "
+            "shortfall is\n  reported here and again when the build finishes; it "
+            "is not in the\n  filenames. To fix it properly you need the "
+            "photographer's originals or\n  the MLS back end -- see IDEA.md 4.")
 
     say("")
     for label, path, note in check_assets(listing_dir, cfg):
@@ -617,18 +616,18 @@ def rebuild_reason(listing_dir, cfg, preset, rung, silent_name):
 def delivery_flags(listing_dir, cfg, preset, lowres=False):
     """(flags, full_rebuild_reason or None) for the six-cut delivery build.
 
-    reason: lowres rides in the state's preset string, not beside it. It changes
-    every output filename, so a build that flips it must not be allowed to take
-    --finish-only and leave the previous run's differently-named cuts sitting in
-    out/ looking current.
+    reason: --allow-lowres permits the build and changes nothing about the encode
+    or the output names, so it is deliberately absent from the state's preset
+    string. The verdict only flips when the photo set changes, and photo_state()
+    already forces a full rebuild on that.
     """
     flags = ["--720p"] if preset == "720p" else []
     if lowres:
         flags.append("--allow-lowres")
     if not resolve(listing_dir, cfg.get("music") or "music.mp3"):
         flags.append("--no-music")
-    reason = rebuild_reason(listing_dir, cfg, preset + ("+lowres" if lowres else ""),
-                            "delivery", "work_silent.mp4")
+    reason = rebuild_reason(listing_dir, cfg, preset, "delivery",
+                            "work_silent.mp4")
     # reason: --finish-only reuses the stitched cut, so it can only ever apply
     # branding, music and timing. Anything upstream of the stitch needs a full run.
     flags.append("--keep-work" if reason else "--finish-only")
@@ -1269,21 +1268,23 @@ def build_flow(args):
     # reason: this used to refuse outright when the photos missed 720p, at the END
     # of a run, after the question set and a draft had already been paid for. The
     # verdict was known at preflight, second one. Refusing late threw away the work
-    # AND told the operator nothing they could act on. So: build it, name it
-    # _lowres, and say plainly what is wrong with it. The gate still exists -- it
-    # decides what the files are CALLED, which is a boundary that survives being
-    # emailed, where a console refusal is a boundary that survives nothing.
+    # AND told the operator nothing they could act on. So: build it, and say
+    # plainly what is wrong with it -- the count, the worst file, the upscale --
+    # here, and again once the cuts exist. The gate is a measurement that reports.
     preset = best_preset(report)
     lowres = preset is None
     if lowres:
         preset = "720p"
         n_bad, n_all = len(report["720p"]), len(photos(listing_dir))
-        say(f"These photos are below par: {n_bad} of {n_all} miss 720p.")
-        say("The six cuts will build at 720p and be named _lowres. They will be "
-            "soft.\nDo not send a _lowres cut to the MLS -- reshoot or get the "
+        worst = max(report["720p"], key=lambda r: r[2])
+        say(f"These photos are below par: {n_bad} of {n_all} miss 720p. "
+            f"Worst {os.path.basename(worst[0])}\nat {worst[1]}, upscaled "
+            f"{worst[2]:.1f}x.")
+        say("The six cuts will build at 720p and will be soft. Nothing in their "
+            "names says\nso -- do not send these to the MLS. Reshoot or get the "
             "originals first.")
     n = len(photos(listing_dir))
-    say(f"Six cuts at {preset}{' (_lowres)' if lowres else ''}, "
+    say(f"Six cuts at {preset}{' (below par)' if lowres else ''}, "
         f"about {runtime(n, cfg):.0f}s each. This takes a few minutes.")
     if not confirm("Build the delivery?", True):
         return
@@ -1293,8 +1294,7 @@ def build_flow(args):
     if run_build(listing_dir, flags) != 0:
         say("\nThe build failed. The intermediates were kept for inspection.")
         return
-    save_state(listing_dir, "delivery", cfg,
-               preset + ("+lowres" if lowres else ""))
+    save_state(listing_dir, "delivery", cfg, preset)
 
     rule("Done")
     for f in outputs(listing_dir):
@@ -1302,9 +1302,10 @@ def build_flow(args):
     say("\nsample_ cuts carry the proofing watermark -- those are what the client "
         "reviews.\ntour_ cuts are the delivery, and only after sign-off.")
     if lowres:
-        say("\n_lowres means these were upscaled past what the photos hold. "
-            "Watchable for\na review, not sharp enough for the MLS. See IDEA.md 4 "
-            "for how to source better.")
+        say(f"\nBELOW PAR: built at {preset} from photos that do not reach it, so "
+            f"these were\nupscaled past what the photos hold. Watchable for a "
+            f"review, not sharp enough\nfor the MLS, and the filenames do not say "
+            f"so. See IDEA.md 4 for how to source\nbetter.")
 
     publish_rung(listing_dir)
 

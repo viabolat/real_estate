@@ -15,7 +15,7 @@ second.
 
 | File | Non-negotiable |
 |---|---|
-| `test_naming.py` | The `tour_`/`sample_` token and the `_lowres` suffix survive whatever prefixes them. `draft.mp4` stays out of `out/`, and draft intermediates stay named apart from delivery ones. |
+| `test_naming.py` | The `tour_`/`sample_` token survives whatever prefixes it, and no cut carries a resolution suffix. `draft.mp4` stays out of `out/`, and draft intermediates stay named apart from delivery ones. |
 | `test_card_isolation.py` | The card never rides in `work_silent.mp4`; the unbranded cuts read the photos-only stitch. `vertical()` keeps two sources per family. The watermark is not gated on `branded`. |
 | `test_finish_window.py` | Branding is held off wherever the card is on screen; the watermark is exempt. A no-card build is unchanged from before cards existed. |
 | `test_photo_order.py` | Order lives in the filename prefix and nowhere else. The order is printed, an unauthored one warns, and `config.json` never gains an ordering key. |

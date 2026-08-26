@@ -1,0 +1,21 @@
+Subject: Video walkthrough for {address}
+
+Hi {agent_first},
+
+I made a custom video walkthrough for your listing at {address}.
+
+Your final package includes three formats:
+
+- Branded version for your website and email
+
+- Unbranded version for the MLS
+
+- Vertical version for social media Reels and Shorts
+
+View the branded preview here:
+{url}
+
+Let me know if you want the final unwatermarked files.
+
+Best,
+Ahmet

@@ -7,6 +7,39 @@ Do not defer updates to end-of-session.
 
 ## Entries
 
+### 2026-08-26 — The link goes last, and the email drafts itself
+**What:** `outreach/links.csv` is now `uploaded_at,brand,listing,cut,url` with `\n`
+endings, and `record_links()` migrates an older file in place rather than appending a
+second shape into it. Every confirmed publish renders `outreach/template.txt` — a new,
+**committed** file — into `outreach/drafts/<brand>__<listing>.txt`.
+
+**Why the URL moved last:** it sat mid-row, so anything that grabbed the link took
+`,2026-08-26T16:58:12` along with it and the URL 404'd. `csv`'s default `\r\n` did the
+same damage by a second route, gluing a carriage return onto whatever the last field
+was. Both are the same class of bug — a field's meaning depending on what follows it —
+and the fix is to put the one field that leaves the machine where nothing can follow it.
+The migration lives in the code and not in a one-off script because the file is
+gitignored: a repair applied once here would never reach another clone.
+
+**Why the template is committed while `property_email.txt` is not:** the template holds
+placeholders and the sender's own name. `property_email.txt` holds a filled-in email —
+an agent's name and a listing address — which is lead data and stays ignored. The
+`.gitignore` needed the directory-contents form (`outreach/*` then
+`!outreach/template.txt`), because git does not descend into an excluded directory and a
+negation under a bare `outreach/` matches nothing. Verified with `git check-ignore`, not
+assumed.
+
+**Why sending stays out:** `PROGRESS.md` §5.1's standing constraint — the operator does
+not want mail leaving the machine automatically. Drafting is cheap to undo; sending is
+not, and a repo with an SMTP credential in it is one flag away from doing it by
+accident. `tests/test_outreach_draft.py` fails on `smtplib`, `sendmail`, `SMTP(` or
+`starttls` appearing in `publish.py`, so the constraint outlives the memory of it.
+
+**Why the draft quotes `sample_branded` only:** it is `PRIMARY_CUT`, the watermarked
+proof. A cold email linking `tour_branded` gives away the paid deliverable, and the
+difference is one word in a filename — the same boundary `publishable()` holds at the
+bucket, restated one layer up where a human copies a link.
+
 ### 2026-08-24 — One apostrophe rule, two slug functions
 **What:** `make_tour._slug` now strips `'` and `’` before separating, matching
 `scraper/zillow_photos.slugify`. The two functions were **not** merged, and their
@@ -42,7 +75,7 @@ which fails naming the disagreeing input, and by a non-negotiable in `CLAUDE.md`
 **What:** Added `tests/` — 60 stdlib `unittest` tests across five modules (now 75
 across six; see the audit entry below), no
 third-party dependency, no ffmpeg invoked, ~0.3s. Covers output naming and the
-`_lowres` tag, card isolation from `work_silent.mp4`, `vertical()`'s two sources, the
+resolution-tag-free naming, card isolation from `work_silent.mp4`, `vertical()`'s two sources, the
 branding/watermark card gate, photo order living in the filename prefix, and
 `status.py`'s three-way folder classification.
 
@@ -269,6 +302,48 @@ public, which is safe only for as long as the `sample_`-only gate holds — that
 the gate is the tested part. And `x-upsert: true` means re-publishing a listing
 replaces the object a client may already be looking at; that is the intended
 behaviour for a corrected cut, but there is no versioning behind it.
+
+---
+
+### 2026-08-26 — The resolution verdict is reported, not encoded in the filename
+**What:** Removed the `_lowres` suffix everywhere. `out_path()` takes the cut name
+and nothing else; `check_resolution()` returns the offending photo list instead of a
+bool and `make_tour.py` restates the count, the worst file and its upscale factor
+after the six cuts exist. `tour.py` states it at preflight, again at the delivery
+confirmation and again with the finished list, and no longer carries `+lowres` in
+`.last_build.json`'s preset string. `status.py` and `publish.py` stopped reading the
+verdict off filenames and re-measure `photos/` instead. The eighteen `_lowres` files
+already on disk were renamed.
+
+**Why:** Operator decision — the tag was doing work the operator did not want it to
+do. It travelled onto every client-facing artefact, including the ones that clear the
+gate at 720p, and it made a soft cut look like a different kind of file rather than
+the same file built from worse photos. The measurement was never the problem, so the
+measurement stayed; only the consequence changed, from *renames the output* to
+*reports, repeatedly, in every place the question is asked*.
+
+**Alternatives rejected:**
+- *Drop the warnings along with the tag.* Rejected: the request was to remove the
+  suffix, not the reminder. The reminder got louder — it now names the worst file and
+  its upscale factor at the end of the build, where before it named only the target.
+- *Keep the verdict in `config.json` or `.last_build.json` so `publish.py` can read
+  it.* Rejected: derived state that goes stale the moment `photos/` changes, and
+  `.last_build.json` is written by `tour.py` only, so a CLI build would leave it
+  blank. Both consumers re-measure the photos, which is where the answer is true.
+- *A fourth copy of the JPEG header parser in `publish.py`.* Rejected: it borrows
+  `jpeg_size` from the scraper exactly as `status.py` does, and degrades to "no
+  verdict" rather than blocking a publish if the scraper is unreachable.
+
+**Accepted risks:** The strongest property of the old design is gone — a soft cut
+sitting in a downloads folder three weeks later no longer says what it is. Nothing in
+the repo can restore that, because the repo does not follow the file. Mitigated by
+making the verdict re-derivable rather than remembered: `status.py` prints
+`soft (NNNpx photos)` on every run, and `publish.py` asks a second time before a soft
+cut leaves the machine. `tests/test_naming.py` now fails if any cut grows a
+resolution tag, the inverse of the test it replaced. Local renames also broke the
+correspondence with three listings already uploaded under `_lowres` names — those
+objects are still in the bucket and `outreach/links.csv` still points at them; a
+re-publish uploads the new names alongside rather than replacing them.
 
 ---
 

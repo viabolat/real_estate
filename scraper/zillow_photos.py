@@ -181,8 +181,8 @@ def report_resolution(out_dir):
           f"({GATE_1080P}px). smallest {worst}px, largest {best}px")
     if best < GATE_720P:
         print(f"    below the 720p gate ({GATE_720P}px) too. every cut would be "
-              f"named _lowres, and the best photo still upscales "
-              f"{1920 / best:.1f}x at 1080p.")
+              f"soft -- the best photo still upscales {1920 / best:.1f}x at "
+              f"1080p, and the filenames will not say so.")
     if 1920 / best > 3:
         print("    NOT usable, even as a watermarked sample. get the "
               "photographer's originals -- see IDEA.md section 4.")
