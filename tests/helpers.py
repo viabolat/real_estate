@@ -34,6 +34,24 @@ def scraper_module(name):
     return importlib.import_module(name)
 
 
+def _repo_module(name, relpath):
+    """Import a repo script under a private name, once.
+
+    reason: status_module() and tour_module() were the same ten lines twice,
+    differing only in two string literals. One body, so the spec/sys.modules/
+    exec_module dance cannot drift between them.
+    """
+    import importlib.util
+    if name in sys.modules:
+        return sys.modules[name]
+    spec = importlib.util.spec_from_file_location(
+        name, os.path.join(REPO, relpath))
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[name] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
 def status_module():
     """Import status.py once. It is read-only and takes no cwd from the caller.
 
@@ -41,16 +59,19 @@ def status_module():
     helpers at import time, so it does not need the temp-cwd dance make_tour
     needs -- and the pure functions under test take their inputs as arguments.
     """
-    import importlib.util
-    name = "status_under_test"
-    if name in sys.modules:
-        return sys.modules[name]
-    spec = importlib.util.spec_from_file_location(
-        name, os.path.join(REPO, "status.py"))
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)
-    return mod
+    return _repo_module("status_under_test", "status.py")
+
+
+def tour_module():
+    """Import tour.py once, for the pure helpers and the wiring assertions.
+
+    reason: tour.py imports make_tour and publish at module scope. Neither
+    touches the network or the filesystem beyond reading a config.json that a
+    test cwd does not have, so a plain import is safe -- but it must be given a
+    private module name so it cannot collide with the freshly-imported
+    make_tour_under_test_N modules listing() creates.
+    """
+    return _repo_module("tour_under_test", "tour.py")
 
 
 def source():

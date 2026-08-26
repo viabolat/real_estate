@@ -1,14 +1,60 @@
-# STEPS.md — Runbook for `make_tour.py`
+# STEPS.md — Runbook
 
-Every scenario the script covers and the exact command for it.
-For photo sourcing and resolution rules, see `IDEA.md`. For project rules, `CLAUDE.md`.
+Two parts, because two different people read this file.
+
+**Part 1 — Operator** is everything needed to ship a listing: one command, the
+three rungs, the review link, and a fenced-off one-time setup section. If your job
+is producing client deliverables, Part 1 is the whole runbook.
+
+**Part 2 — Engine room** is `make_tour.py` itself: every flag, all thirty
+scenarios, the tuning keys, the resolution gate and the failure modes. **You do
+not need any of it to ship a listing.** It is here for the day something behaves
+unexpectedly, or a listing needs something the wizard does not ask about.
+
+For photo sourcing and resolution rules, see `IDEA.md`. For project rules,
+`CLAUDE.md`.
 
 ---
 
-## 0a. Getting a listing onto disk
+# Part 1 — Operator
 
-Before any of this there has to be a listing folder. One command builds it from a
-copied Zillow page dump:
+## 0a. The one command
+
+```bash
+python3 tour.py
+```
+
+It opens on the roll-up — every listing, its photo count, its smallest photo and
+the one thing standing between it and a deliverable — then offers four things:
+
+| | | |
+|---|---|---|
+| **1** | Build a tour | the three rungs, §0b |
+| **2** | Import *n* new dumps | runs the scraper on dumps with no listing folder yet |
+| **3** | Publish a review link | the watermarked cuts, to the review bucket |
+| **4** | Brand settings | what a brokerage sets once, and re-applying it |
+
+Which dumps are pending is worked out by checking whether
+`agents/<brand>/<listing>` exists. There is no marker file and nothing to tidy
+between runs — delete a listing folder and its dump is offered again.
+
+`python3 tour.py --build` skips the screen when you already know the listing.
+
+If the roll-up says it is unavailable, that is `status.py` failing to import the
+scraper. Building is unaffected: pick 1 and carry on.
+
+**Brand settings** (menu **4**) edits `agents/<brand>/brand.json` — the logo,
+music, card and pacing every listing that brokerage owns shares. It does **not**
+hold the agent's name or phone: `leads.csv` lists two agents under some
+brokerages, so a brand-level name or phone would put one agent's details on the
+other's video. Those live in the listing's `config.json`. Changing a brand default
+does not reach back into listings already scaffolded; **Re-apply brand defaults**
+is the explicit action that does, and it shows every key it would change, per
+listing, before writing anything.
+
+### Getting a listing onto disk
+
+Menu item **2** does this for you. The command behind it:
 
 ```bash
 python3 scraper/zillow_run.py            # every *.txt in scraper/dumps/
@@ -50,22 +96,125 @@ them, or re-scrape the listing.
 It writes nothing. It also re-checks every folder name against `leads.csv` and prints
 the `mv` for any that drifted.
 
-### One-time: the publish credentials
+---
 
-`publish.py` needs two values, and refuses to run without them:
+## 0b. Shipping a listing
 
+### The whole job, one command
+```bash
+python3 tour.py        # then 1, or --build to skip the home screen
 ```
-SUPABASE_URL=https://<project-ref>.supabase.co
-SUPABASE_SERVICE_KEY=<the service_role key, not the anon key>
+Pick brand → listing (or create either on the spot). If `photos/` is empty it asks
+for a source folder and copies them in; if the filenames carry no numeric prefix it
+offers to add `010_`, `020_` … in the current alphabetical order — the prefix is
+the order, and there is no manifest anywhere.
+
+Then, **before anything encodes**, it prints the preflight: the resolved photo
+order, which preset the photos actually clear, which assets resolved and which are
+missing, and whether `.build.lock` is held. Anything absent is named here rather
+than found five minutes into a render.
+
+The question set is short, and everything with the same answer on every listing is
+inherited from `agents/<brand>/brand.json` rather than asked: the logo and music;
+the card (outro / intro+outro / intro / none) and its length; whether the lower
+third stays up or clears after the opening seconds; seconds per photo. What it
+still asks per listing is the address, the agent's name and phone, and the
+brokerage — and a changed brokerage is the only one of those it offers to keep as
+a brand default.
+
+**The agent's name and phone are never saved to a brand**, and there is no prompt
+that offers to. A brand folder is keyed on the *brokerage*, and `leads.csv` lists
+two agents under `Coldwell Banker Realty - Boston`, two under
+`Gibson Sotheby's International Realty` and two under `Serhant`. A brand-level
+name or phone would put one agent's details on the other's card, lower third and
+output filenames across every listing that brokerage owns, and it would do it
+silently, because `brand.json` is layered *under* the listing's `config.json`.
+
+Then the three rungs, confirming between each — contact sheet, draft, delivery —
+with the delivery built as `_lowres` when the photos do not clear 720p, after it
+names the count and the worst file. It picks the build
+mode for you: `--finish-only` when only branding, music or timing changed since the
+last build of that rung, a full `--keep-work` build when the photos, the pacing, the
+card or the output preset changed. Draft and delivery keep separate records in
+`.last_build.json`, so a draft can never authorise a `--finish-only` delivery build.
+
+`make_tour.py` never reads `brand.json` — `tour.py` resolves
+`DEFAULTS → brand.json → listing config.json` and writes the result into the
+listing, so `config.json` stays the single record of what produced a delivered
+video. Changing a brand default does not retroactively alter existing listings —
+**Brand settings → Re-apply brand defaults** on the home screen is the explicit
+action that does, and it prints every key it would change, per listing, first.
+
+The lock belongs to the script. `tour.py` only reads `.build.lock` to report it, and
+never writes it — doing so would lock the build out of its own folder.
+
+### Have Claude read the contact sheet (optional)
+```bash
+python3 tour.py --check-photos
+```
+Builds the contact sheet, then asks Claude to name the room in each numbered cell,
+say whether the filename agrees, and flag a running order that opens or closes on a
+bathroom. It proposes renames and **renames nothing** — the prefix is the order, so
+you rename the files yourself. It uses the Claude Code login already on this
+machine: no key, nothing to install. If `claude` is not on PATH it says so and
+tells you to read the sheet yourself, which is the check that actually matters.
+
+### Send the client a review link
+```bash
+cd agents/<brand>/<listing>
+python3 ../../../publish.py --dry-run   # what would go public, and the exact URLs
+python3 ../../../publish.py             # the same, then asks, then uploads
+```
+`tour.py` offers this as rung 4 straight after a delivery build. It defaults to
+**no** — it is the one rung that leaves the machine — and is skipped in silence
+when no credentials are configured, so an operator without a key is not nagged on
+every delivery. Choosing **3. Publish a review link** from the home screen says
+what is missing instead: silence in answer to something you asked for reads as
+success.
+
+**Only the three `sample_` cuts upload.** The `tour_` cuts are listed as *held
+back* and there is no flag that lifts it: the bucket behind `/preview/` is public,
+and the whole point of the two families is that the unwatermarked deliverable does
+not go out before sign-off. Send that one by hand, afterwards.
+
+The upload prints every filename, its size, the exact remote path
+(`<brand>/<listing>/<file>` — never the bare filename, or two listings collide)
+and the resulting URL, then asks. `--dry-run` stops there. A `_lowres` cut asks a
+second time: a prospect judges the quality of your work by the file you send them.
+
+Confirmed links are appended to `outreach/links.csv`. "Confirmed" means the storage
+API lists the object at the right size — not that the public URL answered, because
+the CDN edge may lag the upload by a few seconds. **A `/preview/` link that 404s
+immediately after a publish is usually a cold edge, not a failed upload.** Wait and
+retry before re-uploading.
+
+The local files in `out/` are never touched. `out/` stays the copy of record.
+
+---
+
+## 0c. One-time setup
+
+Three things set up once and then never thought about again. They sit here, out
+of the recurring loop, because a step you take once per project does not belong
+beside one you take per listing.
+
+### Arm the PII gate (once per clone)
+
+```bash
+git config core.hooksPath hooks
 ```
 
-Put them in a `.env` beside `publish.py` — copy `.env.example` — or export them.
-An exported variable always beats the file, so a shell you set deliberately is
-never overridden by a stale `.env`. `.env` is gitignored, and `check_pii.py` now
-also refuses a service key pasted anywhere git would publish.
+`hooks/pre-push` runs `check_pii.py` on every `git push` and refuses the push on
+a finding. The hook file is committed, but **`core.hooksPath` is per-clone
+config** — a fresh clone has the gate present and *off*, which on screen looks
+exactly like the gate passing. So `tour.py`'s home screen checks the wiring on
+every run and prints this command when it is missing, and runs the scan itself
+regardless, because libgit2-based git clients — most IDE integrations — do not
+run git hooks at all.
 
-**Exit 2 means the credentials are missing**, and is a refusal, not a pass. A
-publish that quietly does nothing reads exactly like one that worked.
+There is no bypass in the hook. `git push --no-verify` is git's own escape hatch
+and is visible in the command you typed, which a bypass baked into the hook
+would not be.
 
 ### Before pushing
 
@@ -84,7 +233,62 @@ check that echoes the phone number it found has moved the leak into your scrollb
 Run it before every push; the repo being private is not the same as the data being
 redacted.
 
+### The publish credentials
+
+`publish.py` needs two values, and refuses to run without them:
+
+```
+SUPABASE_URL=https://<project-ref>.supabase.co
+SUPABASE_SERVICE_KEY=<the service_role key, not the anon key>
+```
+
+Put them in a `.env` beside `publish.py` — copy `.env.example` — or export them.
+An exported variable always beats the file, so a shell you set deliberately is
+never overridden by a stale `.env`. `.env` is gitignored, and `check_pii.py` now
+also refuses a service key pasted anywhere git would publish.
+
+**Exit 2 means the credentials are missing**, and is a refusal, not a pass. A
+publish that quietly does nothing reads exactly like one that worked.
+
+### Deploy the preview rewrite
+
+A `/preview/` link only answers once the rewrite is deployed. Vercel hosts **no
+video** — `vercel.json` is a single rewrite rule pointing `/preview/:path*` at the
+public bucket, and the bytes come from Supabase.
+
+```bash
+python3 check_pii.py       # exit 0, or do not push
+git push
+npx vercel --prod
+```
+
+`:path*`, not `:slug` — a remote object is `<brand>/<listing>/<file>`, three path
+segments, and `:slug` matches one.
+
+**`.vercelignore` is a second publishing boundary, and `check_pii.py` cannot see
+it.** That check enumerates what *git* would publish; the Vercel CLI uploads the
+working directory against `.vercelignore`, and when that file exists it takes
+precedence over `.gitignore` — so a path being gitignored does **not** keep it out
+of a deploy. `.env`, `scraper/`, `outreach/`, `agents.txt` and
+`property_email.txt` are listed there explicitly for that reason. Anything new
+holding a key or a lead has to be added there as well as to `.gitignore`.
+
+Reading a 404 from `/preview/`:
+
+| What you see | What it means |
+|---|---|
+| Vercel's branded `404: NOT_FOUND` page | The request never reached the rewrite — wrong path, or the deploy predates `vercel.json` |
+| Supabase JSON `{"statusCode":"404"}` | The rewrite worked; the object is not in the bucket |
+| A 404 for a few seconds, then it works | Cold CDN edge. `publish.py` already confirmed the object at the origin |
+
 ---
+
+# Part 2 — Engine room
+
+`make_tour.py` and everything under it. **You do not need this section to ship a
+listing** — `tour.py` writes the `config.json` and runs the exact commands below.
+Read it when something behaves unexpectedly, or when a listing needs something the
+question set does not ask about.
 
 ## 0. What the script expects
 
@@ -108,9 +312,9 @@ directory. The one exception: an asset path that does not resolve there is retri
 beside `make_tour.py`, which is what lets `viabolat.png` and the shared
 `global_assets/` library work from any listing folder without being copied in.
 
-`python3 tour.py` (from the project root) does all of this through one wizard
-— see §2. It is a front end, not a separate pipeline: it writes `config.json` and
-runs the exact commands shown in the scenarios below.
+`python3 tour.py` (from the project root) does all of this for you — see §0b. It
+is a front end, not a separate pipeline: it writes `config.json` and runs the exact
+commands shown in the scenarios below.
 
 ---
 
@@ -142,54 +346,6 @@ refuses immediately and names the pid holding it.
 ---
 
 ## 2. Scenarios
-
-### The whole job, one command
-```bash
-python3 tour.py
-```
-Pick brand → listing (or create either on the spot). If `photos/` is empty it asks
-for a source folder and copies them in; if the filenames carry no numeric prefix it
-offers to add `010_`, `020_` … in the current alphabetical order — the prefix is
-the order, and there is no manifest anywhere.
-
-Then, **before anything encodes**, it prints the preflight: the resolved photo
-order, which preset the photos actually clear, which assets resolved and which are
-missing, and whether `.build.lock` is held. Anything absent is named here rather
-than found five minutes into a render.
-
-The question set is short, and everything with the same answer on every listing is
-inherited from `agents/<brand>/brand.json` rather than asked: address, agent name,
-phone, brokerage; the card (outro / intro+outro / intro / none) and its length;
-whether the lower third stays up or clears after the opening seconds; the track;
-seconds per photo. Answer once, and it offers to save the name, phone and brokerage
-as brand defaults so the next listing only asks for the address.
-
-Then the three rungs, confirming between each — contact sheet, draft, delivery —
-with the delivery built as `_lowres` when the photos do not clear 720p, after it
-names the count and the worst file. It picks the build
-mode for you: `--finish-only` when only branding, music or timing changed since the
-last build of that rung, a full `--keep-work` build when the photos, the pacing, the
-card or the output preset changed. Draft and delivery keep separate records in
-`.last_build.json`, so a draft can never authorise a `--finish-only` delivery build.
-
-`make_tour.py` never reads `brand.json` — `tour.py` resolves
-`DEFAULTS → brand.json → listing config.json` and writes the result into the
-listing, so `config.json` stays the single record of what produced a delivered
-video. Changing a brand default does not retroactively alter existing listings.
-
-The lock belongs to the script. `tour.py` only reads `.build.lock` to report it, and
-never writes it — doing so would lock the build out of its own folder.
-
-### Have Claude read the contact sheet (optional)
-```bash
-python3 tour.py --check-photos
-```
-Builds the contact sheet, then asks Claude to name the room in each numbered cell,
-say whether the filename agrees, and flag a running order that opens or closes on a
-bathroom. It proposes renames and **renames nothing** — the prefix is the order, so
-you rename the files yourself. It uses the Claude Code login already on this
-machine: no key, nothing to install. If `claude` is not on PATH it says so and
-tells you to read the sheet yourself, which is the check that actually matters.
 
 ### Check the order before building anything
 ```bash
@@ -397,69 +553,6 @@ python3 make_tour.py --720p --allow-lowres --keep-work
 ```
 Checking pacing, ordering, or branding placement before the real photos arrive.
 See §5 before sending the result to anyone.
-
-### Send the client a review link
-```bash
-cd agents/<brand>/<listing>
-python3 ../../../publish.py --dry-run   # what would go public, and the exact URLs
-python3 ../../../publish.py             # the same, then asks, then uploads
-```
-`tour.py` offers this as rung 4 straight after a delivery build. It defaults to
-**no** — it is the one rung that leaves the machine — and is skipped in silence
-when no credentials are configured.
-
-**Only the three `sample_` cuts upload.** The `tour_` cuts are listed as *held
-back* and there is no flag that lifts it: the bucket behind `/preview/` is public,
-and the whole point of the two families is that the unwatermarked deliverable does
-not go out before sign-off. Send that one by hand, afterwards.
-
-The upload prints every filename, its size, the exact remote path
-(`<brand>/<listing>/<file>` — never the bare filename, or two listings collide)
-and the resulting URL, then asks. `--dry-run` stops there. A `_lowres` cut asks a
-second time: a prospect judges the quality of your work by the file you send them.
-
-Confirmed links are appended to `outreach/links.csv`. "Confirmed" means the storage
-API lists the object at the right size — not that the public URL answered, because
-the CDN edge may lag the upload by a few seconds. **A `/preview/` link that 404s
-immediately after a publish is usually a cold edge, not a failed upload.** Wait and
-retry before re-uploading.
-
-The local files in `out/` are never touched. `out/` stays the copy of record.
-
----
-
-### Deploy the preview rewrite
-
-A `/preview/` link only answers once the rewrite is deployed. Vercel hosts **no
-video** — `vercel.json` is a single rewrite rule pointing `/preview/:path*` at the
-public bucket, and the bytes come from Supabase.
-
-```bash
-python3 check_pii.py       # exit 0, or do not push
-git push
-npx vercel --prod
-```
-
-`:path*`, not `:slug` — a remote object is `<brand>/<listing>/<file>`, three path
-segments, and `:slug` matches one.
-
-**`.vercelignore` is a second publishing boundary, and `check_pii.py` cannot see
-it.** That check enumerates what *git* would publish; the Vercel CLI uploads the
-working directory against `.vercelignore`, and when that file exists it takes
-precedence over `.gitignore` — so a path being gitignored does **not** keep it out
-of a deploy. `.env`, `scraper/`, `outreach/`, `agents.txt` and
-`property_email.txt` are listed there explicitly for that reason. Anything new
-holding a key or a lead has to be added there as well as to `.gitignore`.
-
-Reading a 404 from `/preview/`:
-
-| What you see | What it means |
-|---|---|
-| Vercel's branded `404: NOT_FOUND` page | The request never reached the rewrite — wrong path, or the deploy predates `vercel.json` |
-| Supabase JSON `{"statusCode":"404"}` | The rewrite worked; the object is not in the bucket |
-| A 404 for a few seconds, then it works | Cold CDN edge. `publish.py` already confirmed the object at the origin |
-
----
 
 ## 3. Outputs
 

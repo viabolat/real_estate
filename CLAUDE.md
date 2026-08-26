@@ -47,6 +47,7 @@ global_assets/lower_thirds/
 scraper/                      Zillow dump -> leads.csv + a scaffolded listing
 publish.py                    sample_ cuts -> the public review bucket. NEVER tour_
 status.py                     read-only: every listing and its one next action
+hooks/pre-push                runs check_pii.py. Arm per clone -- see Running it
 tests/                        stdlib unittest guards for the non-negotiables below
 ```
 
@@ -77,8 +78,10 @@ a build. That keeps the script's contract intact — read the working directory,
 nothing about the `agents/<brand>/<listing>` layout — and keeps `config.json` an
 accurate record of what produced a delivered video months later. A new listing
 inherits at creation; changing a brand default does **not** retroactively alter
-existing listings, which is what the explicit "Re-apply brand defaults" action in
-the Brand tab is for.
+existing listings, which is what the explicit "Re-apply brand defaults" action
+under **Brand settings** on `tour.py`'s home screen is for. It shows every key it
+would change, per listing, and asks before writing — it is the one action in the
+tool that edits files the operator is not looking at.
 
 `config.json` — every key optional, defaults are the constants in the source:
 
@@ -321,6 +324,35 @@ measurement, not assumption.
 
 - **`brand.json` never carries `agent_name` or `agent_phone`.** A brokerage has many
   agents; the folder is keyed on the brokerage. See the `brand.json` note above.
+  `tour.py` enforced this at neither end for a while: `BRAND_KEYS` listed both
+  keys and `questions()` offered *"Save the name, phone and brokerage as
+  {brand} defaults?"* with the confirm defaulting to **yes**. Nothing had gone
+  wrong yet — all nine `brand.json` files were clean — but `leads.csv` lists two
+  agents under `Coldwell Banker Realty - Boston`, two under `Gibson Sotheby's`
+  and two under `Serhant`, and `load_config()` layers `brand.json` *under* the
+  listing's `config.json` without printing anything. One yes would have put one
+  agent's phone number on the other agent's card, lower third and output
+  filenames across every listing that brokerage owns, silently. `save_brand()`
+  now filters the two keys out and `load_brand()` strips them on the way back in,
+  so a hand-edited or legacy file cannot reintroduce them either;
+  `tests/test_brand_scope.py` fails if either returns by any route. `brokerage`
+  stays — it is the same string for every listing a brand owns, which is what a
+  brand default *is*.
+
+- **The PII gate runs itself, and an unwired gate is reported, never assumed.**
+  `check_pii.py` never has an interesting answer, which is exactly why an
+  operator stops running it. `hooks/pre-push` makes it automatic. But `hooks/` is
+  committed while `core.hooksPath` is **per-clone config**, so a fresh clone
+  ships the file with the gate *off* — present and silent, which on screen is
+  indistinguishable from the gate passing. That is this repo's own stated failure
+  shape. So `tour.py`'s home screen checks `core.hooksPath` and the hook's
+  executable bit and prints the one-line fix when either is wrong, **and** runs
+  `check_pii.py`'s scan itself regardless: the hook only fires for pushes through
+  the git CLI, and libgit2-based clients — most IDE git integrations — do not run
+  git hooks at all. Do not add a bypass to the hook; `git push --no-verify` is
+  git's own escape hatch and is visible in the command someone typed, where a
+  bypass baked into the hook would not be. `tests/test_hook_wired.py` guards
+  both.
 
 - **The two slug functions agree on apostrophes, and are still two functions.**
   `scraper/zillow_photos.slugify` names the folders; `make_tour._slug` names the
@@ -342,15 +374,43 @@ measurement, not assumption.
 
 ## Running it
 
+One command. Everything else is a gate, a one-time setup step, or an escape hatch.
+
+```bash
+python3 tour.py                       # the home screen: roll-up, then four choices
+```
+
+It opens on `status.py`'s roll-up — every listing and its one next action, plus
+the scrape-naming drift report — then offers: **1** build a tour, **2** import the
+dumps that have no listing folder yet, **3** publish a review link, **4** brand
+settings. Which dumps are pending is *derived* from whether
+`agents/<brand>/<listing>` exists; there is no marker file and no manifest, for
+the same reason photo order lives in the filename prefix. `--build` skips the
+screen when you already know the listing.
+
+**Once per clone**, or the PII gate is present and off:
+
+```bash
+git config core.hooksPath hooks       # arms hooks/pre-push -> check_pii.py
+```
+
+**Once per project**, to make the `/preview/` links resolve:
+
+```bash
+npx vercel --prod                     # deploys vercel.json's rewrite. No video.
+```
+
+Everything below still runs standalone, unchanged, and is what the home screen
+runs for you:
+
 ```bash
 python3 scraper/zillow_run.py         # every dump in scraper/dumps/ -> leads + listings
-python3 check_pii.py                  # before any push: no lead, phone or email escapes
 python3 status.py                     # what every listing is waiting on
-python3 tour.py                       # the wizard: listing, questions, three rungs
+python3 check_pii.py                  # what the pre-push hook runs; exit 0 = safe
 python3 tour.py --check-photos        # optional: Claude reads the contact sheet
 python3 publish.py --dry-run          # from a listing: what would go public, and where
 python3 publish.py                    # upload this listing's sample_ cuts
-python3 -m unittest discover -s tests -t .   # the non-negotiables, ~0.5s, no ffmpeg
+python3 -m unittest discover -s tests -t .   # the non-negotiables, ~0.6s, no ffmpeg
 ```
 
 `zillow_run.py` names the folders, downloads `photos/`, writes `brand.json` and
@@ -364,7 +424,10 @@ file, or let it default to every `*.txt` in `scraper/dumps/`. See
 or from a `.env` beside it (see `.env.example`; an exported variable always wins).
 Missing either is **exit 2**, not a quiet no-op. `tour.py` offers it as an optional
 rung 4 after a delivery build, defaulting to *no*, and stays silent when no key is
-configured. Both paths print the file list, the remote paths and the resulting
+configured — silent there only, because an operator with no key should not be
+nagged on every delivery. Reached deliberately from the home screen's **Publish a
+review link** it says what is missing instead, since silence in answer to a
+request reads as success. Both paths print the file list, the remote paths and the resulting
 `/preview/` URLs before anything moves, and write the confirmed links to
 `outreach/links.csv`.
 

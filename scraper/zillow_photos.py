@@ -36,6 +36,11 @@ import argparse
 import json
 import os
 import struct
+# reason: sys.exit(2) is the refusal for a dump that is not a listing, and
+# sys was never imported -- so that path raised NameError instead. It still
+# exited non-zero and still wrote nothing, which is why it went unnoticed,
+# but it exited 1 with a traceback where the contract says 2.
+import sys
 import urllib.request
 
 PHOTO_PATTERN = re.compile(
@@ -127,6 +132,26 @@ def jpeg_size(path):
             if len(size) < 2:
                 return None
             f.seek(struct.unpack(">H", size)[0] - 2, 1)
+
+
+def target_for(text: str):
+    """(brand, listing) -- the folder this dump scaffolds -- or None if it is not one.
+
+    reason: main() derived this pair inline, and tour.py's home screen has to
+    derive the SAME pair to decide whether a dump has already been imported. Two
+    copies of the folder-naming decision is a second naming authority, which is
+    what CLAUDE.md forbids, and a near-miss would report an imported listing as
+    pending forever. One function, both callers.
+
+    None is the refusal: with no photo URLs and no address there is nothing to
+    name the folder after, and the slug defaults would turn a garbage dump into
+    agents/unknown_brokerage/listing/ -- a folder the naming authority can never
+    match.
+    """
+    address = field(text, "streetAddress")
+    if not extract_photo_urls(text) and not address:
+        return None
+    return slugify(field(text, "brokerName"), "unknown_brokerage"), slugify(address)
 
 
 def report_resolution(out_dir):
@@ -248,18 +273,15 @@ def main():
     # reason: the repo root is this script's parent -- agents/ is a sibling of
     # scraper/, not a child of it.
     repo_root = os.path.dirname(script_dir)
-    out_dir = args.out_dir or os.path.join(
-        repo_root, "agents", slugify(broker, "unknown_brokerage"),
-        slugify(address), "photos")
-    # reason: same guard as zillow_lead.py. With no photo URLs and no address
-    # there is nothing to name the folder after, and the slug defaults turn a
-    # garbage dump into agents/unknown_brokerage/listing/ complete with a
-    # brand.json -- a folder the naming authority can never match, created
-    # silently. Refuse before making any directory.
-    if not urls and not address:
+    # reason: same guard as zillow_lead.py, and the same one tour.py's home
+    # screen applies -- target_for() owns both the refusal and the folder names
+    # so the two callers cannot disagree. Refuse before making any directory.
+    target = target_for(text)
+    if target is None:
         print(f"{args.file}: no photo URLs and no address -- this is not a "
               f"Zillow listing dump. Nothing written.")
         sys.exit(2)
+    out_dir = args.out_dir or os.path.join(repo_root, "agents", *target, "photos")
 
     os.makedirs(out_dir, exist_ok=True)
 

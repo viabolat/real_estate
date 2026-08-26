@@ -43,6 +43,125 @@ for whatever is in flight, which expire on ship) and `.claude/settings.local.jso
 
 ## 2. BUILT
 
+### 2026-08-26 — One front door, and a brand default that would have crossed two agents
+
+**The complaint, in the operator's words.** *"i feel there are too many .py files
+and that confuse the user. npx vercel --prod then publish.py check_pii.py etc etc
+these are all confusing and hard to remember which does what."*
+
+Correct, and it is the same failure `tour.py` was built to fix, one level up.
+`tour.py` replaced a dashboard with thirteen controls by inheriting or deriving
+anything with the same answer every time. That rule was applied to the build and
+then never applied to the pipeline around it, which grew back to eight commands.
+Sorted by what they actually are, only one is a decision:
+
+| Command | What it really is | What happened to it |
+|---|---|---|
+| `check_pii.py` | a gate; never has an interesting answer | `hooks/pre-push` |
+| `npx vercel --prod` | one-time setup, not per listing | out of the recurring runbook |
+| `publish.py` | already rung 4 | also home-screen item 3 |
+| `status.py` | "where am I" | **is** the home screen |
+| `zillow_run.py` | a real action, but a *detectable* one | offered, not remembered |
+| `unittest` | developer-only | out of the operator runbook |
+| `make_tour.py` | the engine | documented escape hatch |
+| `tour.py` | the front door | stays |
+
+**What was built.** `python3 tour.py` now opens on `status.py`'s roll-up — the
+same rows, the same drift and *unverifiable* reports — then four choices: build,
+import pending dumps, publish a review link, brand settings. `--build` skips it.
+
+Nothing behind that screen changed. `build_flow()` is the whole of what `main()`
+used to be, moved down one level; every rung, prompt, default, refusal and flag is
+what it was, verified by driving it through preflight, the question set and all
+three rungs.
+
+`status.py`'s body was split into `survey()` / `audit()` / `print_audit()` so the
+home screen calls the *same* functions rather than growing a second copy. Two
+implementations of the scrape-naming check is the exact drift that check exists to
+catch. `status.py` still runs standalone and prints byte-identical output.
+
+**Pending dumps are derived, never recorded.** Which `scraper/dumps/*.txt` have no
+listing yet is answered by parsing the dump and checking whether
+`agents/slugify(broker)/slugify(address)` exists. No marker file, no manifest —
+the photo-order rule one level up: a record kept beside the artifacts drifts out
+of sync with them and is then wrong in a way nothing detects. Deleting a listing
+folder correctly re-offers its dump, which a marker could not do.
+`tests/test_home_screen.py` asserts the detection writes nothing, and parses the
+three relevant files with `ast` — comments stripped — to fail if any of them ever
+gains a processed-dumps record.
+
+**The PII gate now runs itself.** `hooks/pre-push` runs `check_pii.py`, armed with
+`git config core.hooksPath hooks`. Verified: a phone number in a tracked file exits
+1 and blocks; removing it exits 0. Two holes are stated rather than papered over —
+a fresh clone has `core.hooksPath` unset, so the hook is present and *off*; and
+libgit2-based clients (most IDE git integrations) do not run git hooks at all, and
+this repo *has* been pushed by something that was not the shell. So the home screen
+checks the wiring and shouts with the one-line fix, and runs the scan itself
+regardless. `check_pii.py` is unmodified.
+
+**"Re-apply brand defaults" now exists.** `CLAUDE.md` had promised it since the
+Streamlit dashboard was deleted; it existed nowhere. Brand settings → pick brand →
+it lists every key it would change, per listing, and asks before writing. It is the
+one action in the tool that edits files the operator is not looking at.
+
+**A latent bug found on the way in, and the reason it mattered.** `tour.py`'s
+`BRAND_KEYS` carried `agent_name` and `agent_phone`, and `questions()` offered
+*"Save the name, phone and brokerage as {brand} defaults?"* with the confirm
+defaulting to **yes**. `CLAUDE.md` names the opposite as a non-negotiable.
+
+Nothing had gone wrong yet — all nine `brand.json` files on disk were clean, so
+this was armed, not fired. But `leads.csv` lists **two agents under Coldwell Banker
+Realty - Boston, two under Gibson Sotheby's International Realty and two under
+Serhant**, and `load_config()` layers `brand.json` *under* the listing's
+`config.json` without printing anything. One yes would have put one agent's phone
+number on the other agent's card, lower third and output filenames across every
+listing that brokerage owns, silently.
+
+It also sat directly in the path of this work: "Re-apply brand defaults" is
+precisely the operation that would have pushed it into every listing at once.
+Fixed at both ends — `save_brand()` filters the two keys, `load_brand()` strips
+them on read so a hand-edited or legacy file cannot reintroduce them either — and
+the prompt now offers only `brokerage`, which is genuinely the same string for
+every listing a brand owns. `tests/test_brand_scope.py` fails if either key returns
+by any route, including a check of the nine real files on disk.
+
+**STEPS.md split by audience.** 660 lines and 30+ flat scenario headings was the
+thing that was actually hard to navigate. Part 1 — Operator: one command, the three
+rungs, the review link, and a fenced one-time setup section holding the hook wiring,
+the publish credentials and `npx vercel --prod`. Part 2 — Engine room: the flags,
+the scenarios, the tuning, the gate, the failure modes, framed as *you do not need
+this to ship a listing*. Content preserved; ordering and framing changed.
+
+**Cleanup pass, same day.** Four things the first cut left duplicated:
+`status.py`'s row table is now `print_rows()` beside `print_audit()`, and the home
+screen calls it instead of its own copy -- that copy had already drifted, silently
+dropping the *"N brokerage(s) need a logo or music set once"* line, so the home
+screen was telling the operator to add a logo per listing and never saying it is
+set once per brand, which is the whole point of the Brand settings action beneath
+it. `scraper/zillow_photos.py` grew `target_for(text)`, the one function that turns
+a dump into the folder it scaffolds *or refuses it*; `main()` and `tour.py`'s
+pending-dump scan both call it, so the folder-naming decision has one owner rather
+than two copies that could disagree about an already-imported listing. The two
+near-identical module importers in `tests/helpers.py` became one. And the home
+screen no longer re-walks every photo, re-parses every dump and re-runs
+`check_pii.py` to reprint four lines after a mistyped menu key -- it recomputes
+after any action that writes, which is all of them.
+
+**One real bug surfaced by testing that refactor.** `scraper/zillow_photos.py` has
+called `sys.exit(2)` on a non-listing dump since the refusal was added, and never
+imported `sys` -- so that path raised `NameError` and exited **1** with a traceback
+where the contract says 2. It wrote nothing and exited non-zero either way, which
+is exactly why it survived: the failure looked like the refusal working. Added the
+import; the refusal now prints its message and exits 2.
+
+**Verified.** 116 tests (95 + 21), ~0.6s, no ffmpeg. `check_pii.py` exit 0.
+`status.py` output unchanged. The hook blocks and clears. Unsetting
+`core.hooksPath` makes the home screen shout and re-setting it clears the warning.
+`mv scraper /tmp` leaves the roll-up unavailable *with the reason printed* and the
+build route intact. One test fixture and one hook `echo` had to be reworded: both
+tripped the repo's own guards by containing a phone-shaped string and the literal
+`--no-verify` in prose, which is the guards working.
+
 ### 2026-08-24 — The draft lineage was never swept up
 
 **The symptom, as the operator hit it.** Three near-identical files sitting in a
@@ -446,40 +565,58 @@ record of what was decided and why; it is not repeated here.
 
 ## 3. CURRENT STATE
 
-`python3 status.py` is the live answer — it re-reads `leads.csv` and measures every
-photo. This is a folder-level snapshot as of **2026-08-24**, verified by listing the
-directories; the per-photo pixel column is deliberately not reproduced here, because
-a hand-copied one goes stale silently and `status.py` never does.
+`python3 status.py` is the live answer -- it re-reads `leads.csv` and measures every
+photo, and it is now also the first thing `python3 tour.py` prints. This is a
+folder-level snapshot as of **2026-08-26**, verified by running it; the per-photo
+pixel column is deliberately not reproduced here, because a hand-copied one goes
+stale silently and `status.py` never does.
 
-The four lead rows that had no folder on 2026-08-21 all have one now, and five more
-listings have been scraped since. Thirteen listing folders, three built:
+**Twelve** listing folders, three built. That is one fewer than the 2026-08-24
+snapshot: `boston_advanced_realty/335_w_2nd_st_unit_8` -- the "photos too small, do
+not build" row -- is no longer on disk. Its **lead row is still in `leads.csv`** and
+its brand folder still exists, so `status.py` reports
+`boston_advanced_realty/- ... no listings yet`. Deleting the folder was not recorded
+here at the time; re-running `zillow_run.py` on its dump would scaffold it again, and
+the photos would still be too small.
 
 | Listing | Photos | `config.json` | Cuts in `out/` |
 |---|---|---|---|
-| `boston_advanced_realty/335_w_2nd_st_unit_8` | 12 | yes | — photos too small, **do not build** |
-| `brewester/9_w_cedar` | 17 | **no** | — predates the scraper, *unverifiable* |
+| `brewester/9_w_cedar` | 17 | **no** | -- predates the scraper, *unverifiable* |
 | `coldwell_banker_realty_boston/2_commonwealth_ave` | 28 | yes | 6 |
-| `coldwell_banker_realty_boston/8_dartmouth_st_5` | 20 | yes | 6 |
-| `coldwell_banker_realty_waltham/284_sumner_st_3` | 38 | yes | — |
-| `compass/12_adella_pl` | 22 | yes | — |
-| `corcoran/46_beacon_5` | 8 | **no** | — predates the scraper, *unverifiable* |
-| `gibson_sothebys_international_realty/169_k_st_1` | 13 | yes | — |
-| `gibson_sothebys_international_realty/260_262_commonwealth_ave_1b` | 31 | yes | 6 — `_lowres`, sample only |
-| `re_max_partners_relocation/407_w_1st_st_unit_101` | 39 | yes | — |
-| `serhant/267_old_colony_606` | 36 | yes | — |
-| `serhant/99_sumner_st_penthouse_621` | 40 | yes | — |
-| `the_collaborative_companies/55_lagrange_st_unit_1705` | 19 | yes | — |
+| `coldwell_banker_realty_boston/8_dartmouth_st_5` | 20 | yes | 6 -- `_lowres`, sample only |
+| `coldwell_banker_realty_waltham/284_sumner_st_3` | 38 | yes | -- needs a brand logo |
+| `compass/12_adella_pl` | 22 | yes | -- needs a brand logo |
+| `corcoran/46_beacon_5` | 8 | **no** | -- predates the scraper, *unverifiable* |
+| `gibson_sothebys_international_realty/169_k_st_1` | 13 | yes | -- ready to build, would be `_lowres` |
+| `gibson_sothebys_international_realty/260_262_commonwealth_ave_1b` | 31 | yes | 6 -- `_lowres`, sample only |
+| `re_max_partners_relocation/407_w_1st_st_unit_101` | 39 | yes | -- needs a brand logo |
+| `serhant/267_old_colony_606` | 36 | yes | -- needs a brand logo |
+| `serhant/99_sumner_st_penthouse_621` | 40 | yes | -- needs a brand logo |
+| `the_collaborative_companies/55_lagrange_st_unit_1705` | 19 | yes | -- needs a brand logo |
+
+Five brokerages need a logo or music set once -- `coldwell_banker_realty_waltham`,
+`compass`, `re_max_partners_relocation`, `serhant`,
+`the_collaborative_companies`. That is what Brand settings on `tour.py`'s home
+screen is for; setting it there writes `brand.json` and every *new* listing under
+that brokerage inherits it, while existing ones need the explicit "Re-apply brand
+defaults" action.
 
 `brewester/9_w_cedar` and `corcoran/46_beacon_5` are the two hand-named folders with
-no lead row behind them. They are left alone deliberately — see the scrape-naming
+no lead row behind them. They are left alone deliberately -- see the scrape-naming
 non-negotiable in `CLAUDE.md`.
 
-**Intermediates on disk after this session:** `2_commonwealth_ave` and
-`8_dartmouth_st_5` hold `work_silent.mp4` + `work_branded.mp4` + `clips/` (kept for
-`--finish-only`); `9_w_cedar` and `46_beacon_5` hold `work_silent.mp4` + `clips/`.
-Four listings hold a `draft.mp4`. No `work_draft.mp4` or `clips_draft/` remains.
+**Intermediates on disk:** `2_commonwealth_ave` and `8_dartmouth_st_5` hold
+`work_silent.mp4` + `work_branded.mp4` + `clips/` (kept for `--finish-only`);
+`9_w_cedar` and `46_beacon_5` hold `work_silent.mp4` + `clips/`. Four listings hold
+a `draft.mp4`. No `work_draft.mp4` or `clips_draft/` remains.
 
-`IDEA.md` §6 "CURRENT STATE" is a **historical snapshot** of one folder from
+**`scraper/dumps/` holds four `*.txt` files and all four are 0 bytes.** Both scraper
+scripts refuse a dump with no `zpid` and no address, so `tour.py`'s home screen
+correctly reports **0** pending imports rather than offering an import that can only
+fail. Nothing on this machine exercises the dump parsers -- which is also why the
+`zillow_lead.field()` comma bug in section 6 stays unfixed.
+
+`IDEA.md` section 6 "CURRENT STATE" is a **historical snapshot** of one folder from
 2026-08-19, kept for the sourcing argument it supports. This table supersedes it.
 
 ---
@@ -654,6 +791,17 @@ once volume justifies it, and is not a reason to delay.
   drift. Any short form has to be *derived* from the bucket path and stored
   somewhere, and that store is the drift. Revisit only if a real recipient reacts to
   the link.
+
+- **Something outside the shell is pushing this repo, and it may not run hooks.**
+  The reflog carries a push none of the recorded sessions ran (`4371860 ... update
+  by push`), and there were no git hooks at the time, so it was not one. If it is a
+  libgit2-based client -- which is most IDE git integrations -- it does **not** run
+  git hooks at all, and `hooks/pre-push` will never fire for it. Not fixable from
+  inside git, so it was mitigated instead: `tour.py`'s home screen runs the PII scan
+  itself on every render and reports the hook's wiring separately. Open: identify
+  what is pushing and either wire it or stop using it for this repo. Until then,
+  `python3 check_pii.py` by hand before any push from a client that is not the
+  shell.
 
 - **One real end-to-end smoke build in `tests/`, behind a flag.** The suite proves the
   wiring and the filtergraph without invoking ffmpeg, which is what keeps it at 0.3s

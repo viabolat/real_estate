@@ -202,11 +202,15 @@ def next_action(listing_dir, cfg, n, worst, best, scraped=True):
     return f"built, {len(cuts)} cuts"
 
 
-def main():
-    ap = argparse.ArgumentParser(description="What every listing is waiting on.")
-    ap.add_argument("--long", action="store_true", help="also show inherited settings")
-    args = ap.parse_args()
+def survey():
+    """(rows, truth, known) -- one row per listing, plus the naming authority.
 
+    reason: split out of main() so tour.py's home screen renders the SAME rows
+    and runs the SAME audit rather than growing a second copy of them. Two
+    implementations of the scrape-naming check is the drift the check exists to
+    catch, one level up. status.py is still the script; this is just where its
+    body now lives.
+    """
     # reason: read once, up front -- next_action needs to know whether a folder
     # is in leads.csv at all, and the drift report below needs the same table.
     truth = scraped_names()
@@ -227,34 +231,19 @@ def main():
                          next_action(ld, cfg, n, worst, best,
                                      scraped=(brand, listing) in known),
                          bcfg, cfg))
+    return rows, truth, known
 
-    if not rows:
-        print("No listings under agents/.")
-        return
 
-    w = max(len(f"{b}/{l}") for b, l, *_ in rows)
-    print(f"{'BROKERAGE / LISTING'.ljust(w)}  PHOTOS  SMALLEST  NEXT")
-    print("-" * (w + 40))
-    for brand, listing, n, worst, best, action, bcfg, cfg in rows:
-        name = f"{brand}/{listing}".ljust(w)
-        px = f"{worst}px".rjust(8) if worst else "".rjust(8)
-        print(f"{name}  {str(n).rjust(6)}  {px}  {action}")
-        if args.long and cfg:
-            print(f"{' ' * w}          logo={cfg.get('logo') or '(blank)'} "
-                  f"music={cfg.get('music') or '(blank)'} card={cfg.get('card')}")
+def audit(rows, truth, known):
+    """(drift, unverifiable) -- folders whose names the scrape does not agree with.
 
-    blocked = [r for r in rows if "brand.json" in r[5]]
-    if blocked:
-        brands_missing = sorted({r[0] for r in blocked})
-        print(f"\n{len(brands_missing)} brokerage(s) need a logo or music set once: "
-              f"{', '.join(brands_missing)}")
-
-    # reason: the drift check matches on agent_phone out of config.json, so a
-    # folder with no config.json -- which is the strongest signal it was never
-    # scaffolded by the scraper, i.e. the likeliest hand-named folder there is --
-    # produced no match and fell silently through the check built to catch it.
-    # brewester/9_w_cedar sat through the scrape-naming commit that way. Report
-    # unverifiable separately rather than letting absence read as agreement.
+    reason: the drift check matches on agent_phone out of config.json, so a
+    folder with no config.json -- which is the strongest signal it was never
+    scaffolded by the scraper, i.e. the likeliest hand-named folder there is --
+    produced no match and fell silently through the check built to catch it.
+    brewester/9_w_cedar sat through the scrape-naming commit that way. Report
+    unverifiable separately rather than letting absence read as agreement.
+    """
     drift, unverifiable = [], []
     for brand, listing, _n, _w, _b, _a, _bc, cfg in rows:
         if listing == "-":                      # "no listings yet" placeholder
@@ -268,22 +257,69 @@ def main():
             drift.append((brand, listing, want))
         elif not want and (brand, listing) not in known:
             unverifiable.append((brand, listing, bool(cfg)))
+    return drift, unverifiable
+
+
+def print_audit(drift, unverifiable, out=print):
+    """The two naming reports, printed identically wherever they are shown."""
     if drift:
-        print(f"\n{len(drift)} folder name(s) do not match the scrape "
-              f"(leads.csv is the naming authority):")
+        out(f"\n{len(drift)} folder name(s) do not match the scrape "
+            f"(leads.csv is the naming authority):")
         for brand, listing, (tb, tl) in drift:
-            print(f"  agents/{brand}/{listing}")
-            print(f"    mv agents/{brand}/{listing} agents/{tb}/{tl}")
+            out(f"  agents/{brand}/{listing}")
+            out(f"    mv agents/{brand}/{listing} agents/{tb}/{tl}")
     if unverifiable:
-        print(f"\n{len(unverifiable)} folder(s) have no lead row to check against "
-              f"(not renamed -- unverifiable):")
+        out(f"\n{len(unverifiable)} folder(s) have no lead row to check against "
+            f"(not renamed -- unverifiable):")
         for brand, listing, has_cfg in unverifiable:
             why = ("config.json has no agent_phone matching leads.csv"
                    if has_cfg else "no config.json, so nothing to match on")
-            print(f"  agents/{brand}/{listing} -- {why}")
-        print("  These predate the scrape or their lead row is gone. The scrape "
-              "cannot name them; renaming by hand would invent a second "
-              "authority. Leave them, or re-scrape the listing.")
+            out(f"  agents/{brand}/{listing} -- {why}")
+        out("  These predate the scrape or their lead row is gone. The scrape "
+            "cannot name them; renaming by hand would invent a second "
+            "authority. Leave them, or re-scrape the listing.")
+
+
+def print_rows(rows, long=False, out=print):
+    """The table, and the one-line summary of what a brand still owes.
+
+    reason: split out of main() for the same reason audit()/print_audit() were --
+    tour.py's home screen renders this table too, and it had grown its own copy
+    of the header, the column widths and the row format. That copy had already
+    drifted: it omitted the "N brokerage(s) need a logo" line entirely, so the
+    home screen told the operator to add a logo per listing and never said it is
+    set once per brand -- which is exactly what its Brand settings action does.
+    """
+    w = max(len(f"{b}/{l}") for b, l, *_ in rows)
+    out(f"{'BROKERAGE / LISTING'.ljust(w)}  PHOTOS  SMALLEST  NEXT")
+    out("-" * (w + 40))
+    for brand, listing, n, worst, best, action, bcfg, cfg in rows:
+        name = f"{brand}/{listing}".ljust(w)
+        px = f"{worst}px".rjust(8) if worst else "".rjust(8)
+        out(f"{name}  {str(n).rjust(6)}  {px}  {action}")
+        if long and cfg:
+            out(f"{' ' * w}          logo={cfg.get('logo') or '(blank)'} "
+                f"music={cfg.get('music') or '(blank)'} card={cfg.get('card')}")
+
+    brands_missing = sorted({r[0] for r in rows if "brand.json" in r[5]})
+    if brands_missing:
+        out(f"\n{len(brands_missing)} brokerage(s) need a logo or music set once: "
+            f"{', '.join(brands_missing)}")
+
+
+def main():
+    ap = argparse.ArgumentParser(description="What every listing is waiting on.")
+    ap.add_argument("--long", action="store_true", help="also show inherited settings")
+    args = ap.parse_args()
+
+    rows, truth, known = survey()
+
+    if not rows:
+        print("No listings under agents/.")
+        return
+
+    print_rows(rows, long=args.long)
+    print_audit(*audit(rows, truth, known))
 
 
 if __name__ == "__main__":

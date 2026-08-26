@@ -1,0 +1,43 @@
+#!/bin/sh
+# Refuses a push that would publish a lead, a phone number, an email address or
+# a Supabase service key.
+#
+# reason: check_pii.py never has an interesting answer -- it is a gate, and a
+# gate an operator has to REMEMBER to run is a gate that eventually does not
+# run. This makes it automatic. It is the same argument the tour_/sample_
+# filename split makes: a boundary the machine holds survives, a boundary a
+# person holds is one distracted afternoon from being gone.
+#
+# Wired per clone, deliberately not per repo, because git offers no committed
+# way to do it:
+#
+#     git config core.hooksPath hooks
+#
+# core.hooksPath REPLACES .git/hooks wholesale. Nothing else lives there in this
+# repo -- confirmed empty of non-sample hooks before this was added -- so
+# pointing at hooks/ disables nothing. If you add a hook later, add it here.
+#
+# NOT a complete gate on its own, for two reasons, so tour.py's home screen runs
+# the same scan itself:
+#   1. A fresh clone has core.hooksPath unset, so this file is present and OFF.
+#   2. libgit2-based clients -- most IDE git integrations -- do not run git
+#      hooks at all, and something outside the shell has pushed this repo.
+# An unwired gate reads exactly like a passing one. That is this project's
+# stated failure shape, so it is checked and shouted about, never assumed.
+#
+# There is no bypass in here on purpose. `git push --no-verify` skips it, which
+# is git's own escape hatch and is visible in the command the operator typed;
+# a bypass baked into the hook would not be.
+set -e
+
+repo=$(git rev-parse --show-toplevel)
+
+if ! command -v python3 >/dev/null 2>&1; then
+    echo "pre-push REFUSING: python3 not found, so check_pii.py cannot run."
+    echo "A gate that cannot run fails closed -- 'nothing scanned' must not"
+    echo "read as clean. Install python3, or read the diff yourself first."
+    exit 1
+fi
+
+echo "pre-push: scanning for leads, PII and credentials..."
+python3 "$repo/check_pii.py"

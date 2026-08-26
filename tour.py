@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """tour.py — the one command. Photos in a folder, a few questions, an mp4 out.
 
-    python3 tour.py                 # the wizard
+    python3 tour.py                 # the home screen: where every listing is
+    python3 tour.py --build         # skip it, go straight to the wizard
     python3 tour.py --check-photos  # optional: ask Claude to read the contact sheet
 
 This replaced the Streamlit dashboard, which put thirteen controls on screen and
@@ -10,6 +11,31 @@ opposite: everything with the same answer on every listing is inherited from
 agents/<brand>/brand.json or derived from the photos, everything missing is named
 up front rather than discovered five minutes into an encode, and what is left is
 a short question set — where the photos are, what the card says, how long it runs.
+
+That rule was applied to the build and then not applied to the pipeline around
+it, which grew back to eight commands an operator had to keep straight —
+zillow_run, status, tour, publish, check_pii, make_tour, vercel, unittest — with
+nothing saying which was a decision and which was a chore. Sorted by what they
+actually are, only one is a decision:
+
+  check_pii.py  is a gate and never has an interesting answer  -> hooks/pre-push
+  npx vercel    is one-time setup, not per listing             -> out of the loop
+  publish.py    was already rung 4 here                        -> also menu item 3
+  status.py     is "where am I"                                -> the home screen
+  zillow_run.py is a real action, but a DETECTABLE one         -> offered, not
+                                                                  remembered
+  make_tour.py  is the engine                                  -> escape hatch
+  unittest      is developer-only                              -> out of the loop
+
+So this opens on status.py's roll-up and four choices: build, import the dumps
+that have no folder yet, publish a review link, edit a brand. Nothing behind that
+screen changed — every rung, prompt, default and refusal is what it was, and
+every script named above still runs standalone exactly as documented.
+
+Which dumps are pending is DERIVED, from whether agents/<brand>/<listing> exists.
+There is no marker file and no manifest, for the same reason photo order lives in
+the filename prefix: a record kept beside the artifacts drifts out of sync with
+them and is then wrong in a way nothing detects.
 
 It runs make_tour.py as a subprocess, exactly as the dashboard did, so the script's
 contract is untouched: it reads the working directory and knows nothing about the
@@ -40,6 +66,12 @@ Two things this file does that make_tour.py cannot:
   naming folders; this only keeps the manual door from producing a name the scrape
   could never agree with. A name that slugifies to nothing is refused.
 
+  The PII gate's wiring. hooks/pre-push is committed but core.hooksPath is
+  per-clone config, so a fresh clone has the gate present and OFF — which reads
+  exactly like the gate passing. The home screen checks the wiring and shouts,
+  and runs check_pii.py's own scan regardless, because libgit2-based clients do
+  not run git hooks at all.
+
   The resolution verdict. When neither preset clears, this used to REFUSE, at the
   end of a run, after the question set and a draft had already been paid for,
   having computed the identical answer at preflight in the first second. It now
@@ -51,6 +83,7 @@ Two things this file does that make_tour.py cannot:
 """
 
 import glob
+import importlib.util
 import json
 import os
 import shutil
@@ -99,12 +132,27 @@ DEFAULTS = {
     "address": "",
     "output_prefix": "",
 }
-# What a brand sets once and every listing under it inherits. The address is the
-# one field that is genuinely per-property, so it is the one field never inherited.
+# What a brand sets once and every listing under it inherits. The address is
+# per-property and never inherited -- and neither is the agent.
+#
+# reason: agent_name and agent_phone were in this tuple, and questions() offered
+# to save them as brand defaults with the confirm defaulting to YES. A brand
+# folder is keyed on the BROKERAGE, and leads.csv currently lists two agents
+# under Coldwell Banker Realty - Boston, two under Gibson Sotheby's and two under
+# Serhant. So one operator answering yes once would have put their own phone
+# number on the other agent's card, lower third and output filenames, on every
+# listing that brokerage owns -- silently, because load_config() layers brand.json
+# under config.json without saying so. CLAUDE.md names this as a non-negotiable.
+# brokerage stays: it is the same string for every listing a brand owns, which is
+# what a brand default IS. tests/test_brand_scope.py fails if the two agent keys
+# come back.
 BRAND_KEYS = ("logo", "music", "clip_seconds", "xfade_seconds",
               "brand_persistent", "brand_in", "brand_out",
               "card", "card_seconds", "card_style", "card_theme", "accent",
-              "font", "agent_name", "agent_phone", "brokerage")
+              "font", "brokerage")
+# Never inherited from a brand, at either end -- stripped on read as well as on
+# write, so a hand-edited or legacy brand.json cannot reintroduce them either.
+AGENT_KEYS = ("agent_name", "agent_phone")
 
 CARD_MODES = [("outro", "Outro card only (recommended)"),
               ("both", "Intro and outro"),
@@ -247,12 +295,26 @@ def _read_json(path, label):
 
 
 def load_brand(brand):
-    return _read_json(os.path.join(LISTINGS_ROOT, brand, BRAND_FILE), BRAND_FILE)
+    """A brand's shared defaults, with any agent identity stripped out.
+
+    reason: save_brand() can no longer write agent_name or agent_phone, but nine
+    brand.json files already exist and any of them can be hand-edited. Filtering
+    on read too means a brand.json that carries an agent -- from an older build,
+    an editor, or a copy-paste -- still cannot leak that agent onto a second
+    agent's listing through load_config(). See AGENT_KEYS.
+    """
+    got = _read_json(os.path.join(LISTINGS_ROOT, brand, BRAND_FILE), BRAND_FILE)
+    dropped = [k for k in AGENT_KEYS if got.get(k)]
+    if dropped:
+        say(f"  IGNORING {', '.join(dropped)} in {brand}/{BRAND_FILE}: a brand "
+            f"has many agents. Those two live in the listing's config.json.")
+    return {k: v for k, v in got.items() if k not in AGENT_KEYS}
 
 
 def save_brand(brand, cfg):
     out = {k: v for k, v in cfg.items()
-           if k in BRAND_KEYS and v is not None and v != ""}
+           if k in BRAND_KEYS and k not in AGENT_KEYS
+           and v is not None and v != ""}
     with open(os.path.join(LISTINGS_ROOT, brand, BRAND_FILE), "w") as f:
         json.dump(out, f, indent=2)
         f.write("\n")
@@ -385,15 +447,19 @@ def preflight(listing_dir, cfg):
 def questions(listing_dir, brand, cfg):
     """The short set: what the card says, what shape it is, how long it runs."""
     rule("What goes on screen")
-    before = {k: cfg.get(k) for k in ("agent_name", "agent_phone", "brokerage")}
+    was_brokerage = cfg.get("brokerage")
     cfg["address"] = ask("Property address", cfg.get("address", ""))
     cfg["agent_name"] = ask("Agent name", cfg.get("agent_name", ""))
     cfg["agent_phone"] = ask("Agent phone", cfg.get("agent_phone", ""))
     cfg["brokerage"] = ask("Brokerage (card only, used when there is no logo)",
                            cfg.get("brokerage", ""))
-    if any(cfg[k] != before[k] for k in before) and \
-            confirm(f"Save the name, phone and brokerage as {brand} defaults?", True):
-        save_brand(brand, {**load_brand(brand), **{k: cfg[k] for k in before}})
+    # reason: the agent's name and phone are deliberately NOT offered as brand
+    # defaults. This prompt used to save all three, defaulting to yes, which put
+    # one agent's phone number on every other agent's listing at the same
+    # brokerage. See AGENT_KEYS.
+    if cfg["brokerage"] != was_brokerage and cfg["brokerage"] and \
+            confirm(f"Save the brokerage as the {brand} default?", True):
+        save_brand(brand, {**load_brand(brand), "brokerage": cfg["brokerage"]})
 
     if not resolve(listing_dir, cfg.get("logo")):
         available = assets("logo")
@@ -602,7 +668,12 @@ def outputs(listing_dir):
 
 # ---- rung 4: publish ---------------------------------------------------------
 
-def publish_rung(listing_dir):
+def sample_cuts(listing_dir):
+    """The cuts in out/ that publish.py would accept. publish.py is the gate."""
+    return [f for f in outputs(listing_dir) if publish.publishable(f)[0]]
+
+
+def publish_rung(listing_dir, quiet=True):
     """Offer to put the sample_ cuts on the review bucket. Optional, and silent
     when there is no key configured.
 
@@ -618,8 +689,16 @@ def publish_rung(listing_dir):
     publish.load_dotenv()
     if not (os.environ.get("SUPABASE_URL")
             and os.environ.get("SUPABASE_SERVICE_KEY")):
+        # reason: quiet after a build -- an operator with no Supabase key is not
+        # nagged on every delivery. Not quiet when publishing is the thing they
+        # asked for from the menu, where silence would read as "it worked".
+        if not quiet:
+            say("\n  No Supabase credentials, so nothing can be published.")
+            say("  Set SUPABASE_URL and SUPABASE_SERVICE_KEY in .env beside "
+                "publish.py -- see\n  .env.example. Missing either is exit 2, "
+                "never a quiet no-op.")
         return
-    cuts = [f for f in outputs(listing_dir) if publish.publishable(f)[0]]
+    cuts = sample_cuts(listing_dir)
     if not cuts:
         return
     rule("4. Publish")
@@ -676,6 +755,387 @@ def check_photos(listing_dir):
     say("\nNothing was renamed. Photo order lives in the filename prefix -- "
         "rename the files to act on any of that.")
     return True
+
+
+# ---- the home screen ---------------------------------------------------------
+#
+# reason: the pipeline worked, but its SURFACE grew back into the thing tour.py
+# was built to kill. An operator had eight commands to remember -- zillow_run,
+# status, tour, publish, check_pii, make_tour, vercel, unittest -- and nothing
+# told them which was a decision and which was a chore. Sorted by what they
+# actually are, only one is a decision. check_pii is a gate, so it became a
+# pre-push hook. vercel is one-time setup, so it left the recurring runbook.
+# publish was already a rung. status is "where am I", so it is the screen this
+# opens on. zillow_run is a real action, but a DETECTABLE one. What is left is
+# one command, a roll-up and four choices. Nothing behind this screen changed:
+# every rung, prompt, default and refusal in the build flow is what it was, and
+# every script still runs standalone from the CLI.
+
+CHECK_PII = os.path.join(ROOT, "check_pii.py")
+DUMPS = os.path.join(ROOT, "scraper", "dumps")
+RUN_SCRAPER = os.path.join(ROOT, "scraper", "zillow_run.py")
+
+_STATUS = ()        # () = not tried yet; (module, None) or (None, why) after
+
+
+def _sibling(name, relpath):
+    """Import a module beside this one under a private name."""
+    path = os.path.join(ROOT, relpath)
+    spec = importlib.util.spec_from_file_location(name, path)
+    mod = importlib.util.module_from_spec(spec)
+    # reason: scraper/zillow_photos.py imports zillow_lead as a flat sibling --
+    # there is no package -- so its own folder has to be importable while it
+    # executes. Same two lines status.py uses for the same reason.
+    sys.path.insert(0, os.path.dirname(path))
+    try:
+        spec.loader.exec_module(mod)
+    finally:
+        sys.path.pop(0)
+    return mod
+
+
+def load_status():
+    """(status module, None) or (None, why). Never raises, cached.
+
+    reason: status.py runs _load_scraper() at module scope, so importing it
+    loads the scraper. In a tree copied without scraper/ that raises, and an
+    exception on the way to the menu would take a build down with it. This
+    mirrors the project's existing asymmetry: a broken cosmetic layer warns and
+    drops out, only a broken watermark stops a build. A roll-up is cosmetic --
+    say why it is missing, then carry on to the listing picker.
+    """
+    global _STATUS
+    if _STATUS == ():
+        try:
+            _STATUS = (_sibling("status_for_tour", "status.py"), None)
+        except Exception as e:              # noqa: BLE001 -- deliberately broad
+            _STATUS = (None, f"{type(e).__name__}: {e}")
+    return _STATUS
+
+
+def unimported_dumps():
+    """[(filename, brand, listing)] for dumps with no folder under agents/.
+
+    reason: DERIVED, never recorded. The alternative -- a .processed marker, or
+    a manifest of handled dumps -- is the photo-order failure one level up:
+    state kept beside the artifacts drifts out of sync with them, and then the
+    record is wrong in a way nothing detects. A folder either exists or it does
+    not, and that answer cannot go stale. It also means deleting a listing
+    folder correctly re-offers its dump, which a marker file would not.
+
+    Names are not derived here at all: zillow_photos.target_for() is the one
+    function that turns a dump into the folder it scaffolds, and the scraper
+    calls the same one. A second copy of that decision would be a second naming
+    authority, and a near-miss would report an imported listing as pending
+    forever.
+    """
+    status, _why = load_status()
+    if status is None or not os.path.isdir(DUMPS):
+        return []
+    out = []
+    for name in sorted(os.listdir(DUMPS)):
+        if not name.lower().endswith(".txt") or name.startswith("."):
+            continue
+        try:
+            with open(os.path.join(DUMPS, name), encoding="utf-8",
+                      errors="ignore") as f:
+                text = f.read()
+        except OSError:
+            continue
+        # reason: None IS zillow_photos' own refusal -- a dump with neither
+        # photo URLs nor an address is not a listing dump, both scraper scripts
+        # exit non-zero on it, and counting it here would offer an import that
+        # can only fail.
+        target = status._zp.target_for(text)
+        if target is None:
+            continue
+        brand, listing = target
+        if not os.path.isdir(os.path.join(LISTINGS_ROOT, brand, listing)):
+            out.append((name, brand, listing))
+    return out
+
+
+def hook_state():
+    """(wired, why_not) for the pre-push PII gate IN THIS CLONE.
+
+    reason: hooks/pre-push is committed, but core.hooksPath is per-clone config,
+    so a fresh clone has the file present and the gate OFF -- which on screen
+    looks exactly like the gate passing. That is this project's stated failure
+    shape: "nothing to scan" and "nothing found" read identically and mean
+    opposite things. A test cannot check the operator's clone, so this does.
+    """
+    hook = os.path.join(ROOT, "hooks", "pre-push")
+    if not os.path.isfile(hook):
+        return False, "hooks/pre-push is missing from this tree"
+    if not os.access(hook, os.X_OK):
+        return False, "hooks/pre-push is not executable"
+    try:
+        r = subprocess.run(["git", "-C", ROOT, "config", "--get",
+                            "core.hooksPath"], capture_output=True, text=True)
+    except (OSError, subprocess.SubprocessError) as e:
+        return False, f"git could not be asked about core.hooksPath ({e})"
+    got = r.stdout.strip() if r.returncode == 0 else ""
+    if got != "hooks":
+        return False, f"core.hooksPath is {got or 'unset'}, not hooks/"
+    return True, None
+
+
+def pii_scan():
+    """(exit code, one line of detail) from check_pii.py's real scan.
+
+    reason: defense in depth, and not theatre. The pre-push hook only fires for
+    pushes that go through the git CLI; libgit2-based clients -- most IDE git
+    integrations -- do not run git hooks at all, and this repo has been pushed
+    by something that was not this shell. Running the same scan here does not
+    depend on identifying the pusher. check_pii.py is unmodified: 0 is clean,
+    1 is findings, 2 is could-not-scan, which it treats as worse than findings.
+    """
+    try:
+        r = subprocess.run([sys.executable, CHECK_PII],
+                           capture_output=True, text=True, timeout=120)
+    except (OSError, subprocess.SubprocessError) as e:
+        return 2, f"could not run check_pii.py ({e})"
+    if r.returncode == 0:
+        return 0, None
+    lines = [l.strip() for l in r.stdout.splitlines() if l.strip()]
+    refusal = next((l for l in lines if "REFUSING" in l), None)
+    finding = next((l for l in lines if "finding(s)" in l), None)
+    return r.returncode, refusal or finding or (lines[-1] if lines else
+                                                "run python3 check_pii.py")
+
+
+def gate_banner():
+    """One block, and only when something is wrong. Silence means armed."""
+    wired, why = hook_state()
+    code, detail = pii_scan()
+    if code == 1:
+        say(f"\n  \033[1mPII GATE: {detail}\033[0m")
+        say("  Something git would publish holds a lead, a phone number or a "
+            "key.\n  See it masked with:  python3 check_pii.py")
+    elif code == 2:
+        say(f"\n  \033[1mPII gate could not run: {detail}\033[0m")
+        say("  It fails closed on purpose -- 'nothing scanned' must not read as "
+            "clean.")
+    if not wired:
+        say(f"\n  \033[1mPII gate is NOT wired into git push here\033[0m ({why}).")
+        say("  The hook is committed; enabling it is per clone:\n"
+            "      git config core.hooksPath hooks")
+
+
+def _indent(msg):
+    return "\n".join(("  " + l if l else l) for l in msg.splitlines())
+
+
+def _say_indented(msg):
+    """The out= status.py's printers take, so their output lands in this menu."""
+    say(_indent(msg))
+
+
+def roll_up(status):
+    """status.py's own rows and its own naming audit, rendered here."""
+    rows, truth, known = status.survey()
+    if not rows:
+        say("  No listings under agents/ yet. Drop a Zillow dump in "
+            "scraper/dumps/ and pick 2.")
+        return
+    # reason: printed through status.py's own print_rows/print_audit rather
+    # than re-rendered here. Two implementations of the scrape-naming check is
+    # the exact drift the check exists to catch, one level up -- and the same
+    # went for the table: the copy that used to live here had already lost the
+    # "N brokerage(s) need a logo" line.
+    status.print_rows(rows, out=_say_indented)
+    status.print_audit(*status.audit(rows, truth, known), out=_say_indented)
+
+
+def import_dumps():
+    """Rung zero: turn the pending dumps into listings. zillow_run.py, as-is."""
+    pending = unimported_dumps()
+    if not pending:
+        say("\n  Nothing pending. Save a Zillow page dump as a .txt in "
+            "scraper/dumps/ first.")
+        return
+    say(f"\n  This downloads photos for {len(pending)} listing(s) and appends "
+        f"to leads.csv.\n  It never overwrites an existing brand.json or "
+        f"config.json, so it is safe to rerun.")
+    if not confirm("Run the scraper now?", True):
+        return
+    subprocess.run([sys.executable, "-u", RUN_SCRAPER])
+
+
+def publish_action():
+    """Menu route to rung 4, for a listing that is already built."""
+    _brand, listing_dir = choose_listing()
+    if not sample_cuts(listing_dir):
+        say(f"\n  No sample_ cuts in "
+            f"{os.path.relpath(listing_dir, ROOT)}/out/ -- build it first.\n"
+            "  Only sample_ cuts publish. A tour_ cut goes out after sign-off, "
+            "by hand.")
+        return
+    publish_rung(listing_dir, quiet=False)
+
+
+# ---- brand settings ----------------------------------------------------------
+
+def brand_settings():
+    """Edit what a brokerage sets once, and optionally push it down.
+
+    reason: CLAUDE.md has promised an explicit "Re-apply brand defaults" action
+    since the Streamlit dashboard was deleted, and it has not existed anywhere
+    since. A new listing inherits brand.json at creation; changing a brand
+    default deliberately does NOT reach back into listings already scaffolded,
+    because config.json is meant to still explain what produced a delivered
+    video months later. That is the right default and the reason the explicit
+    action has to exist -- otherwise fixing a brokerage's logo means hand-editing
+    every config.json under it.
+    """
+    bs = brands()
+    if not bs:
+        say("\n  No brands yet. They are named by the scrape -- import a dump "
+            "first.")
+        return
+    brand = pick("Brand", [(b, b) for b in bs], default=0)
+    bcfg = load_brand(brand)
+    rule(f"{brand}/brand.json")
+    if bcfg:
+        for k in sorted(bcfg):
+            say(f"  {k} = {bcfg[k]}")
+    else:
+        say("  (nothing set yet -- every listing falls back to the built-in "
+            "defaults)")
+    say("\n  A brand holds what every listing this brokerage owns shares.")
+    say("  Not the agent: leads.csv lists two agents under some brokerages, so "
+        "a\n  brand-level name or phone would put one agent's details on "
+        "another's video.\n  Those live in the listing's config.json.")
+
+    for kind, label in (("logo", "Logo"), ("music", "Music bed")):
+        available = assets(kind)
+        if not available:
+            continue
+        current = bcfg.get(kind)
+        options = [(f, f + ("  (current)" if asset_path(kind, f) == current
+                            else "")) for f in available]
+        choice = pick(f"{label}", options,
+                      default=next((i for i, f in enumerate(available)
+                                    if asset_path(kind, f) == current), 0),
+                      extra=(None, f"No {label.lower()}"))
+        bcfg[kind] = asset_path(kind, choice) if choice else None
+
+    bcfg["brokerage"] = ask("Brokerage name (card only, when there is no logo)",
+                            bcfg.get("brokerage", ""))
+    bcfg["card"] = pick("Default card", CARD_MODES,
+                        default=[m[0] for m in CARD_MODES].index(
+                            bcfg.get("card", DEFAULTS["card"])))
+    bcfg["clip_seconds"] = number("Seconds per photo",
+                                  bcfg.get("clip_seconds",
+                                           DEFAULTS["clip_seconds"]), 1.0, 15.0)
+    save_brand(brand, bcfg)
+    say(f"\n  Saved agents/{brand}/{BRAND_FILE}.")
+
+    ls = listings(brand)
+    if not ls:
+        return
+    say(f"\n  {len(ls)} existing listing(s) keep the values they were scaffolded "
+        f"with.\n  That is deliberate -- config.json is the record of what "
+        f"produced a delivered\n  video. Re-applying overwrites those keys.")
+    if confirm(f"Re-apply {brand} defaults to its {len(ls)} listing(s)?", False):
+        reapply_brand(brand, ls)
+
+
+def reapply_brand(brand, ls):
+    """Push the brand's keys down into each listing, showing every change first.
+
+    reason: shown before written, per listing, per key. This is the one action
+    in the whole tool that edits files the operator is not looking at, and a
+    silent bulk write over the record of what produced a delivered video is not
+    something to find out about later.
+    """
+    bcfg = load_brand(brand)
+    # reason: AGENT_KEYS can never be here -- load_brand strips them and
+    # save_brand refuses to write them -- but re-applying is the exact operation
+    # that would spread them across every listing a brokerage owns if they ever
+    # came back, so the filter is restated at the point of the blast radius.
+    push = {k: v for k, v in bcfg.items()
+            if k in BRAND_KEYS and k not in AGENT_KEYS}
+    if not push:
+        say("  Nothing set on the brand to apply.")
+        return
+    planned = []
+    for name in ls:
+        listing_dir = os.path.join(LISTINGS_ROOT, brand, name)
+        cfg = _read_json(os.path.join(listing_dir, "config.json"), "config.json")
+        changes = {k: (cfg.get(k), v) for k, v in push.items() if cfg.get(k) != v}
+        if changes:
+            planned.append((name, listing_dir, cfg, changes))
+    if not planned:
+        say("  Every listing already matches the brand. Nothing to write.")
+        return
+    say("")
+    for name, _dir, _cfg, changes in planned:
+        say(f"  {brand}/{name}")
+        for k, (was, now) in sorted(changes.items()):
+            say(f"    {k}: {was if was not in (None, '') else '(unset)'} -> {now}")
+    if not confirm(f"\nWrite these to {len(planned)} config.json file(s)?", False):
+        say("  Nothing was written.")
+        return
+    for _name, listing_dir, cfg, changes in planned:
+        cfg.update({k: now for k, (_was, now) in changes.items()})
+        save_config(listing_dir, cfg)
+    say(f"  Updated {len(planned)} listing(s).")
+
+
+def home():
+    """The one screen: where every listing is, then the four things to do."""
+    status, why = load_status()
+    # reason: the roll-up opens every photo in every listing, the dump scan
+    # re-reads scraper/dumps/, and the gate banner spawns check_pii.py over the
+    # whole repo. That is worth paying once, and again after an action that
+    # could have changed the answer -- but it was being paid to reprint four
+    # lines after a mistyped menu key. The flag, not a timer: correctness here
+    # is "recompute after anything that writes", which is every action.
+    stale, pending = True, []
+    while True:
+        if stale:
+            rule("Tour builder")
+            if status is None:
+                say(f"  The listing roll-up is unavailable ({why}).")
+                say("  status.py loads scraper/zillow_photos.py at import, and "
+                    "that is what failed.\n  Building is unaffected -- pick 1 "
+                    "and the listing picker works as always.")
+            else:
+                roll_up(status)
+            pending = unimported_dumps()
+            if pending:
+                say(f"\n  {len(pending)} dump(s) in scraper/dumps/ have no "
+                    f"listing folder yet:")
+                for name, brand, listing in pending:
+                    say(f"    {name}  ->  agents/{brand}/{listing}")
+            gate_banner()
+            stale = False
+
+        menu = [
+            ("1", "Build a tour", None),
+            ("2", f"Import {len(pending)} new dump(s)" if pending
+             else "Import new dumps (none pending)", import_dumps),
+            ("3", "Publish a review link", publish_action),
+            ("4", "Brand settings", brand_settings),
+        ]
+        say("")
+        for key, label, _ in menu:
+            say(f"  {key}. {label}")
+        say("  q. quit")
+        choice = ask("\nWhich", "1").strip().lower()
+        if choice in ("q", "quit", "exit"):
+            return
+        if choice == "1":
+            build_flow([])
+            return
+        action = next((f for k, _, f in menu if k == choice), None)
+        if action is None:
+            say("  Pick 1-4, or q to quit.")
+            continue
+        action()
+        say("")
+        stale = True
 
 
 # ---- the wizard -------------------------------------------------------------
@@ -738,11 +1198,26 @@ def choose_listing():
 
 def main():
     args = sys.argv[1:]
-    if args and args[0] not in ("--check-photos",):
+    if args and args[0] not in ("--check-photos", "--build"):
         raise SystemExit(__doc__.strip().splitlines()[0] +
-                         "\n\n    python3 tour.py [--check-photos]")
+                         "\n\n    python3 tour.py [--build | --check-photos]")
+    # reason: --check-photos and --build are the two ways past the home screen.
+    # The roll-up is worth a second of startup when you are deciding what to
+    # work on and pure noise when you already know, so it is skippable -- but
+    # only explicitly. The default is still the screen that answers "where am I".
+    if args:
+        build_flow(args)
+    else:
+        home()
 
-    rule("Tour builder")
+
+def build_flow(args):
+    """Pick a listing, ask the short set, walk the three rungs. Unchanged.
+
+    reason: this is the whole of what main() used to be, moved down a level so a
+    home screen could sit in front of it. Every rung, prompt, default, refusal
+    and flag below is byte-for-byte what it was.
+    """
     brand, listing_dir = choose_listing()
     say(f"\n{os.path.relpath(listing_dir, ROOT)}")
 
