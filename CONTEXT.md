@@ -1,0 +1,129 @@
+# The pipeline
+
+The repeating unit is a **listing**. It moves through four stages, each ending at a
+gate a person passes. Nothing about the stage is recorded anywhere: every one of
+them is derived from what exists on disk, which is why there is no manifest, no
+marker file and no status key in `config.json`.
+
+| # | Stage | Runs | Writes | Gate |
+|---|---|---|---|---|
+| 1 | Scrape | `scraper/run.py` | `leads.csv` row + `agents/<brand>/<listing>/` | photos land, and the resolution verdict is printed before anything is worth building |
+| 2 | Build | `make_tour.py --samples-only` | the three `sample_` cuts in `out/` | the operator walks the three rungs below |
+| 3 | Publish | `publish.py` | the cuts to the review bucket + `outreach/links.csv` + an email draft | **the client signs off.** Nothing is sent by the machine |
+| 4 | Deliver | `make_tour.py --delivery-only` | the three `tour_` cuts in `out/` | the paid deliverable leaves |
+
+`tour.py` is the runner for all four. `status.py` is the read-only roll-up that says
+which stage every listing is on. Both derive; neither records.
+
+## The three rungs inside stage 2
+
+Each costs what its question is worth, and the cheap one comes first:
+
+| Rung | Command | Cost | Question |
+|---|---|---|---|
+| 1 | `make_tour.py --contact-sheet` | ~1s | is the order right? |
+| 2 | `make_tour.py --draft` | ~1min | does the edit feel right? |
+| 3 | `make_tour.py --samples-only` | ~6min | ship it to the client for review |
+
+Rung 1 runs *before* the resolution gate on purpose — "are these in the right order"
+is worth answering on photos that are not yet good enough to build with.
+
+## How each stage's state is derived
+
+| Question | Answered by | Never by |
+|---|---|---|
+| Which photos, in what order? | sorting `photos/` filenames | a manifest or an order key |
+| Which dumps are still unimported? | whether `agents/<brand>/<listing>` exists | a marker file |
+| Which run is this listing on? | what is in `out/` — nothing / `sample_` / `tour_` | a stage key in `config.json` |
+| Has it been published? | `outreach/links.csv`, read by header name | a marker file |
+| Can the stitch be reused? | `.last_build.json` vs `photo_state()` | assumption |
+| Are the photos good enough? | re-measuring `photos/` on every read | a suffix in a filename |
+
+The last column is the whole design. A fact stored beside the artifact drifts out of
+sync with it and is then wrong in a way nothing detects.
+
+`status.py`'s `out/` states name the **family**, not just a count — a first run
+writes three cuts on purpose, so a bare `built, 3 cuts` was indistinguishable from a
+six-cut build that died halfway:
+
+| State | Means |
+|---|---|
+| `ready to build` | nothing in `out/` yet |
+| `sample built -- publish the review link` | run 1 done |
+| `sample published -- awaiting sign-off` | a cut is on the review bucket |
+| `delivered, N cuts` | a `tour_` cut exists |
+
+*Published* is derived from `outreach/links.csv`, which `publish.py` already writes
+on every confirmed upload, read **by header name** — no marker file is invented to
+hold it, and a missing file means "nothing published" exactly as a missing
+`leads.csv` means "nothing scraped". The soft-photo verdict rides along on every
+state and is still measured from `photos/`.
+
+## The home screen
+
+`tour.py` opens on `status.py`'s roll-up — every listing and its one next action,
+plus the scrape-naming drift report — then offers: **1** build a tour, **2** import
+the dumps that have no listing folder yet, **3** publish a review link, **4** brand
+settings. Which dumps are pending is *derived* from whether
+`agents/<brand>/<listing>` exists; there is no marker file and no manifest, for the
+same reason photo order lives in the filename prefix. `--build` skips the screen
+when you already know the listing.
+
+## Two runs, and how the tool knows which one it is on
+
+`--samples-only` and `--delivery-only` build one family instead of both. A bare
+`make_tour.py` still builds all six, unchanged; the staging is `tour.py`'s. The two
+flags are opposites and passing both **exits 2** — "build neither family" is not a
+request.
+
+| Run | What it writes | Cost |
+|---|---|---|
+| 1 — proofing | the three `sample_` cuts | full build, ~6 min |
+| 2 — after sign-off | the three `tour_` cuts | `--finish-only`, ~1 min |
+
+The `tour_` trio is the paid deliverable and only ever leaves after sign-off, so
+building it during cold outreach spends half a six-minute encode, and ~200 MB, on a
+listing that may never reply.
+
+**The stage is derived from `out/`, and is never recorded.** Nothing built → run 1;
+`sample_` cuts alone → run 2 is next; any `tour_` cut → delivered. Same rule as the
+photo order: a marker file beside the artifacts drifts out of sync with them and is
+then wrong in a way nothing detects. There is no stage key in `config.json` and
+there must never be one.
+
+**`.last_build.json` gains no new rung, and that is the point.** Its top-level key
+names the *intermediate lineage* — `draft` ↔ `work_draft.mp4`, `delivery` ↔
+`work_silent.mp4` — not the cut family. Both runs write `delivery`, so run 2 finds
+run 1's record with preset, pacing, card and `photo_state()` unchanged and takes
+`--finish-only`. Change the photos or the pacing in between and `rebuild_reason()`
+correctly forces a full rebuild. Two orthogonal questions, two mechanisms that
+already existed: `out/` answers *which run is this*, `.last_build.json` answers
+*can the stitch be reused*. Splitting the rung per family would leave run 2 with no
+record and re-stitch photos that never moved.
+
+Staging is a default, never a restriction: `build_choice()` keeps *all six now* and
+a rebuild of either family reachable from every stage, because a client who has
+already paid should not have to build a proof first.
+
+A build from photos that miss the resolution gate names all six exactly the same
+way. The shortfall is reported to the console — at preflight, and again once the
+cuts exist — and never written into a filename. See
+[`below-par-photos-build-and-are-reported`](_rules/below-par-photos-build-and-are-reported.md).
+
+The watermark is deliberately **not** gated on the `branded` flag — it is the entire
+reason a sample cut exists, so it appears on `sample_unbranded.mp4` too.
+
+
+## What is stable vs. what is per-run
+
+**Factory** — configured once, identical across runs: `global_assets/` (logos, music,
+lower thirds, `viabolat.png`), `agents/<brand>/brand.json`, `outreach/template.txt`,
+`_rules/`, `_reference/`, `IDEA.md`, `STEPS.md`.
+
+**Product** — new every listing: `agents/<brand>/<listing>/` — `photos/`,
+`config.json`, `out/`, and the email draft in `outreach/drafts/`.
+
+`brand.json` is the factory layer for one brokerage. It holds what every listing that
+brokerage owns shares — and **no agent identity**, because a brokerage has many
+agents. See
+[`brand-json-carries-no-agent-identity`](_rules/brand-json-carries-no-agent-identity.md).

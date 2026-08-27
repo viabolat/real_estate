@@ -11,8 +11,13 @@ scenarios, the tuning keys, the resolution gate and the failure modes. **You do
 not need any of it to ship a listing.** It is here for the day something behaves
 unexpectedly, or a listing needs something the wizard does not ask about.
 
-For photo sourcing and resolution rules, see `IDEA.md`. For project rules,
-`CLAUDE.md`.
+`WALKTHROUGH.md` is the eleven-step version of Part 1, for someone doing this for
+the first time; this file is the depth behind it. When they disagree, this file is
+right and `WALKTHROUGH.md` needs updating.
+
+For photo sourcing and resolution rules, see `IDEA.md`. For the rules that must not
+be broken, `_rules/` — the table in `_rules/CONTEXT.md` routes by area. `CLAUDE.md`
+routes to everything.
 
 ---
 

@@ -115,7 +115,7 @@ class TestZeroDimensionAssets(unittest.TestCase):
 
     def test_a_broken_watermark_stops_the_build(self):
         """NOT cosmetic. Skipping it writes an unmarked sample_ cut -- the one
-        file CLAUDE.md forbids sending. It must refuse, not degrade."""
+        file _rules/a-missing-watermark-stops-the-build.md forbids. Refuse, not degrade."""
         with listing(config={}, assets=("viabolat.png",)) as (mod, tmp):
             mod.run = lambda cmd: None
             mod.duration = lambda path: 60.0

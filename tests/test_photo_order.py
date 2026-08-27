@@ -1,6 +1,7 @@
 """Photo order lives in the filename prefix and nowhere else.
 
-Guards CLAUDE.md: "Photo order lives in the filename prefix and nowhere else",
+Guards _rules/photo-order-lives-in-the-filename-prefix.md: "Photo order lives in
+the filename prefix and nowhere else",
 and the three things that must all stay: the build prints the resolved order, it
 warns when nothing authored it, and config.json never gains an order key.
 
@@ -121,8 +122,9 @@ class TestConfigNeverCarriesOrder(unittest.TestCase):
         undocumented = self.config_keys() - documented
         self.assertEqual(undocumented, set(),
                          f"undocumented config keys: {sorted(undocumented)}. "
-                         "Docs do not go stale -- add them to CLAUDE.md, "
-                         "STEPS.md and the module docstring in this pass.")
+                         "Docs do not go stale -- add them to "
+                         "_reference/config-schema.md, STEPS.md and the "
+                         "module docstring in this pass.")
 
     def test_an_order_key_in_config_is_ignored_by_the_build(self):
         """Even if one appears in a listing's config, nothing may read it."""

@@ -1,6 +1,8 @@
 """The card must never reach the MLS cut, and vertical needs two sources.
 
-Guards CLAUDE.md: "The card never rides in work_silent.mp4", "vertical() takes
+Guards _rules/the-card-never-rides-in-work-silent.md and
+_rules/vertical-takes-two-sources-per-family.md: "The card never rides in
+work_silent.mp4", "vertical() takes
 two sources per family, and that is not redundancy", and "the watermark is
 deliberately not gated on the branded flag".
 

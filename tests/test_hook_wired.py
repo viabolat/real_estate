@@ -1,6 +1,8 @@
 """The PII gate runs itself, and an unwired gate does not read as a passing one.
 
-Guards CLAUDE.md: "No lead, phone number or email address is ever committed" and
+Guards _rules/no-pii-is-ever-committed.md and
+_rules/a-gate-that-cannot-run-fails-closed.md: "No lead, phone number or email
+address is ever committed" and
 "A gate that cannot run must fail closed."
 
 reason: check_pii.py never has an interesting answer, which is exactly why an

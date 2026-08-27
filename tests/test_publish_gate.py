@@ -1,10 +1,12 @@
 """Only a watermarked cut leaves the machine.
 
-Guards CLAUDE.md: "Never send a sample_ file as a deliverable, and never send a
+Guards _rules/never-cross-the-sample-tour-boundary.md and
+_rules/only-sample-cuts-publish.md: "Never send a sample_ file as a deliverable,
+and never send a
 tour_ file before sign-off." The bucket behind /preview/ is public, so the
 filename gate in publish.py is the only thing standing between an unwatermarked
 deliverable and a guessable URL. Also guards the remote-path collision that
-CLAUDE.md's output_prefix rule already solved locally.
+the output_prefix rule already solved locally (_reference/layout.md).
 
 No network: the gate and the path builder are pure, the HTTP call is behind them.
 """

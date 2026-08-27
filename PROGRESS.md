@@ -565,59 +565,45 @@ record of what was decided and why; it is not repeated here.
 
 ## 3. CURRENT STATE
 
-`python3 status.py` is the live answer -- it re-reads `leads.csv` and measures every
-photo, and it is now also the first thing `python3 tour.py` prints. This is a
-folder-level snapshot as of **2026-08-26**, verified by running it; the per-photo
-pixel column is deliberately not reproduced here, because a hand-copied one goes
-stale silently and `status.py` never does.
+**`python3 status.py` is the answer. This section no longer restates it.**
 
-**Twelve** listing folders, three built. That is one fewer than the 2026-08-24
-snapshot: `boston_advanced_realty/335_w_2nd_st_unit_8` -- the "photos too small, do
-not build" row -- is no longer on disk. Its **lead row is still in `leads.csv`** and
-its brand folder still exists, so `status.py` reports
-`boston_advanced_realty/- ... no listings yet`. Deleting the folder was not recorded
-here at the time; re-running `run.py` on its dump would scaffold it again, and
-the photos would still be too small.
+It re-reads `leads.csv`, measures every photo, names the run each listing is on and
+prints the `mv` for any folder that has drifted from its lead row. `tour.py` prints
+it as the first thing on the home screen.
 
-| Listing | Photos | `config.json` | Cuts in `out/` |
-|---|---|---|---|
-| `brewester/9_w_cedar` | 17 | **no** | -- predates the scraper, *unverifiable* |
-| `coldwell_banker_realty_boston/2_commonwealth_ave` | 28 | yes | 6 |
-| `coldwell_banker_realty_boston/8_dartmouth_st_5` | 20 | yes | 6 -- soft (1024px photos), sample only |
-| `coldwell_banker_realty_waltham/284_sumner_st_3` | 38 | yes | -- needs a brand logo |
-| `compass/12_adella_pl` | 22 | yes | -- needs a brand logo |
-| `corcoran/46_beacon_5` | 8 | **no** | -- predates the scraper, *unverifiable* |
-| `gibson_sothebys_international_realty/169_k_st_1` | 13 | yes | -- ready to build, would be soft |
-| `gibson_sothebys_international_realty/260_262_commonwealth_ave_1b` | 31 | yes | 6 -- soft (1024px photos), sample only |
-| `re_max_partners_relocation/407_w_1st_st_unit_101` | 39 | yes | -- needs a brand logo |
-| `serhant/267_old_colony_606` | 36 | yes | -- needs a brand logo |
-| `serhant/99_sumner_st_penthouse_621` | 40 | yes | -- needs a brand logo |
-| `the_collaborative_companies/55_lagrange_st_unit_1705` | 19 | yes | -- needs a brand logo |
+A hand-copied table of the same facts used to sit here. It was wrong within two days
+of being written -- one listing folder had been deleted and the table still listed
+it -- and it was wrong in the way this project has a rule about: a fact stored beside
+the artifact, drifting out of sync with it, with nothing to detect the drift. The
+same reasoning that keeps photo order in the filename prefix and the build stage in
+`out/` applies to a state table in a build log. It is gone; `status.py` derives it.
 
-Five brokerages need a logo or music set once -- `coldwell_banker_realty_waltham`,
-`compass`, `re_max_partners_relocation`, `serhant`,
-`the_collaborative_companies`. That is what Brand settings on `tour.py`'s home
-screen is for; setting it there writes `brand.json` and every *new* listing under
-that brokerage inherits it, while existing ones need the explicit "Re-apply brand
-defaults" action.
+What stays here is what `status.py` cannot derive -- the decisions:
 
-`brewester/9_w_cedar` and `corcoran/46_beacon_5` are the two hand-named folders with
-no lead row behind them. They are left alone deliberately -- see the scrape-naming
-non-negotiable in `CLAUDE.md`.
-
-**Intermediates on disk:** `2_commonwealth_ave` and `8_dartmouth_st_5` hold
-`work_silent.mp4` + `work_branded.mp4` + `clips/` (kept for `--finish-only`);
-`9_w_cedar` and `46_beacon_5` hold `work_silent.mp4` + `clips/`. Four listings hold
-a `draft.mp4`. No `work_draft.mp4` or `clips_draft/` remains.
-
-**`scraper/dumps/` holds four `*.txt` files and all four are 0 bytes.** Both scraper
-scripts refuse a dump with no `zpid` and no address, so `tour.py`'s home screen
-correctly reports **0** pending imports rather than offering an import that can only
-fail. Nothing on this machine exercises the dump parsers -- which is also why the
-`lead.field()` comma bug in section 6 stays unfixed.
-
-`IDEA.md` section 6 "CURRENT STATE" is a **historical snapshot** of one folder from
-2026-08-19, kept for the sourcing argument it supports. This table supersedes it.
+- **`brewester/9_w_cedar` and `corcoran/46_beacon_5`** are hand-named, predate the
+  scraper, and have no lead row. They are **left alone deliberately**: the scrape is
+  the only thing that names a listing folder, and it cannot name one it has no row
+  for. `status.py` reports them as *unverifiable*, which is the correct third
+  answer, not a failure. See
+  [`the-scrape-names-the-folders`](_rules/the-scrape-names-the-folders.md) and
+  [`a-folder-with-no-lead-row-still-starts`](_rules/a-folder-with-no-lead-row-still-starts.md).
+- **`boston_advanced_realty/335_w_2nd_st_unit_8` was deleted from disk** some time
+  before 2026-08-26 -- the "photos too small, do not build" listing. Its lead row is
+  still in `leads.csv` and its brand folder still exists, so `status.py` reports
+  `boston_advanced_realty/- ... no listings yet`. Re-running `run.py` on its dump
+  would scaffold it again, and the photos would still be too small. The deletion was
+  never recorded at the time; it is recorded here now.
+- **`scraper/dumps/` holds four `*.txt` files and all four are 0 bytes.** Both
+  scraper scripts refuse a dump with no `zpid` and no address, so the home screen
+  correctly reports **0** pending imports rather than offering an import that can
+  only fail. Nothing on this machine exercises the dump parsers -- which is why the
+  `lead.field()` comma bug in section 6 stays unfixed, and why it must stay unfixed
+  until a real dump exists to regression-test the naming authority against.
+- **Stale intermediates in the two pre-scraper listings** are an open item, not a
+  state reading. See section 6.
+- **`IDEA.md` section 6 "CURRENT STATE"** is a historical snapshot of one folder from
+  2026-08-19, kept for the sourcing argument it supports. It is not a live reading
+  either; `status.py` supersedes it.
 
 ---
 
@@ -641,6 +627,12 @@ is a rename on disk, never a sidecar.
 ---
 
 ## 5. PROPOSED — designed, deliberately deferred
+
+> **One deferred proposal is not in this section.** `IDEA.md` §8.1 — programmatic
+> drop shadow on the logo — is parked in `IDEA.md` **by agreement**, as the branding/
+> output backlog's spot. It was left there rather than moved here so that agreement
+> is not overridden silently; this pointer is what keeps the backlog readable from
+> one place. Anything else deferred belongs below.
 
 ### 5.0 A positional directory argument for `make_tour.py` — **deferred 2026-08-24**
 

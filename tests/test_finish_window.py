@@ -1,6 +1,7 @@
 """Branding is held off wherever the card is on screen; the watermark is not.
 
-Guards CLAUDE.md: "Branding is held off wherever the card is on screen, and the
+Guards _rules/branding-is-held-off-under-the-card.md: "Branding is held off
+wherever the card is on screen, and the
 watermark is not", and "a no-card build is byte-identical to one from before
 cards existed".
 

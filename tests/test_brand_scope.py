@@ -1,6 +1,7 @@
 """A brand is a brokerage, and a brokerage has many agents.
 
-Guards CLAUDE.md: "brand.json never carries agent_name or agent_phone. A
+Guards _rules/brand-json-carries-no-agent-identity.md: "brand.json never
+carries agent_name or agent_phone. A
 brokerage has many agents; the folder is keyed on the brokerage."
 
 reason: tour.py's BRAND_KEYS carried agent_name and agent_phone, and questions()

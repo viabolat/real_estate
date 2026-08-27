@@ -1,6 +1,9 @@
 """The output filename is a boundary that survives being emailed.
 
-Guards CLAUDE.md: "Never send a sample_ file as a deliverable, and never send a
+Guards _rules/never-cross-the-sample-tour-boundary.md,
+_rules/below-par-photos-build-and-are-reported.md and
+_rules/draft-mp4-is-not-a-deliverable.md: "Never send a sample_ file as a
+deliverable, and never send a
 tour_ file before sign-off", "the resolution verdict is reported, never encoded in
 a filename", and "draft.mp4 is not a deliverable and does not go in out/".
 """
@@ -85,7 +88,7 @@ class TestSlug(unittest.TestCase):
         return helpers.scraper_module("photos").slugify
 
     def test_scraper_slug_drops_apostrophes_rather_than_separating(self):
-        """The folder-naming authority. CLAUDE.md documents exactly this."""
+        """The folder-naming authority. _reference/layout.md documents this."""
         slugify = self.both()
         self.assertEqual(slugify("Gibson Sotheby's International Realty"),
                          "gibson_sothebys_international_realty")

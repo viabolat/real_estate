@@ -1,6 +1,7 @@
 """The front door: derived state, and a roll-up that cannot block a build.
 
-Guards CLAUDE.md's "Photo order lives in the filename prefix and nowhere else"
+Guards _rules/photo-order-lives-in-the-filename-prefix.md -- "Photo order lives
+in the filename prefix and nowhere else"
 generalised one level up -- unimported dumps are detected by whether the folder
 exists, never by a marker file -- and the project's warn-vs-refuse asymmetry: a
 broken cosmetic layer drops out, only a broken watermark stops a build.

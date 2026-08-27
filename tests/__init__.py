@@ -1,1 +1,1 @@
-"""Regression guards for the CLAUDE.md non-negotiables. Stdlib unittest only."""
+"""Regression guards for the _rules/ non-negotiables. Stdlib unittest only."""

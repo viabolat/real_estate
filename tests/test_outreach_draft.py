@@ -6,7 +6,7 @@ Guards two things publish.py now owns:
     link used to sit mid-row, so anything that grabbed it took the timestamp with
     it and the URL 404'd. Nothing may be appended after url again.
   * the email draft quotes the sample_branded cut and never a tour_ file --
-    CLAUDE.md's "never send a tour_ file before sign-off", one layer up from the
+    _rules/never-cross-the-sample-tour-boundary.md, one layer up from the
     upload gate that tests/test_publish_gate.py covers.
 
 No network: record_links() and the draft renderer are pure file work.

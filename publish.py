@@ -248,7 +248,7 @@ def remote_path(listing_dir, filename):
     reason: the bare filename collides. Two listings by the same agent both
     produce sean_obrien_sample_branded.mp4, and a listing with a blank
     agent_name produces a bare sample_branded.mp4 -- with x-upsert the second
-    silently overwrites the first. This is the collision CLAUDE.md already
+    silently overwrites the first. This is the collision _reference/layout.md
     solved locally with output_prefix, and it has to be solved again at the
     bucket. Refusing a directory that is not under agents/ keeps the layout
     knowledge honest: publish.py may know it, make_tour.py may not.

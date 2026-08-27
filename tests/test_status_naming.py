@@ -1,6 +1,7 @@
 r"""status.py must not send you somewhere that cannot help, or pass silently.
 
-Guards CLAUDE.md: "status.py prints the mv when a folder no longer matches its
+Guards _rules/the-scrape-names-the-folders.md: "status.py prints the mv when a
+folder no longer matches its
 lead row" -- and the gap found on 2026-08-24, where a folder with no config.json
 was invisible to that check because the check keys on agent_phone out of the
 config. brewester/9_w_cedar sat through the scrape-naming commit that way.

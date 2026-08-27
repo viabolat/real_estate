@@ -2,6 +2,9 @@
 
 Do these in order. Steps 1–3 are done once. Steps 4–11 repeat for every listing.
 
+This is the short version. `STEPS.md` Part 1 is the same ground with the reasoning,
+the variations and the failure modes; it is the authority when the two disagree.
+
 ---
 
 ## One-time setup

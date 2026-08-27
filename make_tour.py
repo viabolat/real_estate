@@ -1116,7 +1116,8 @@ def finish(silent, music, brand, out, branded=True, logo=None, watermark=None,
     # reason: the watermark is NOT cosmetic and is deliberately not treated like
     # the two above. It is the only thing separating a sample_ cut from a
     # deliverable, so silently dropping it writes an unmarked proof -- the exact
-    # file CLAUDE.md forbids sending. A broken watermark stops the build.
+    # file _rules/never-cross-the-sample-tour-boundary.md forbids sending.
+    # A broken watermark stops the build.
     # reason: a MISSING watermark used to fall through to use_wm=False and write
     # an unmarked sample_ cut in silence -- publish.py then uploads it on the
     # filename alone. A watermark that is absent is a watermark that will not

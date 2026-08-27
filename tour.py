@@ -179,7 +179,8 @@ DEFAULTS = {
 # Serhant. So one operator answering yes once would have put their own phone
 # number on the other agent's card, lower third and output filenames, on every
 # listing that brokerage owns -- silently, because load_config() layers brand.json
-# under config.json without saying so. CLAUDE.md names this as a non-negotiable.
+# under config.json without saying so. See
+# _rules/brand-json-carries-no-agent-identity.md.
 # brokerage stays: it is the same string for every listing a brand owns, which is
 # what a brand default IS. tests/test_brand_scope.py fails if the two agent keys
 # come back.
@@ -1091,7 +1092,7 @@ def publish_action():
 def brand_settings():
     """Edit what a brokerage sets once, and optionally push it down.
 
-    reason: CLAUDE.md has promised an explicit "Re-apply brand defaults" action
+    reason: _reference/layout.md promises an explicit "Re-apply brand defaults" action
     since the Streamlit dashboard was deleted, and it has not existed anywhere
     since. A new listing inherits brand.json at creation; changing a brand
     default deliberately does NOT reach back into listings already scaffolded,

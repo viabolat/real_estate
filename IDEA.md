@@ -265,7 +265,8 @@ old order.
 
 > **Scope note:** §1-7 above are the photo sourcing standard. This section is a
 > branding/output backlog and is *not* part of that standard. It lives here only as
-> the agreed parking spot for proposals.
+> the agreed parking spot for proposals — the one exception to the rule that a
+> deferred proposal lives in `PROGRESS.md` §5, which carries a pointer back here.
 
 Both items were proposed on 2026-08-19 while adding the logo overlay and the
 `sample_` cuts. Both were deferred, not rejected. **8.1 is still parked. 8.2 was

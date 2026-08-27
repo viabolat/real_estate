@@ -104,7 +104,7 @@ BRAND_STUB = {
     "music": "",
 }
 # Inherited into a new listing at creation, matching the documented model in
-# CLAUDE.md ("a new listing inherits at creation").
+# _reference/layout.md ("a new listing inherits at creation").
 INHERITED = tuple(BRAND_STUB) + ("card_style", "card_theme", "accent", "font")
 
 
@@ -140,7 +140,8 @@ def target_for(text: str):
     reason: main() derived this pair inline, and tour.py's home screen has to
     derive the SAME pair to decide whether a dump has already been imported. Two
     copies of the folder-naming decision is a second naming authority, which is
-    what CLAUDE.md forbids, and a near-miss would report an imported listing as
+    what _rules/the-scrape-names-the-folders.md forbids, and a near-miss would
+    report an imported listing as
     pending forever. One function, both callers.
 
     None is the refusal: with no photo URLs and no address there is nothing to
