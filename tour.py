@@ -121,6 +121,7 @@ import subprocess
 import sys
 
 import make_tour
+import prospects
 import publish
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -738,6 +739,26 @@ def run_build(listing_dir, flags):
                           cwd=listing_dir).returncode
 
 
+def clear_review_artifacts(listing_dir):
+    """Delete rung-1/rung-2 review files once the sample cuts exist to replace them.
+
+    reason: contact_sheet.png answered "is the order right" and draft.mp4 answered
+    "does the edit feel right" -- once out/ holds the sample_ cuts those questions
+    are settled and both files are pure carry-weight. work_draft.mp4/clips_draft/
+    are NOT this function's job: a delivery build already clears that lineage
+    itself, regardless of --keep-work -- see a-build-deletes-its-own-intermediates.md.
+    Duplicating that removal here would be a second place doing one thing.
+    Returns the names actually removed.
+    """
+    removed = []
+    for name in (SHEET, DRAFT_OUT):
+        p = os.path.join(listing_dir, name)
+        if os.path.exists(p):
+            os.remove(p)
+            removed.append(name)
+    return removed
+
+
 def outputs(listing_dir):
     d = os.path.join(listing_dir, "out")
     if not os.path.isdir(d):
@@ -1058,6 +1079,10 @@ def roll_up(status):
     # "N brokerage(s) need a logo" line.
     status.print_rows(rows, out=_say_indented)
     status.print_audit(*status.audit(rows, truth, known), out=_say_indented)
+    try:
+        prospects.rebuild(rows, status.slugify)
+    except OSError as e:
+        say(f"\n  prospects/ index did not rebuild ({type(e).__name__}: {e}).")
 
 
 def import_dumps():
@@ -1454,9 +1479,18 @@ def build_flow(args):
     # delivery run that follows take --finish-only off the same intermediates.
     save_state(listing_dir, "delivery", cfg, preset)
 
+    # reason: once the sample_ cuts exist, the questions draft.mp4 and
+    # contact_sheet.png answered are settled -- see clear_review_artifacts().
+    # A delivery-only rebuild (what == "delivery") leaves them alone: they were
+    # already cleared the first time this listing's samples were built.
+    cleared = clear_review_artifacts(listing_dir) if what in ("sample", "both") else []
+
     rule("Done")
     for f in outputs(listing_dir):
         say(f"  out/{f}")
+    if cleared:
+        say(f"\nCleared {' and '.join(cleared)} -- the sample cuts answer what "
+            "they were for.")
     say("\nsample_ cuts carry the proofing watermark -- those are what the client "
         "reviews.\ntour_ cuts are the delivery, and only after sign-off.")
     if what == "sample":

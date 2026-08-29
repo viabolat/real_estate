@@ -43,6 +43,53 @@ for whatever is in flight, which expire on ship) and `.claude/settings.local.jso
 
 ## 2. BUILT
 
+### 2026-08-30 — The review rungs clear themselves, and a view of agents/ by agent
+
+**The ask, in the operator's words.** *"we have to have the codebase after the 3
+samples get created delete all irrelevant files in the dir/folder of the property
+and only keep like .json files or whatever is needed when the client agrees to pay
+and then go back to tour.py run it and get the 3 mp4 the client paid for. also keep
+track of it in like a prospects dir with the agent name and property."*
+
+This resolves the open question from 2026-08-24 (*"should a successful delivery
+build also remove `draft.mp4`?"*) but not the way it was framed there: the answer
+is not "make `make_tour.py`'s delivery build do it." `contact_sheet.png` and
+`draft.mp4` are `tour.py`'s own review rungs — rung 1 and rung 2, answering "is the
+order right" and "does the edit feel right" — so `tour.py` clears them itself, in
+`build_flow()`, the moment a run actually writes the `sample_` cuts (`what in
+("sample", "both")`). `clear_review_artifacts()` deliberately does **not** touch
+`work_draft.mp4`/`clips_draft/`: a delivery build already clears that lineage
+regardless of `--keep-work` (2026-08-24, above), and duplicating that removal here
+would be a second place doing one job. A delivery-only rebuild of an
+already-sampled listing does not re-run this — those files were cleared the first
+time. `photos/`, `config.json`, `brand.json`, `.last_build.json`, and the kept
+delivery stitch are never touched, so a later "client said yes" run stays a fast
+`--finish-only` rebuild instead of starting over.
+
+**`prospects/<agent>__<phone>/<brand>__<listing>`** is the second half: a view of
+`agents/` grouped by agent instead of brokerage, since `brand.json` deliberately
+carries no agent identity (`brand-json-carries-no-agent-identity.md`) and one
+brokerage can have several agents. Keyed on slugified `agent_name` **and** the
+digits of `agent_phone` — name alone collides the moment two brokerages share an
+agent name, which `leads.csv` already has. It is symlinks, not copies, wiped and
+rewritten from scratch on every call — new module `prospects.py`, called from
+`tour.py`'s `roll_up()` and from `status.py`'s own `__main__` — the same derived-
+index pattern `leads.html` already uses, and for the same reason: a hand-maintained
+second tree is the naming-drift failure `the-scrape-names-the-folders.md` already
+happened once. `status.py`'s own docstring says it writes nothing, so the rebuild
+does not live inside `survey()`; both call sites pass in `status.py`'s existing
+`slugify` rather than `prospects.py` loading a third copy of it.
+
+`prospects/` holds an agent's name and phone number in its directory names and
+symlinks straight into `agents/`, so it is exactly the PII `agents/` is already
+gitignored to keep off the repo — added to both `.gitignore` and `.vercelignore`,
+the second publishing boundary `a-deploy-is-a-second-publishing-boundary.md`
+requires. `check_pii.py` only scans what git would publish, so an ignored
+`prospects/` is invisible to it by design, same as `agents/`.
+
+`tests/test_review_cleanup.py` and `tests/test_prospects.py` guard both. 179
+tests, ~0.6s, no ffmpeg. `python3 check_pii.py`: clean.
+
 ### 2026-08-26 — One front door, and a brand default that would have crossed two agents
 
 **The complaint, in the operator's words.** *"i feel there are too many .py files
@@ -740,14 +787,6 @@ once volume justifies it, and is not a reason to delay.
 ---
 
 ## 6. OPEN DECISIONS
-
-- **Should a successful delivery build also remove `draft.mp4`?** As of 2026-08-24 a
-  delivery clears the draft *intermediates* but leaves the draft cut itself. The case
-  for removing it: once six real cuts exist, a watermarked 720p file in the listing
-  root is stale and is the wrong thing to grab in a hurry. The case against, and why
-  it was not done: it is a **named output the operator asked for**, not an
-  intermediate, and deleting one on their behalf is a different class of decision
-  from sweeping up work files. Four listings currently hold one.
 
 - **`brewester/9_w_cedar` and `corcoran/46_beacon_5`** have no `config.json` and no lead
   row. Either back-fill lead rows so they join the naming scheme, or accept them as

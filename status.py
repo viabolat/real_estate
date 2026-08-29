@@ -3,7 +3,9 @@
 status.py
 
 One read-only view of every listing under agents/, and the single next action
-each one is waiting on. Nothing here writes, encodes, or downloads.
+each one is waiting on. survey() itself writes, encodes, and downloads nothing.
+Running this file does one thing beyond that: it rebuilds prospects/, a view of
+the same rows keyed by agent instead of brokerage -- see prospects.py.
 
 reason: the pipeline now spans a scrape, a per-brokerage brand.json, a per-listing
 config.json, a photo set with its own resolution verdict, and six output cuts. Any
@@ -53,6 +55,8 @@ import re
 import struct
 import subprocess
 import sys
+
+import prospects
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 AGENTS = os.path.join(ROOT, "agents")
@@ -409,6 +413,10 @@ def main():
 
     print_rows(rows, long=args.long)
     print_audit(*audit(rows, truth, known))
+    try:
+        prospects.rebuild(rows, slugify)
+    except OSError as e:
+        print(f"\nprospects/ index did not rebuild ({type(e).__name__}: {e}).")
 
 
 if __name__ == "__main__":

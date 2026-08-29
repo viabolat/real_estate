@@ -726,6 +726,13 @@ itself is left in place — it is the review cut you asked for, not an intermedi
 The reverse never happens: a `--draft` run only ever clears what a draft wrote, so a
 kept delivery stitch survives drafting intact.
 
+That is `make_tour.py`'s own contract; it never touches `draft.mp4`. `tour.py` goes
+one step further at rung 3: once a build actually writes the `sample_` cuts to
+`out/`, it deletes `contact_sheet.png` and `draft.mp4` from the listing root — the
+order and edit questions they answered are settled the moment the sample cuts exist.
+A delivery-only rebuild (the client already signed off) does not re-run this; those
+files were already cleared the first time this listing's samples were built.
+
 ---
 
 ## 4. Tuning

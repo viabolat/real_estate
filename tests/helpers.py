@@ -62,6 +62,12 @@ def status_module():
     return _repo_module("status_under_test", "status.py")
 
 
+def prospects_module():
+    """Import prospects.py once. Its rebuild() takes agents_dir/dest_dir as
+    arguments precisely so a test never has to touch the real prospects/."""
+    return _repo_module("prospects_under_test", "prospects.py")
+
+
 def tour_module():
     """Import tour.py once, for the pure helpers and the wiring assertions.
 

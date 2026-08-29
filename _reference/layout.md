@@ -12,6 +12,7 @@ shape, not the law.
 ```
 agents/<brand>/brand.json     per-brand defaults — tour.py ONLY, see below
 agents/<brand>/<listing>/     photos/, config.json, out/  — cwd for a build
+prospects/<agent>__<phone>/   agents/ viewed by agent instead of brand — symlinks, gitignored
 global_assets/logos/          shared branding, referenced by config.json
 global_assets/music/
 global_assets/lower_thirds/
@@ -73,6 +74,27 @@ agents/<brand>/<listing>/
    .build.lock                     held by a running build, O_EXCL, released via atexit
    draft.mp4                       only from --draft. Deliberately NOT in out/
 ```
+
+## `prospects/` — the same listings, viewed by agent
+
+`agents/<brand>/<listing>` is grouped by brokerage, which cannot answer "everything
+tied to one agent" — a brand.json holds no agent identity (above), and one
+brokerage can have several agents. `prospects/` is that other view: one directory
+per agent, holding a symlink to every listing folder that agent is behind.
+
+```
+prospects/<agent_slug>__<phone_digits>/<brand>__<listing>   -> ../../agents/<brand>/<listing>
+```
+
+Keyed on slugified `agent_name` **and** the digits of `agent_phone`, not name alone
+— `leads.csv` already has two agents named the same at different brokerages, and
+name-only would merge them. Built and rebuilt by `prospects.py`, called from
+`tour.py`'s home screen and from `status.py`'s own `__main__` — never hand-maintained,
+the same way `leads.html` is regenerated from `leads.csv` rather than patched.
+Wiped and rewritten from scratch on every call: a listing removed from `agents/`
+just stops appearing here, no separate cleanup needed. It is gitignored like
+`agents/` itself — the directory names carry an agent's name and phone number,
+which is exactly the PII `agents/` is already gitignored to keep off the repo.
 
 ## What a build reads
 
