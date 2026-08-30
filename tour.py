@@ -4,6 +4,7 @@
     python3 tour.py                 # the home screen: where every listing is
     python3 tour.py --build         # skip it, go straight to the wizard
     python3 tour.py --check-photos  # optional: ask Claude to read the contact sheet
+    python3 tour.py --auto          # hands-off: every pending dump through to 3 sample cuts
 
 This replaced the Streamlit dashboard, which put thirteen controls on screen and
 still left the operator to remember which of them mattered. The shape here is the
@@ -110,6 +111,24 @@ Two things this file does that make_tour.py cannot:
   720p. The gate is unchanged as a measurement; what changed is that it reports
   rather than decides. The verdict is stated at preflight, before the build and
   again after it -- it is not carried in the output filenames.
+
+  --auto answers the same short question set from config.json/brand.json alone
+  -- never input() -- and walks every listing that has no cuts yet straight
+  through to the 3 sample_ cuts, skipping the draft rung entirely. Before it
+  stitches anything it scores every photo in photos/ for the one judgment call
+  no default can safely make: whether it is a floor plan or whole-house layout
+  image, which must never appear in the video (PROGRESS.md 4.2). A hit halts
+  that one listing -- printed, never deleted or renamed -- and the rest of the
+  batch keeps going. Delete the file by hand and rerun --auto, bare or scoped
+  to that brand/listing, to pick back up; nothing about that halt is recorded
+  anywhere, so re-running is the entire resume mechanism. It never builds a
+  draft and never publishes -- the sample cuts already are the reviewed
+  artifact, and publish.py's email draft can only be written from an
+  already-uploaded public URL, so auto-publishing would skip the human look
+  this feature exists to force. This is the one place PROGRESS.md 7's "do not
+  run a video build without asking" is deliberately narrowed; the interactive
+  flow above is unchanged, byte for byte, whenever --auto is not the argument
+  typed.
 """
 
 import glob
@@ -120,6 +139,7 @@ import shutil
 import subprocess
 import sys
 
+import floorplan
 import make_tour
 import prospects
 import publish
@@ -209,7 +229,9 @@ def rule(title):
     say(f"\n\033[1m{title}\033[0m\n" + "-" * max(len(title), 20))
 
 
-def ask(question, default=""):
+def ask(question, default="", auto=False):
+    if auto:
+        return default
     hint = f" [{default}]" if default != "" else ""
     try:
         answer = input(f"{question}{hint}: ").strip()
@@ -218,7 +240,9 @@ def ask(question, default=""):
     return answer or default
 
 
-def confirm(question, default=True):
+def confirm(question, default=True, auto=False):
+    if auto:
+        return default
     d = "Y/n" if default else "y/N"
     while True:
         a = ask(f"{question} ({d})", "y" if default else "n").lower()
@@ -229,9 +253,11 @@ def confirm(question, default=True):
         say("  Answer y or n.")
 
 
-def pick(question, options, default=0, extra=None):
+def pick(question, options, default=0, extra=None, auto=False):
     """Numbered menu. options is [(value, label)]. extra adds a trailing choice."""
     items = list(options) + ([extra] if extra else [])
+    if auto:
+        return items[default][0]
     say(f"\n{question}")
     for i, (_, label) in enumerate(items, 1):
         say(f"  {i}. {label}" + ("   (default)" if i - 1 == default else ""))
@@ -242,7 +268,9 @@ def pick(question, options, default=0, extra=None):
         say(f"  Enter 1-{len(items)}.")
 
 
-def number(question, default, lo, hi):
+def number(question, default, lo, hi, auto=False):
+    if auto:
+        return float(default)
     while True:
         a = ask(question, str(default))
         try:
@@ -484,24 +512,32 @@ def preflight(listing_dir, cfg):
 
 # ---- questions --------------------------------------------------------------
 
-def questions(listing_dir, brand, cfg):
-    """The short set: what the card says, what shape it is, how long it runs."""
+def questions(listing_dir, brand, cfg, auto=False):
+    """The short set: what the card says, what shape it is, how long it runs.
+
+    auto=True answers every prompt below from cfg alone -- see the module
+    docstring's --auto paragraph. The logo pick and the music pick are the two
+    exceptions: each only fires when nothing already resolves, and guessing
+    which brokerage mark or which track is a choice only a human should make,
+    so under auto they are skipped outright and cfg["logo"]/cfg["music"] are
+    left unset rather than defaulted.
+    """
     rule("What goes on screen")
     was_brokerage = cfg.get("brokerage")
-    cfg["address"] = ask("Property address", cfg.get("address", ""))
-    cfg["agent_name"] = ask("Agent name", cfg.get("agent_name", ""))
-    cfg["agent_phone"] = ask("Agent phone", cfg.get("agent_phone", ""))
+    cfg["address"] = ask("Property address", cfg.get("address", ""), auto=auto)
+    cfg["agent_name"] = ask("Agent name", cfg.get("agent_name", ""), auto=auto)
+    cfg["agent_phone"] = ask("Agent phone", cfg.get("agent_phone", ""), auto=auto)
     cfg["brokerage"] = ask("Brokerage (card only, used when there is no logo)",
-                           cfg.get("brokerage", ""))
+                           cfg.get("brokerage", ""), auto=auto)
     # reason: the agent's name and phone are deliberately NOT offered as brand
     # defaults. This prompt used to save all three, defaulting to yes, which put
     # one agent's phone number on every other agent's listing at the same
     # brokerage. See AGENT_KEYS.
     if cfg["brokerage"] != was_brokerage and cfg["brokerage"] and \
-            confirm(f"Save the brokerage as the {brand} default?", True):
+            confirm(f"Save the brokerage as the {brand} default?", True, auto=auto):
         save_brand(brand, {**load_brand(brand), "brokerage": cfg["brokerage"]})
 
-    if not resolve(listing_dir, cfg.get("logo")):
+    if not auto and not resolve(listing_dir, cfg.get("logo")):
         available = assets("logo")
         if available:
             choice = pick("No logo set for this brand. Pick one?",
@@ -513,10 +549,12 @@ def questions(listing_dir, brand, cfg):
     cfg["card"] = pick("Intro / outro card?",
                        CARD_MODES,
                        default=[m[0] for m in CARD_MODES].index(cfg.get("card",
-                                                                        "outro")))
+                                                                        "outro")),
+                       auto=auto)
     if cfg["card"] != "none":
         cfg["card_seconds"] = number("Card length in seconds",
-                                     cfg.get("card_seconds", 5.0), 2.0, 10.0)
+                                     cfg.get("card_seconds", 5.0), 2.0, 10.0,
+                                     auto=auto)
     # reason: the drawn lower third and the card carry the SAME three lines, by
     # construction -- both are rendered from address/agent_name/agent_phone. A
     # persistent lower third plus an outro card therefore shows the operator's
@@ -542,21 +580,21 @@ def questions(listing_dir, brand, cfg):
     cfg["brand_persistent"] = confirm(
         "Keep the lower third up for the whole tour? "
         "(n = it clears after the opening seconds)",
-        default_persistent)
+        default_persistent, auto=auto)
     if not cfg["brand_persistent"]:
         cfg["brand_in"] = number("  Lower third in at", cfg.get("brand_in", 0.8),
-                                 0.0, 60.0)
+                                 0.0, 60.0, auto=auto)
         cfg["brand_out"] = number("  and out at", cfg.get("brand_out", 6.5),
-                                  cfg["brand_in"] + 0.5, 120.0)
+                                  cfg["brand_in"] + 0.5, 120.0, auto=auto)
 
-    if not resolve(listing_dir, cfg.get("music") or "music.mp3"):
+    if not auto and not resolve(listing_dir, cfg.get("music") or "music.mp3"):
         available = assets("music")
         if available and confirm("No music set. Pick a track?", True):
             cfg["music"] = asset_path(
                 "music", pick("Track", [(f, f) for f in available]))
 
     cfg["clip_seconds"] = number("Seconds per photo", cfg.get("clip_seconds", 4.0),
-                                 1.0, 15.0)
+                                 1.0, 15.0, auto=auto)
     # reason: make_tour names the cuts after the agent, but it does not know the
     # agents/<brand>/<listing> layout and must not learn it. So the fallback for a
     # blank agent_name is resolved HERE, where the brand IS known, and handed over
@@ -591,13 +629,16 @@ def import_photos(listing_dir):
     say(f"  Copied {len(found)} photo(s).")
 
 
-def offer_prefixes(listing_dir):
+def offer_prefixes(listing_dir, auto=False):
     """Renumber photos/ in its current alphabetical order, on confirmation.
 
     reason: the filename prefix IS the tour order -- there is no manifest and there
     is never going to be one, because a sidecar drifts out of sync with the folder.
     A folder with no prefixes still builds, it just builds alphabetically, and that
     silent failure has shipped once already. So offer the prefixes out loud.
+
+    auto=True still renames -- alphabetical is the correct order once numbered,
+    just not silently -- it only skips asking first.
     """
     names = photos(listing_dir)
     if not names or any(f[:1].isdigit() for f in names):
@@ -609,7 +650,7 @@ def offer_prefixes(listing_dir):
     if len(names) > 5:
         say(f"  ... and {len(names) - 5} more")
     if not confirm("Add 010_, 020_ ... prefixes in that order? "
-                   "(rename them later to reorder)", True):
+                   "(rename them later to reorder)", True, auto=auto):
         return
     d = os.path.join(listing_dir, "photos")
     for i, f in enumerate(names, 1):
@@ -1112,6 +1153,120 @@ def publish_action():
     publish_rung(listing_dir, quiet=False)
 
 
+# ---- --auto: hands-off run from pasted dump to 3 sample cuts -----------------
+
+def auto_targets(scope=None):
+    """[(brand, listing_dir)] not yet at the sample stage, optionally narrowed
+    to one "brand/listing". Re-derived from out/ on every call -- see stage()
+    -- so nothing about a halted listing is ever recorded, and a manual photo
+    deletion needs no separate "resume" state to pick back up from.
+    """
+    if scope:
+        brand, _, name = scope.partition("/")
+        listing_dir = os.path.join(LISTINGS_ROOT, brand, name)
+        if not os.path.isdir(listing_dir):
+            raise SystemExit(f"No such listing: {scope}")
+        return [(brand, listing_dir)] if stage(listing_dir) == "sample" else []
+    return [(brand, os.path.join(LISTINGS_ROOT, brand, name))
+            for brand in brands() for name in listings(brand)
+            if stage(os.path.join(LISTINGS_ROOT, brand, name)) == "sample"]
+
+
+def _auto_build_one(brand, listing_dir, ignore_floorplan):
+    """Run one listing through --auto: contact sheet, the floor-plan check,
+    then -- if clean -- the 3 sample_ cuts. Returns "built" / "flagged" /
+    "error".
+    """
+    rule(os.path.relpath(listing_dir, ROOT))
+    if not photos(listing_dir):
+        say("  photos/ is empty -- nothing to build yet.")
+        return "error"
+    offer_prefixes(listing_dir, auto=True)
+    cfg = load_config(listing_dir, brand)
+    report = preflight(listing_dir, cfg)
+    cfg = questions(listing_dir, brand, cfg, auto=True)
+
+    if run_build(listing_dir, ["--contact-sheet"]) != 0:
+        say("  The contact sheet failed.")
+        return "error"
+
+    if not ignore_floorplan:
+        flagged = floorplan.detect(photo_paths(listing_dir))
+        if flagged:
+            say(f"\n  Halted -- {len(flagged)} photo(s) look like a floor plan "
+                "or site map:")
+            for name, why in flagged:
+                say(f"    {name}  ({why})")
+            say(f"  Delete the file(s) by hand, then rerun:\n"
+                f"    python3 tour.py --auto "
+                f"{brand}/{os.path.basename(listing_dir)}\n"
+                "  A false positive can be forced through once with "
+                "--ignore-floorplan-check.")
+            return "flagged"
+
+    preset = best_preset(report)
+    lowres = preset is None
+    if lowres:
+        preset = "720p"
+    flags, reason = delivery_flags(listing_dir, cfg, preset, lowres, cuts="sample")
+    if reason:
+        say(f"  Full rebuild: {reason}.")
+    if run_build(listing_dir, flags) != 0:
+        say("  The build failed. Intermediates were kept for inspection.")
+        return "error"
+    save_state(listing_dir, "delivery", cfg, preset)
+    clear_review_artifacts(listing_dir)
+    say(f"  Built {len(sample_cuts(listing_dir))} sample cut(s) in out/.")
+    return "built"
+
+
+def auto_flow(args):
+    """python3 tour.py --auto [brand/listing] [--ignore-floorplan-check]
+
+    Imports pending dumps, then walks every listing with no cuts yet straight
+    through to the 3 sample_ cuts -- stopping a listing only on a photo the
+    floor-plan detector flags. See the module docstring's --auto paragraph for
+    what this deliberately does not do.
+    """
+    ignore_floorplan = "--ignore-floorplan-check" in args
+    scope = next((a for a in args if not a.startswith("--")), None)
+    if ignore_floorplan and not scope:
+        raise SystemExit(
+            "--ignore-floorplan-check needs a brand/listing scope:\n"
+            "    python3 tour.py --auto <brand>/<listing> --ignore-floorplan-check")
+
+    pending = unimported_dumps()
+    if pending:
+        say(f"Importing {len(pending)} pending dump(s)...")
+        subprocess.run([sys.executable, "-u", RUN_SCRAPER])
+
+    targets = auto_targets(scope)
+    if not targets:
+        say((f"{scope} already has sample cuts, or further along -- nothing "
+             "for --auto to do.") if scope else
+            "Nothing to build -- every listing already has sample cuts, or "
+            "further.")
+        return
+
+    built = flagged = errors = 0
+    for brand, listing_dir in targets:
+        result = _auto_build_one(brand, listing_dir, ignore_floorplan)
+        built += result == "built"
+        flagged += result == "flagged"
+        errors += result == "error"
+
+    rule("Done")
+    say(f"{built} built, {flagged} flagged for review, {errors} failed.")
+
+    status, _why = load_status()
+    if status is not None:
+        try:
+            rows, _truth, _known = status.survey()
+            prospects.rebuild(rows, status.slugify)
+        except OSError as e:
+            say(f"prospects/ index did not rebuild ({type(e).__name__}: {e}).")
+
+
 # ---- brand settings ----------------------------------------------------------
 
 def brand_settings():
@@ -1367,9 +1522,13 @@ def choose_listing():
 
 def main():
     args = sys.argv[1:]
+    if args and args[0] == "--auto":
+        auto_flow(args[1:])
+        return
     if args and args[0] not in ("--check-photos", "--build"):
-        raise SystemExit(__doc__.strip().splitlines()[0] +
-                         "\n\n    python3 tour.py [--build | --check-photos]")
+        raise SystemExit(
+            __doc__.strip().splitlines()[0] +
+            "\n\n    python3 tour.py [--build | --check-photos | --auto]")
     # reason: --check-photos and --build are the two ways past the home screen.
     # The roll-up is worth a second of startup when you are deciding what to
     # work on and pure noise when you already know, so it is skippable -- but

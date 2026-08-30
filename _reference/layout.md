@@ -20,6 +20,8 @@ scraper/                      Zillow dump -> leads.csv + a scaffolded listing
 publish.py                    sample_ cuts -> the public review bucket. NEVER tour_
 status.py                     read-only: every listing and its one next action.
                               Names the run each is on -- see the two-run rule
+floorplan.py                  flags a likely floor plan/site map photo -- never
+                              reorders or deletes. Called from tour.py --auto
 hooks/pre-push                runs check_pii.py. Arm per clone -- see Running it
 tests/                        stdlib unittest guards for the non-negotiables below
 ```

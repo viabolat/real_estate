@@ -38,6 +38,7 @@ is worth answering on photos that are not yet good enough to build with.
 | Has it been published? | `outreach/links.csv`, read by header name | a marker file |
 | Can the stitch be reused? | `.last_build.json` vs `photo_state()` | assumption |
 | Are the photos good enough? | re-measuring `photos/` on every read | a suffix in a filename |
+| Does a photo look like a floor plan? | re-scoring `photos/` on every `--auto` run (`floorplan.py`) | a marker, a rename, or a `config.json` key |
 
 The last column is the whole design. A fact stored beside the artifact drifts out of
 sync with it and is then wrong in a way nothing detects.

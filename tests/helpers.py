@@ -68,6 +68,12 @@ def prospects_module():
     return _repo_module("prospects_under_test", "prospects.py")
 
 
+def floorplan_module():
+    """Import floorplan.py once. Every function takes its inputs as arguments
+    -- no cwd, no config.json -- so one import is safe to share."""
+    return _repo_module("floorplan_under_test", "floorplan.py")
+
+
 def tour_module():
     """Import tour.py once, for the pure helpers and the wiring assertions.
 

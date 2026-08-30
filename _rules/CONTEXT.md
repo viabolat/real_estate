@@ -53,13 +53,14 @@ reading *prose only* is a rule nothing enforces. That is the list worth shrinkin
 
 <!-- RULE-TABLE:start -->
 
-29 rules.
+30 rules.
 
 | Area | Rule | Guarded by |
 |---|---|---|
 | interface | [Anything with the same answer on every listing is inherited or derived, and never becomes a control](nothing-invariant-becomes-a-control.md) | *prose only* |
 | photos | [A soft cut is not MLS-ready, and its name will not tell you](a-soft-cut-is-not-mls-ready.md) | `tests/test_status_naming.py` |
 | photos | [Below-par photos build, and the shortfall is reported, never encoded in a filename](below-par-photos-build-and-are-reported.md) | `tests/test_naming.py` |
+| photos | [Floor-plan detection flags a candidate; it never reorders, renames, or deletes](floor-plan-detection-is-flag-only.md) | `tests/test_floorplan.py`<br>`tests/test_auto_flow.py` |
 | photos | [No AI upscaling of listing photos](no-ai-upscaling-of-listing-photos.md) | *prose only* |
 | photos | [Photo order lives in the filename prefix and nowhere else](photo-order-lives-in-the-filename-prefix.md) | `tests/test_photo_order.py`<br>`tests/test_home_screen.py` |
 | scrape | [One dump per file, and a dump that is not a listing is refused](one-dump-per-file.md) | *prose only* |
@@ -87,6 +88,6 @@ reading *prose only* is a rule nothing enforces. That is the list worth shrinkin
 | pii | [The PII gate runs itself, and an unwired gate is reported, never assumed](the-pii-gate-runs-itself.md) | `tests/test_hook_wired.py` |
 | docs | [Docs do not go stale](docs-do-not-go-stale.md) | `tests/test_photo_order.py` |
 
-Unguarded rules: 6 of 29.
+Unguarded rules: 6 of 30.
 
 <!-- RULE-TABLE:end -->

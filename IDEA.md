@@ -172,6 +172,10 @@ below — the steps are what it does, not an alternative to it.
    to look. `python3 tour.py --check-photos` will additionally hand the sheet to
    Claude to name the rooms and flag filenames that disagree with the image — it
    proposes renames and renames nothing, and it is off unless you ask for it.
+   `python3 tour.py --auto` runs this same rung unattended and additionally scores
+   every photo for a likely floor plan or whole-house layout image — a hit halts
+   just that listing (named, never deleted) until you remove the file by hand and
+   rerun (§5 of `STEPS.md`).
 4. Settle the edit on a draft, not on deliverables:
    ```bash
    python3 ../../../make_tour.py --draft

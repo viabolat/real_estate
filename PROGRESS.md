@@ -43,6 +43,60 @@ for whatever is in flight, which expire on ship) and `.claude/settings.local.jso
 
 ## 2. BUILT
 
+### 2026-08-30 — A pasted dump runs itself to the 3 samples, and stops for one photo
+
+**The ask, in the operator's words.** *"i want this to run so that after a .txt is
+pasted (or more than one) it goes through the process up until the point of
+contact sheet where I will check to see if there are any map images. ... If there
+is a way to detect that and build that in to the code base I wam ok with that in
+that case the automation should go all the way through to the 3 sample stage. ...
+if there is a layout image needing to removed I will do that and then a trigger or
+rerun needs to happen to make it go through all the way to the 3 samples stage.
+That way when I paste the .txt and when the process is done the only thing I am
+doing is checking the mp4 and if good copying the email template."*
+
+`tour.py --auto` answers the same question set `build_flow()` already asks, from
+`config.json`/`brand.json` alone (`auto=True` on `ask`/`confirm`/`pick`/`number` —
+never `input()`), for every listing `stage()` reads as not yet at the sample
+rung. It skips the logo and music picks outright rather than guess one — an
+unresolved brokerage logo or a missing `music.mp3` builds with neither, same as a
+hand-run build today. It builds the contact sheet, skips the draft rung, and
+walks straight to the 3 `sample_` cuts.
+
+**The floor-plan half of 4.2, built here.** New module `floorplan.py` scores every
+photo right after the contact sheet, using the same ffmpeg-subprocess-plus-
+raw-bytes technique `alpha_bbox()`/`art_contrast()` already use: downsample to a
+32×32 grid and flag only a photo that clears both a high near-white fraction
+**and** a high low-chroma fraction — requiring both, not either, is what keeps a
+genuinely bright, white-walled room from tripping it. A hit halts just that
+listing, prints the filename and the reason, and the batch keeps going; the
+photo is never deleted, renamed or moved — `floorplan.py` is structurally
+incapable of any of the three, checked by a source-text scan in its own test
+file, not just asserted in a docstring.
+
+**No new state for "resume."** A halted listing has written nothing to `out/`,
+so `stage()` still reads it as a target on the next call — same "derive, never
+record" discipline already governing `stage()` and `unimported_dumps()`.
+Deleting the flagged file by hand and re-running `--auto`, bare or scoped to
+`brand/listing`, is the entire resume mechanism. `--ignore-floorplan-check`
+forces a false positive through once; it needs a scope, refusing to waive the
+check across an entire batch, and is read once from argv — it never reaches
+`config.json` or `.last_build.json`.
+
+It never builds a draft and never publishes: the sample cuts already are the
+reviewed artifact, and `publish.py`'s email draft can only be written from an
+already-uploaded public URL, so auto-publishing would skip the human look this
+whole feature exists to force. This is the one deliberate, narrow exception to
+§7's "do not run a video build without asking" — the interactive flow is
+unaffected whenever `--auto` is not the argument typed. Nothing here changes
+`_auto_build_one()`'s destinations: it calls the same `run_build()`
+`build_flow()` does, into the same `out/`, and `auto_targets()`'s
+`stage() == "sample"` guard excludes an already-built listing from every later
+sweep, so no listing's cuts can end up built twice.
+
+`tests/test_floorplan.py` and `tests/test_auto_flow.py` guard both halves. 212
+tests, ~2s, no ffmpeg. `python3 check_pii.py`: clean.
+
 ### 2026-08-30 — The review rungs clear themselves, and a view of agents/ by agent
 
 **The ask, in the operator's words.** *"we have to have the codebase after the 3
@@ -669,6 +723,9 @@ class as the shuffled photo order — a bad video with no error. Photo order liv
 filename prefix and nowhere else (`CLAUDE.md` non-negotiable), so any action this takes
 is a rename on disk, never a sidecar.
 
+**Floor-plan half: BUILT 2026-08-30**, see §2 — `floorplan.py`, wired into
+`tour.py --auto`. Near-duplicate-frame detection stays open.
+
 **Approved by the operator.**
 
 ---
@@ -861,7 +918,11 @@ once volume justifies it, and is not a reason to delay.
 
 ## 7. STANDING OPERATOR PREFERENCES
 
-- **Do not run a video build without asking.**
+- **Do not run a video build without asking.** Narrowed once, deliberately:
+  `tour.py --auto` (§2, 2026-08-30) builds unattended through the 3 `sample_`
+  cuts, since checking the mp4 afterward is the ask. It still never builds a
+  draft and never publishes, and the interactive flow is unaffected whenever
+  `--auto` is not the argument typed.
 - **Explain why**, not just what, when automating something.
 - Logos and music are the operator's to supply; automate the rest.
 - **Walk through the CLI.** Give the commands to run rather than executing the whole

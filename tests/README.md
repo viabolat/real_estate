@@ -24,6 +24,8 @@ second.
 | `test_review_cleanup.py` | `tour.py` clears `contact_sheet.png` + `draft.mp4` once the sample cuts exist, and never touches `work_draft.mp4`/`clips_draft/`/the delivery lineage -- that stays `make_tour.py`'s job alone. |
 | `test_prospects.py` | `prospects/` is keyed on agent name AND phone so two agents cannot collide; a blank agent and the "no listings yet" placeholder are skipped; a removed listing disappears on the next rebuild. |
 | `test_guards.py` | The crashes and hangs from the 2026-08-24 audit: `prepare_music`'s loop terminates on a short track; a zero-dimension asset never reaches a fit box, and a broken watermark refuses while broken branding degrades; `photos/` listing survives a directory or an unreadable file; `check_pii.py` fails closed when it cannot enumerate; the hardcoded resolution gates still match `make_tour.gate_min`. |
+| `test_floorplan.py` | `floorplan.py` flags a likely floor plan or site map only when a photo clears BOTH a high near-white fraction AND a high low-chroma fraction — either alone must not flag a genuinely bright room. `detect()` never touches the folder it scores, and the module's source text never contains a delete/rename/move call. |
+| `test_auto_flow.py` | `ask`/`confirm`/`pick`/`number` never call `input()` under `auto=True`, and are unchanged under the default. `questions(auto=True)` leaves the logo and music unset rather than guessing. `auto_targets()` is re-derived from `out/` on every call — the resume mechanism after a manual floor-plan photo deletion. `auto_flow()`/`_auto_build_one()` never call `publish_rung` and never pass `--draft`; `--ignore-floorplan-check` always needs a scope and never reaches `save_config()`/`save_state()`. |
 
 ## How they test
 

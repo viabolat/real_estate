@@ -158,6 +158,33 @@ action that does, and it prints every key it would change, per listing, first.
 The lock belongs to the script. `tour.py` only reads `.build.lock` to report it, and
 never writes it — doing so would lock the build out of its own folder.
 
+### Hands-off: paste a dump, walk away, check the mp4
+```bash
+python3 tour.py --auto                                # every pending dump/listing
+python3 tour.py --auto <brand>/<listing>               # just one -- also the resume, below
+python3 tour.py --auto <brand>/<listing> --ignore-floorplan-check   # force a false positive through
+```
+Imports every pending dump, then answers the same question set above from
+`config.json`/`brand.json` alone — never `input()` — for every listing with no
+cuts yet. It skips the logo and music picks outright rather than guess one:
+a brokerage with an unresolved logo or no `music.mp3` builds with neither, the
+same way a hand-run build with nothing set does. It builds the contact sheet,
+skips the draft rung entirely, and goes straight to the three `sample_` cuts.
+
+Before it stitches anything, it scores every photo in `photos/` for the one
+judgment call no default can safely make: whether it is a floor plan or
+whole-house layout image, which must never appear in the video. A hit halts
+just that listing — the file is named, never deleted or renamed — and the rest
+of the batch keeps going. Delete the file by hand and rerun `--auto`, bare or
+scoped to that `brand/listing`; nothing about the halt is written anywhere, so
+re-running from the top is the entire resume mechanism. A false positive can
+be forced through once with `--ignore-floorplan-check`, which needs a scope —
+it is never allowed to waive the check for a whole batch.
+
+It never builds a draft and never publishes. Checking the mp4 in `out/`, then
+running `publish.py` from the listing folder (above), stays the last manual
+step.
+
 ### Have Claude read the contact sheet (optional)
 ```bash
 python3 tour.py --check-photos
