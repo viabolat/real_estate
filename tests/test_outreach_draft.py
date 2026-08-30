@@ -1,6 +1,6 @@
 """The recorded link stays a link, and the draft quotes the watermarked cut.
 
-Guards two things publish.py now owns:
+Guards three things publish.py now owns:
 
   * outreach/links.csv puts url LAST and uploaded_at FIRST, with \n endings. The
     link used to sit mid-row, so anything that grabbed it took the timestamp with
@@ -8,8 +8,11 @@ Guards two things publish.py now owns:
   * the email draft quotes the sample_branded cut and never a tour_ file --
     _rules/never-cross-the-sample-tour-boundary.md, one layer up from the
     upload gate that tests/test_publish_gate.py covers.
+  * outreach/contacted.csv is append-only, by header name, and never rewrites
+    leads.csv itself -- the same shape links.csv already holds.
 
-No network: record_links() and the draft renderer are pure file work.
+No network: record_links(), record_contacted() and the draft renderer are pure
+file work.
 """
 import csv
 import os
@@ -77,6 +80,56 @@ class TestLinkRecord(unittest.TestCase):
         for r in rows:
             self.assertEqual(r["url"], URL)
             self.assertEqual(r["brand"], "corcoran")
+
+
+class TestContactedRecord(unittest.TestCase):
+    """outreach/contacted.csv -- byte-for-byte the same append-by-header-name
+    shape record_links() already uses for links.csv."""
+
+    def test_columns_are_marked_at_brand_listing_agent(self):
+        self.assertEqual(publish.CONTACTED_COLUMNS,
+                          ["marked_at", "brand", "listing", "agent"])
+
+    def test_record_then_lookup_round_trips(self):
+        with tempfile.TemporaryDirectory() as d:
+            contacted = os.path.join(d, "outreach", "contacted.csv")
+            with mock.patch.object(publish, "CONTACTED", contacted):
+                self.assertFalse(publish.contacted("corcoran", "46_beacon_5",
+                                                    "sean_obrien"))
+                publish.record_contacted("corcoran", "46_beacon_5", "sean_obrien")
+                self.assertTrue(publish.contacted("corcoran", "46_beacon_5",
+                                                   "sean_obrien"))
+                self.assertFalse(publish.contacted("corcoran", "46_beacon_5",
+                                                    "someone_else"))
+
+    def test_a_missing_file_reads_as_not_contacted(self):
+        with mock.patch.object(publish, "CONTACTED", "/no/such/file.csv"):
+            self.assertFalse(publish.contacted("corcoran", "46_beacon_5",
+                                                "sean_obrien"))
+
+    def test_appending_twice_keeps_one_header_and_two_rows(self):
+        with tempfile.TemporaryDirectory() as d:
+            contacted = os.path.join(d, "outreach", "contacted.csv")
+            with mock.patch.object(publish, "CONTACTED", contacted):
+                publish.record_contacted("corcoran", "46_beacon_5", "sean_obrien")
+                publish.record_contacted("corcoran", "9_oak_st", "jane_doe")
+            with open(contacted, newline="", encoding="utf-8") as f:
+                raw = f.read()
+                f.seek(0)
+                rows = list(csv.DictReader(f))
+        self.assertEqual(raw.count("marked_at"), 1, "the header was written twice")
+        self.assertEqual(len(rows), 2)
+
+    def test_never_touches_links_csv(self):
+        """reason: publish.py's other record file must not gain a side effect
+        from marking a lead contacted -- the two are independent facts."""
+        with tempfile.TemporaryDirectory() as d:
+            links = os.path.join(d, "links.csv")
+            contacted = os.path.join(d, "contacted.csv")
+            with mock.patch.object(publish, "LINKS", links), \
+                 mock.patch.object(publish, "CONTACTED", contacted):
+                publish.record_contacted("corcoran", "46_beacon_5", "sean_obrien")
+            self.assertFalse(os.path.isfile(links))
 
 
 class TestDraft(unittest.TestCase):

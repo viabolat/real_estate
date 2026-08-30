@@ -113,7 +113,8 @@ class TestConfigNeverCarriesOrder(unittest.TestCase):
     def test_the_known_config_surface_has_not_silently_grown(self):
         """A new [cfg] key is fine -- undocumented is not. Update CLAUDE.md."""
         documented = {
-            "clip_seconds", "xfade_seconds", "brand_persistent", "brand_in",
+            "clip_seconds", "xfade_seconds", "max_total_seconds",
+            "brand_persistent", "brand_in",
             "brand_out", "lower_third", "logo", "music", "watermark",
             "address", "agent_name", "agent_phone", "brokerage",
             "output_prefix", "card", "card_seconds", "card_style",

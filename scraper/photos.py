@@ -201,6 +201,24 @@ def report_resolution(out_dir):
               "photographer's originals -- see IDEA.md section 4.")
 
 
+def already_scraped(out_dir, urls):
+    """How many of this dump's photos are already on disk, or 0.
+
+    reason: the per-file `os.path.exists(dest)` skip in the download loop
+    already makes a rerun cheap, but it still walks every URL and prints as
+    though something happened. A dump pasted twice for the same
+    company/address/agent is not a resumed download, it is a no-op -- the
+    caller uses a nonzero return to say so loudly and stop before the loop
+    runs at all. A folder with FEWER photos than this dump has URLs is a
+    partial/interrupted run, not a duplicate, and must fall through to the
+    ordinary download loop so it can finish.
+    """
+    if not urls or not os.path.isdir(out_dir):
+        return 0
+    existing = [n for n in os.listdir(out_dir) if n.lower().endswith(".jpg")]
+    return len(existing) if len(existing) >= len(urls) else 0
+
+
 def compose_address(street, city, state, zip_):
     """The full one-line address for the card and lower third, from the dump."""
     tail = " ".join(p for p in [state, zip_] if p)
@@ -295,6 +313,17 @@ def main():
               f"Zillow listing dump. Nothing written.")
         sys.exit(2)
     out_dir = args.out_dir or os.path.join(repo_root, "agents", *target, "photos")
+
+    if not args.out_dir:
+        dup_count = already_scraped(out_dir, urls)
+        if dup_count:
+            banner = f"{'/'.join(target)} already has {dup_count} photo(s) on disk."
+            rule = "=" * max(60, len(banner))
+            print(rule)
+            print("DUPLICATE -- NOTHING DOWNLOADED")
+            print(banner)
+            print(rule)
+            sys.exit(3)
 
     os.makedirs(out_dir, exist_ok=True)
 

@@ -44,6 +44,139 @@ for whatever is in flight, which expire on ship) and `.claude/settings.local.jso
 
 ## 2. BUILT
 
+### 2026-08-31 — A "contacted" tracker for leads
+
+There was no record of which leads had actually been emailed — `leads.csv` gave
+no signal of who'd been contacted once a draft went out. `publish.py` gains
+`outreach/contacted.csv` (`marked_at,brand,listing,agent`), byte-for-byte the
+same append-by-header-name shape `record_links()` already uses, plus
+`record_contacted()`/`contacted()` — a write and a lookup, mirroring
+`published_listings()`. Nothing writes it automatically:
+`tour.py`'s `publish_rung()` asks once, right after a publish succeeds,
+defaulting to No like every other prompt on this side of
+`the-draft-is-automatic-the-send-is-not.md` — it only records a send that
+already happened by hand. A new home-screen item **5**
+(`mark_contacted_action()`) walks every published, not-yet-contacted listing
+and asks the same question one at a time, for whatever was published in an
+earlier session or skipped at that first prompt.
+
+`status.py` gets a `contacted(brand, listing, agent)` wrapper and a `CONTACTED`
+column in `print_rows()`, added without touching `survey()`'s row-tuple shape
+(several call sites unpack it positionally). `scraper/lead.py`'s `leads.html`
+gets the same column, joined by slugifying each row the same way
+`scraper/photos.py`'s `target_for()` already names its folder.
+
+The plan's literal instruction was to import `photos.slugify()` into `lead.py`
+"the same way `status.py` already imports it" — at module scope. Tracing the
+actual import order first found that would crash on the very first run:
+`photos.py` imports *from* `lead.py`, and `lead.py` is not registered under
+the name `"lead"` while running as `__main__`, so a module-level load in
+`lead.py` re-executes `lead.py`'s own file fresh under that name, recursing
+before `field()`/`extract_zip_city_state()` exist on it. Fixed by making the
+load lazy and function-scoped (`lead._load_photos()`, called only from inside
+`write_html_table()`), verified against a direct run with no hang or crash,
+and pinned down by `TestLeadHtmlContactedColumn` in
+`tests/test_scraper_duplicates.py` so the regression would show up as an
+import error, not a wrong column. `lead.py` reads `outreach/contacted.csv`
+directly rather than importing `publish.py` for the lookup, since
+`publish.py`'s own `_jpeg_size()` also transitively loads `photos.py`.
+
+`tests/test_outreach_draft.py` (`TestContactedRecord`),
+`tests/test_scraper_duplicates.py` (`TestLeadHtmlContactedColumn`): 280 tests
+total, ~2.5s, no ffmpeg. `python3 check_pii.py`: clean.
+
+### 2026-08-30 — A confirmed sample publish clears its own cuts from `out/`
+
+`publish.py` uploads `sample_` cuts to the review bucket but, by design, never
+deleted the local copies — `a-publish-never-deletes-the-local-cut.md` still
+holds for `publish.py` itself, unchanged. This adds the deletion one layer up:
+`tour.py`'s `publish_rung()` now captures the `subprocess.run()` return code,
+and on success calls a new `clear_published_cuts()`, which cross-checks
+`outreach/links.csv` (via a new `publish.published_cuts(brand, listing)`) and
+removes only the exact `sample_` filenames that row confirms are on the CDN —
+never a `tour_` file, which can't appear in that column but is also checked by
+`family()` directly in case a row is ever hand-edited or replayed. A successful
+publish now also unconditionally re-runs `clear_review_artifacts()`, closing a
+gap where a `--draft` rerun after the sample build regenerated
+`draft.mp4`/`contact_sheet.png` with nothing left to clear them a second time.
+A new `tour.py --sweep-published-samples [--yes]` applies the same cleanup
+retroactively across every listing, dry-run by default, reusing
+`clear_published_cuts()` so there is one implementation of "is this cut safe
+to remove."
+
+This makes "nothing built" and "published, then swept" look identical to
+`out/`'s state, which would let `auto_targets()` re-select an
+already-published, awaiting-sign-off listing as fresh. `tour.stage()` and
+`status.py`'s `next_action()` both gained a `published(brand, listing)`
+fallback (checked only when `out/` has neither cut family) to close it.
+Writing the test for this (`tests/test_publish_cleanup.py`) surfaced a
+pre-existing off-by-one bug in `stage()`'s brand/listing derivation — it read
+`os.path.basename(listing_dir)` (the agent folder) as `listing` and its parent
+as `brand`, one level shallower than `agents/<brand>/<listing>/<agent>`
+actually nests (confirmed against `publish.remote_path()`, and against
+`status.py`'s own already-correct version) — fixed as part of this change; no
+existing test exercised that fallback path deeply enough to have caught it.
+See
+[`a-confirmed-sample-publish-clears-its-own-cuts`](_rules/a-confirmed-sample-publish-clears-its-own-cuts.md).
+`tests/test_publish_cleanup.py`, `tests/test_publish_gate.py`: 272 tests total,
+~2s, no ffmpeg. `python3 check_pii.py`: clean.
+
+### 2026-08-30 — A 90-second ceiling, filled by the sharpest photos, never exceeded
+
+Some dumps carry 30-39 photos; at a fixed per-photo pace that built a
+2-3-minute video with nothing capping it. `make_tour.py` gained
+`max_total_seconds` (`[cfg]`, default `90.0`) and a new `photo_quality.py`
+module (same shape as `floorplan.py`: an ffmpeg subprocess decodes each photo
+to a small in-memory RGB grid, scored in pure Python — edge/gradient energy
+over luma — never given a path to write). A photo set that already fits is
+untouched; one that doesn't gets trimmed to the sharpest photos that fit,
+restored to their original filename order before the build, with a loud
+report of what was dropped and why. This is a deliberate, narrow exception to
+[`floor-plan-detection-is-flag-only`](_rules/floor-plan-detection-is-flag-only.md):
+that halts for a human because dropping a real room photo by mistake is a
+silent-failure risk, but excess-photo trimming was explicitly requested to run
+unattended instead. See
+[`excess-photos-are-trimmed-by-quality-never-halted`](_rules/excess-photos-are-trimmed-by-quality-never-halted.md).
+`make_tour.py`'s own cap arithmetic (`max_photos_for()`) is deliberately
+duplicated from `tour.py`'s `runtime()` rather than imported — `tour.py`
+imports `make_tour`, not the other way around — held in agreement by a test.
+`tests/test_photo_quality.py`. Docs: `_reference/config-schema.md`, the
+`make_tour.py` module docstring, `STEPS.md`.
+
+### 2026-08-30 — Loud, resource-saving duplicate detection in the scraper
+
+A dump pasted twice for the same company/address/agent used to re-walk every
+photo URL (skipping each on the per-file `os.path.exists()` check) and print
+as though something happened, wasting a download pass and inviting a
+redundant 6-minute encode. `scraper/photos.py` gained
+`already_scraped(out_dir, urls)` — a pure function checking whether the
+target folder already holds at least as many photos as the dump has URLs —
+called before the download loop starts; a hit prints a loud banner and exits
+`3` before touching a URL. A folder with *fewer* photos than the dump has URLs
+is treated as an interrupted run, not a duplicate, and falls through to the
+ordinary loop. `scraper/lead.py`'s existing `find_duplicate()` skip got the
+same banner treatment via a new `duplicate_banner()`. `scraper/run.py` now
+classifies each dump as new/duplicate/failed (via the exit-code pairs) instead
+of binary pass/fail, and reports three separate counts in its batch summary.
+Both `main()` entry points write into real, gitignored, PII-bearing paths
+(`agents/`, `scraper/leads.csv`), so `tests/test_scraper_duplicates.py`
+exercises only the pure, extracted functions directly, never `main()`.
+
+### 2026-08-30 — A bare `make_tour.py` build now says what building "both" means, and no code defect was found for it
+
+Investigated a report of "6 mp4s built instead of 3." Three research passes
+over `tour.py`'s dispatch and `make_tour.py`'s flag parsing found no defect:
+`--auto` hardcodes `cuts="sample"` unconditionally, and every default in
+`build_choice()` resolves to 3 cuts — building all six is only reachable by an
+explicit, non-default menu pick, or a bare `python3 make_tour.py` run outside
+`tour.py` entirely. `STEPS.md` documents that bare form in a few diagnostic
+recipes, which is the likely real-world path to the confusion. Fix was
+guardrails, not a bug fix: `build_choice()`'s `"both"` branch, chosen at the
+*sample* stage, now prints one explicit line naming the consequence
+("Building the tour_ deliverables now too, before sign-off..."), and the bare
+`make_tour.py` recipes in `STEPS.md` now carry a reminder to add
+`--samples-only`/`--delivery-only` for one family.
+
 ### 2026-08-30 — `agents/`, `prospects/` and the outreach draft unify under company/address/agent
 
 One property's outputs were scattered three ways: photos and `out/` cuts under

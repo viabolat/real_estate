@@ -69,6 +69,13 @@ leaving the machine is a separate, deliberate act, never a flag someone trips.
 The link written to outreach/links.csv is the LAST field on its line, and the file
 is written with \n endings. It used to sit mid-row, so anything that grabbed the
 link took the uploaded_at timestamp with it and the URL 404'd.
+
+outreach/contacted.csv (marked_at,brand,listing,agent -- record_contacted()/
+contacted()) tracks a second, independent fact: whether the operator has actually
+sent that draft. Nothing here writes it automatically -- tour.py's publish_rung()
+only offers to, once, right after a publish succeeds, defaulting to No exactly
+like every other prompt that leaves the machine's hand off the send button. See
+the-draft-is-automatic-the-send-is-not.md.
 """
 
 import argparse
@@ -120,6 +127,8 @@ LINKS = os.path.join(ROOT, "outreach", "links.csv")
 # grabbed it took ",2026-08-26T16:58:12" along and the URL 404'd. Nothing follows
 # the last field, so nothing can be swallowed into it.
 LINK_COLUMNS = ["uploaded_at", "brand", "listing", "cut", "url"]
+CONTACTED = os.path.join(ROOT, "outreach", "contacted.csv")
+CONTACTED_COLUMNS = ["marked_at", "brand", "listing", "agent"]
 TEMPLATE = os.path.join(ROOT, "outreach", "template.txt")
 # reason: the draft used to live in a flat outreach/drafts/ tree, apart from
 # the out/ cuts that produced it. It now lands beside them, inside the
@@ -476,6 +485,70 @@ def published_listings():
         return set()
     return {(r["brand"].strip(), r["listing"].strip()) for r in rows
             if (r.get("brand") or "").strip() and (r.get("listing") or "").strip()}
+
+
+def published_cuts(brand, listing):
+    """{filename} confirmed onto the review bucket for this (brand, listing).
+
+    reason: tour.py's publish_rung() needs to know exactly which out/ files a
+    successful upload just confirmed, so it can delete only those -- never a
+    file that merely looks like it should have uploaded. Same read-by-header,
+    tolerant-of-missing-file shape as published_listings(); the two only
+    differ in which column ends up in the return value.
+    """
+    if not os.path.isfile(LINKS):
+        return set()
+    try:
+        with open(LINKS, newline="", encoding="utf-8") as f:
+            rows = list(csv.DictReader(f))
+    except OSError:
+        return set()
+    return {r["cut"].strip() for r in rows
+            if r.get("brand", "").strip() == brand
+            and r.get("listing", "").strip() == listing
+            and (r.get("cut") or "").strip()}
+
+
+def record_contacted(brand, listing, agent):
+    """Append one row to outreach/contacted.csv -- marks a lead as emailed.
+
+    reason: byte-for-byte the same append-by-header-name shape record_links()
+    already uses. This only ever records that a human sent the email
+    write_draft() already drafted; it does not send anything itself, so it
+    does not touch the-draft-is-automatic-the-send-is-not.md's boundary.
+    """
+    os.makedirs(os.path.dirname(CONTACTED), exist_ok=True)
+    new = not os.path.isfile(CONTACTED)
+    with open(CONTACTED, "a", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=CONTACTED_COLUMNS, lineterminator="\n")
+        if new:
+            w.writeheader()
+        w.writerow({
+            "marked_at": datetime.datetime.now().isoformat(timespec="seconds"),
+            "brand": brand, "listing": listing, "agent": agent,
+        })
+
+
+def contacted(brand, listing, agent):
+    """True once (brand, listing, agent) has a row in outreach/contacted.csv.
+
+    reason: same read-by-header-name, tolerant-of-missing-file shape as
+    published_listings()/published_cuts() -- a missing file means "nothing
+    marked" exactly as a missing leads.csv means "nothing scraped".
+    """
+    if not os.path.isfile(CONTACTED):
+        return False
+    try:
+        with open(CONTACTED, newline="", encoding="utf-8") as f:
+            rows = list(csv.DictReader(f))
+    except OSError:
+        return False
+    return any(
+        r.get("brand", "").strip() == brand
+        and r.get("listing", "").strip() == listing
+        and r.get("agent", "").strip() == agent
+        for r in rows
+    )
 
 
 # ---- the draft --------------------------------------------------------------

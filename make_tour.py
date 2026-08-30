@@ -82,6 +82,8 @@ config.json -- every key optional, every default is the constant in the source:
 
     clip_seconds      4.0    seconds per photo, before crossfade overlap
     xfade_seconds     0.5    crossfade length
+    max_total_seconds 90.0   hard ceiling on finished runtime -- a set that
+                             already fits is untouched, never padded up to it
     brand_persistent  true   false = show the lower third only between the times below
     brand_in          0.8    only read when brand_persistent is false
     brand_out         6.5    ditto; must be greater than brand_in
@@ -112,6 +114,13 @@ prefix and nowhere else. Changing clip_seconds or xfade_seconds invalidates
 work_silent.mp4, so those changes need a full build, not --finish-only. So does
 renaming photos to reorder them: --finish-only reuses the earlier stitch and
 would reship the old order, which is why that path warns.
+
+A photo set too large to fit max_total_seconds is trimmed, not halted:
+photo_quality.select_photos() scores every photo for sharpness and keeps only
+the sharpest ones that fit, restored to their original order, and prints what
+it dropped and why before anything encodes. This runs between the resolution
+gate and build_clips(), so a build that already fits needs no config and sees
+no change. See _rules/excess-photos-are-trimmed-by-quality-never-halted.md.
 
 The card is the intro and/or outro plate: logo (or brokerage type when there is
 no logo) over address, agent and phone, drawn by ffmpeg from the same config.json.
@@ -193,6 +202,8 @@ import os
 import subprocess
 import sys
 
+import photo_quality
+
 # ---- config.json ------------------------------------------------------------
 # A listing folder may carry a config.json overriding the values marked [cfg]
 # below. An absent file, or an absent key, falls back to the default written
@@ -224,6 +235,10 @@ if os.path.exists(CONFIG_FILE):
 # ---- tune these -------------------------------------------------------------
 CLIP_SECONDS = _cfg.get("clip_seconds", 4.0)     # [cfg] per photo, pre-crossfade
 XFADE_SECONDS = _cfg.get("xfade_seconds", 0.5)   # [cfg] crossfade length
+# [cfg] hard ceiling on finished runtime -- a cap, never a target. A dump with
+# more photos than fit gets trimmed by photo_quality.select_photos(); one that
+# fits already needs no change and never gets padded up to it.
+MAX_TOTAL_SECONDS = float(_cfg.get("max_total_seconds", 90.0))
 FPS = 30
 ZOOM_MAX = 1.12        # 12% push. Above ~1.20 it starts to look cheap.
 MUSIC_VOLUME = 0.55
@@ -573,6 +588,49 @@ def check_resolution(photos, allow_lowres=False):
           f"are named\n  like any other build; the shortfall is restated when "
           f"the build finishes.\n")
     return bad
+
+
+def max_photos_for(seconds):
+    """Largest photo count whose stitched runtime stays at or under `seconds`,
+    given this module's own CLIP_SECONDS/XFADE_SECONDS/CARD/CARD_SECONDS.
+
+    reason: mirrors tour.py's runtime(n, cfg) arithmetic exactly, duplicated
+    rather than imported -- tour.py is the module that imports make_tour, not
+    the other way around, so make_tour cannot reach tour.runtime().
+    tests/test_photo_quality.py holds the two formulas in agreement.
+    """
+    cards = (CARD in ("intro", "both")) + (CARD in ("outro", "both"))
+    n = 0
+    while True:
+        clips = [CLIP_SECONDS] * (n + 1) + [CARD_SECONDS] * cards
+        total = sum(clips) - (len(clips) - 1) * XFADE_SECONDS
+        if total > seconds:
+            return n
+        n += 1
+
+
+def select_photos(photos, max_seconds=None):
+    """Trim `photos` to fit max_seconds (default MAX_TOTAL_SECONDS): keep the
+    sharpest, restored to their original order. A set that already fits comes
+    back unchanged -- this only ever removes photos, never pads a short list.
+
+    reason: a DELIBERATE, narrow exception to floorplan.py's flag-only
+    philosophy -- a floor-plan candidate halts for a human because dropping a
+    real room photo by mistake is a silent-failure risk; trimming excess
+    photos was explicitly requested to run unattended, so it reports loudly
+    instead of halting. See
+    _rules/excess-photos-are-trimmed-by-quality-never-halted.md.
+    """
+    cap_seconds = MAX_TOTAL_SECONDS if max_seconds is None else max_seconds
+    cap = max_photos_for(cap_seconds)
+    if len(photos) <= cap:
+        return photos, []
+    kept, dropped = photo_quality.select(photos, cap)
+    print(f"\n{len(dropped)} of {len(photos)} photos trimmed to stay at or "
+          f"under {cap_seconds:g}s ({cap} kept, by sharpness):")
+    for path, score in dropped:
+        print(f"  {os.path.basename(path):<32} sharpness {score:.1f}")
+    return kept, dropped
 
 
 def out_path(name):
@@ -1518,8 +1576,9 @@ def main():
         # cleaned it up) must fall back to a full build, not crash in finish().
         if "--finish-only" in sys.argv:
             print(f"--finish-only: no {silent} to reuse, building from photos.")
-        print(f"Building {len(photos)} clips...")
-        clips = build_clips(photos)
+        build_photos, _dropped = select_photos(photos)
+        print(f"Building {len(build_photos)} clips...")
+        clips = build_clips(build_photos)
 
         intro, outro = build_cards(LOGO)
         spans = (CARD_SECONDS * bool(intro), CARD_SECONDS * bool(outro))

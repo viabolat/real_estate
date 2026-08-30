@@ -74,6 +74,12 @@ def floorplan_module():
     return _repo_module("floorplan_under_test", "floorplan.py")
 
 
+def photo_quality_module():
+    """Import photo_quality.py once. Same shape as floorplan_module() -- every
+    function takes its inputs as arguments, no cwd, no config.json."""
+    return _repo_module("photo_quality_under_test", "photo_quality.py")
+
+
 def tour_module():
     """Import tour.py once, for the pure helpers and the wiring assertions.
 

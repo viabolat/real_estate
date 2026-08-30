@@ -10,6 +10,12 @@ property summary, listing agent (name/phone/brokerage/MLS ID/email), and who
 actually receives the lead if the Contact Agent button is clicked (may differ
 from the listing agent on Premier Agent ad slots). Also appends a row to
 leads.csv and regenerates leads.html, a browser-viewable table of all leads.
+leads.html carries one derived CONTACTED column, joined against
+outreach/contacted.csv by slugifying each row the same way scraper/photos.py's
+target_for() already names its folder, so the table and agents/ can never
+disagree about which lead a row is (see lead._load_photos()'s docstring for why
+that reuse has to stay a lazy, function-scoped load rather than a module-level
+import of photos.py).
 
 Usage:
     python3 lead.py paste.txt
@@ -197,15 +203,93 @@ def find_duplicate(csv_path: str, row: dict):
     return None
 
 
+def duplicate_banner(csv_path: str, row: dict) -> str:
+    """The loud, three-line message printed when find_duplicate() has a hit."""
+    banner = (f"{row['address']} -- {row['agent_name']} already in {csv_path} "
+              f"(zpid {row['zpid']}, same listing agent phone). Nothing appended.")
+    rule = "=" * max(60, len(banner))
+    return f"{rule}\nDUPLICATE -- SKIPPED\n{banner}\n{rule}"
+
+
+def _load_photos():
+    """scraper/photos.py, or None -- the one place slugify()/UNASSIGNED_AGENT
+    live, borrowed here rather than kept as a third slug function (see
+    two-slug-functions-one-apostrophe-rule.md).
+
+    reason: photos.py imports FROM lead.py (`from lead import field,
+    extract_zip_city_state`), so this load has to stay lazy and
+    function-scoped -- called only from write_html_table(), after lead.py
+    has already finished defining field()/extract_zip_city_state() at
+    import time. A module-level call here would re-enter this same file
+    under the name "lead" (photos.py's import triggers a fresh load, since
+    lead.py never runs under that name itself) before those functions exist
+    on it yet, and crash on the very first run.
+    """
+    try:
+        import importlib.util
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        path = os.path.join(script_dir, "photos.py")
+        spec = importlib.util.spec_from_file_location("_photos_for_lead", path)
+        mod = importlib.util.module_from_spec(spec)
+        if script_dir not in sys.path:
+            sys.path.insert(0, script_dir)
+        spec.loader.exec_module(mod)
+        return mod
+    except Exception:
+        return None
+
+
+CONTACTED_CSV = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "outreach", "contacted.csv")
+
+
+def _contacted_keys():
+    """{(brand, listing, agent)} already marked in outreach/contacted.csv.
+
+    reason: publish.py owns writing this file (record_contacted()), but
+    publish.py itself loads scraper/photos.py for jpeg_size -- importing
+    publish.py from here would load photos.py a second time through that
+    path, the same cycle _load_photos()'s docstring avoids. Reading the
+    documented columns (marked_at,brand,listing,agent) directly needs no
+    import and invents no second writer for the file.
+    """
+    if not os.path.isfile(CONTACTED_CSV):
+        return set()
+    try:
+        with open(CONTACTED_CSV, newline="", encoding="utf-8") as f:
+            rows = list(csv.DictReader(f))
+    except OSError:
+        return set()
+    return {(r.get("brand", "").strip(), r.get("listing", "").strip(),
+             r.get("agent", "").strip()) for r in rows}
+
+
 def write_html_table(csv_path: str, html_path: str) -> None:
-    """Mirror leads.csv as a real, styled HTML table -- open leads.html in a browser."""
+    """Mirror leads.csv as a real, styled HTML table -- open leads.html in a browser.
+
+    Adds one derived column, CONTACTED, joined against outreach/contacted.csv
+    by slugifying broker_name/address/agent_name the same way
+    scraper/photos.py's target_for() already names the folder for this row --
+    so this table and agents/ can never disagree about which lead a row is.
+    """
     with open(csv_path, "r", newline="", encoding="utf-8") as f:
         rows = list(csv.DictReader(f))
 
+    photos = _load_photos()
+    marked = _contacted_keys()
     header = "".join(f"<th>{html.escape(key)}</th>" for key in CSV_FIELDS)
+    header += "<th>contacted</th>"
     body_lines = []
     for row in rows:
         cells = "".join(f"<td>{html.escape(row.get(key) or '')}</td>" for key in CSV_FIELDS)
+        is_contacted = False
+        if photos is not None:
+            key = (photos.slugify(row.get("broker_name"), "unknown_brokerage"),
+                   photos.slugify(row.get("address")),
+                   photos.slugify(row.get("agent_name"), photos.UNASSIGNED_AGENT))
+            is_contacted = key in marked
+        cells += f"<td>{'yes' if is_contacted else ''}</td>"
         body_lines.append(f"<tr>{cells}</tr>")
 
     page = HTML_TEMPLATE.format(count=len(rows), header=header, body="\n".join(body_lines))
@@ -281,8 +365,7 @@ def main():
     print()
     dup = find_duplicate(csv_path, row)
     if dup:
-        print(f"Skipped {csv_path}: duplicate of an existing row "
-              f"(zpid {row['zpid']}, same listing agent phone)")
+        print(duplicate_banner(csv_path, row))
     else:
         file_exists = os.path.isfile(csv_path)
         with open(csv_path, "a", newline="", encoding="utf-8") as f:
@@ -293,6 +376,12 @@ def main():
         print(f"Appended to {csv_path}")
 
     write_html_table(csv_path, html_path)
+
+    # reason: a duplicate is not a failure (exit 2 is reserved for "not a
+    # listing dump" above) but it is not a success either -- run.py needs a
+    # third signal to keep the two apart in a batch summary.
+    if dup:
+        sys.exit(3)
     print(f"Updated {html_path}")
 
     if args.full:

@@ -5,6 +5,8 @@
     python3 tour.py --build         # skip it, go straight to the wizard
     python3 tour.py --check-photos  # optional: ask Claude to read the contact sheet
     python3 tour.py --auto          # hands-off: every pending dump through to 3 sample cuts
+    python3 tour.py --sweep-published-samples [--yes]  # retroactively clear out/
+                                     # sample_ cuts already confirmed on the bucket
 
 This replaced the Streamlit dashboard, which put thirteen controls on screen and
 still left the operator to remember which of them mattered. The shape here is the
@@ -28,10 +30,11 @@ actually are, only one is a decision:
   make_tour.py  is the engine                                  -> escape hatch
   unittest      is developer-only                              -> out of the loop
 
-So this opens on status.py's roll-up and four choices: build, import the dumps
-that have no folder yet, publish a review link, edit a brand. Nothing behind that
-screen changed — every rung, prompt, default and refusal is what it was, and
-every script named above still runs standalone exactly as documented.
+So this opens on status.py's roll-up and five choices: build, import the dumps
+that have no folder yet, publish a review link, edit a brand, mark leads as
+contacted. Nothing behind that screen changed — every rung, prompt, default and
+refusal is what it was, and every script named above still runs standalone
+exactly as documented.
 
 Which dumps are pending is DERIVED, from whether agents/<brand>/<listing> exists.
 There is no marker file and no manifest, for the same reason photo order lives in
@@ -50,6 +53,25 @@ That staging is a default and never a restriction -- a client who has already pa
 can take all six in one go from the same menu. It exists because the tour_ trio is
 the paid deliverable, and building it before anyone has asked spends half a
 six-minute encode on a listing that may never reply.
+
+A confirmed sample publish clears its own sample_ cuts from out/ once the upload
+is verified against the bucket (publish_rung(), via clear_published_cuts()) --
+the CDN copy is the record from then on, and outreach/links.csv is the proof of
+it. That would make a published-and-cleaned-up listing look identical to "never
+built" to the out/-derived rule above, so stage() and status.py's next_action()
+both fall back to a links.csv lookup before concluding "nothing here yet." See
+a-confirmed-sample-publish-clears-its-own-cuts.md. --sweep-published-samples
+[--yes] applies that same cleanup retroactively, across every listing, dry-run by
+default.
+
+publish_rung() also asks, once, right after a publish succeeds: mark this lead as
+contacted once you've actually sent the draft? Default is No, same as every other
+prompt on this side of the-draft-is-automatic-the-send-is-not.md -- this only
+records that a human already sent the email, never sends one. A confirmed row
+lands in outreach/contacted.csv (publish.record_contacted()/contacted()).
+mark_contacted_action(), the fifth home-screen item, walks every published,
+not-yet-contacted listing and asks the same question one at a time, for whatever
+was published in an earlier session or skipped at that first prompt.
 
 Both runs write the same .last_build.json rung, "delivery", because that key names
 the intermediate lineage and not the cut family. That is what makes run 2 cheap:
@@ -769,11 +791,15 @@ def build_choice(st):
     proof first, and a rebuild of either family must remain possible.
     """
     if st == "sample":
-        return pick("No cuts built yet.", [
+        choice = pick("No cuts built yet.", [
             ("sample", "Sample cuts -- the 3 watermarked cuts the client reviews"),
             ("both", "All six now -- sample and delivery together"),
             (None, "Not now"),
         ], default=0)
+        if choice == "both":
+            say("Building the tour_ deliverables now too, before sign-off -- "
+                "these stay local, nothing sends them.")
+        return choice
     if st == "delivery":
         return pick("The sample cuts are built. Has the client signed off?", [
             ("delivery", "Yes -- build the 3 tour_ deliverables"),
@@ -858,17 +884,29 @@ def cut_families(listing_dir):
 def stage(listing_dir):
     """"sample" | "delivery" | "delivered" -- which run this listing is on.
 
-    Derived from out/ and nothing else. No marker file, no stage key in
-    config.json: the cuts on disk ARE the record of what has been built, the same
-    way the photo order is the filename prefix and nothing else. .last_build.json
-    answers a different question -- whether the STITCH can be reused -- and its
-    rung key names the intermediate lineage, not the cut family. The two stay
+    Derived from out/, falling back to outreach/links.csv when out/ has
+    neither family. No marker file, no stage key in config.json: the cuts on
+    disk ARE the record of what has been built, the same way the photo order
+    is the filename prefix and nothing else. .last_build.json answers a
+    different question -- whether the STITCH can be reused -- and its rung key
+    names the intermediate lineage, not the cut family. The two stay
     orthogonal on purpose.
+
+    The links.csv fallback exists because a confirmed publish clears its own
+    sample_ cuts from out/ (see
+    a-confirmed-sample-publish-clears-its-own-cuts.md) -- without it, a
+    cleaned-up-but-published listing would look identical to one never built,
+    and --auto would re-select it. status.py's next_action() carries the same
+    fallback for the same reason.
     """
     fams = cut_families(listing_dir)
     if fams["tour"]:
         return "delivered"
     if fams["sample"]:
+        return "delivery"
+    listing = os.path.basename(os.path.dirname(listing_dir))
+    brand = os.path.basename(os.path.dirname(os.path.dirname(listing_dir)))
+    if (brand, listing) in publish.published_listings():
         return "delivery"
     return "sample"
 
@@ -878,6 +916,63 @@ def stage(listing_dir):
 def sample_cuts(listing_dir):
     """The cuts in out/ that publish.py would accept. publish.py is the gate."""
     return [f for f in outputs(listing_dir) if publish.publishable(f)[0]]
+
+
+def clear_published_cuts(listing_dir, dry_run=False):
+    """Delete out/ sample_ cuts that outreach/links.csv confirms are on the
+    bucket. Returns the names removed (or, under dry_run, the names that
+    would be -- nothing is touched in that case).
+
+    reason: a-publish-never-deletes-the-local-cut.md stays true of publish.py
+    itself -- it still contains no os.remove. This is the one layer up that's
+    allowed to delete a LOCAL copy, and only once a links.csv row names that
+    exact cut as confirmed on the CDN. A tour_ file can never appear in that
+    column (publish.publishable() already refuses to upload one), but the
+    family() check here makes that guarantee explicit rather than incidental,
+    since --sweep-published-samples reuses this same function against a
+    links.csv it did not just write. See
+    a-confirmed-sample-publish-clears-its-own-cuts.md.
+    """
+    listing = os.path.basename(os.path.dirname(listing_dir))
+    brand = os.path.basename(os.path.dirname(os.path.dirname(listing_dir)))
+    confirmed = publish.published_cuts(brand, listing)
+    out_dir = os.path.join(listing_dir, "out")
+    removed = []
+    for name in sorted(confirmed):
+        p = os.path.join(out_dir, name)
+        if os.path.isfile(p) and publish.family(name) == "sample":
+            removed.append(name)
+            if not dry_run:
+                os.remove(p)
+    return removed
+
+
+def sweep_published_samples(dry_run=True):
+    """Walk every listing; for each one already published, remove its
+    confirmed sample_ cuts from out/ via clear_published_cuts() -- the same
+    function publish_rung() calls right after a fresh upload, reused here so
+    there is exactly one implementation of "is this cut safe to remove."
+
+    Defaults to dry-run: reports what would be removed without touching
+    anything. main() only passes dry_run=False for --sweep-published-samples
+    --yes -- see a-confirmed-sample-publish-clears-its-own-cuts.md.
+    """
+    swept = False
+    for brand in brands():
+        for name in listings(brand):
+            for agent in agent_dirs(brand, name):
+                listing_dir = os.path.join(LISTINGS_ROOT, brand, name, agent)
+                if (brand, name) not in publish.published_listings():
+                    continue
+                removed = clear_published_cuts(listing_dir, dry_run=dry_run)
+                if removed:
+                    swept = True
+                    verb = "would remove" if dry_run else "removed"
+                    say(f"{os.path.relpath(listing_dir, ROOT)}: {verb} "
+                        f"{', '.join(removed)}")
+    if not swept:
+        say("Nothing to sweep -- no published listing still has a confirmed "
+            "cut in out/.")
 
 
 def publish_rung(listing_dir, quiet=True):
@@ -917,7 +1012,28 @@ def publish_rung(listing_dir, quiet=True):
         say("Nothing was uploaded. Run publish.py from the listing folder any "
             "time.")
         return
-    subprocess.run([sys.executable, "-u", PUBLISH, listing_dir])
+    result = subprocess.run([sys.executable, "-u", PUBLISH, listing_dir])
+    if result.returncode == 0:
+        removed = clear_published_cuts(listing_dir)
+        if removed:
+            say(f"\n  Confirmed on the bucket -- removed the local copy: "
+                f"{', '.join(removed)}")
+        # reason: closes the gap where a --draft rerun after the sample build
+        # regenerates draft.mp4/contact_sheet.png with nothing left to clear
+        # them a second time -- see
+        # a-confirmed-sample-publish-clears-its-own-cuts.md.
+        clear_review_artifacts(listing_dir)
+        agent = os.path.basename(listing_dir)
+        listing = os.path.basename(os.path.dirname(listing_dir))
+        brand = os.path.basename(os.path.dirname(os.path.dirname(listing_dir)))
+        # reason: defaults to No -- the draft is automatic, the send is not
+        # (the-draft-is-automatic-the-send-is-not.md), and this prompt fires
+        # before the operator has actually sent anything.
+        if (not publish.contacted(brand, listing, agent)
+                and confirm("\n  Mark this lead as contacted once you've "
+                             "sent the email?", False)):
+            publish.record_contacted(brand, listing, agent)
+            say("  Recorded in outreach/contacted.csv.")
 
 
 # ---- the optional pair of eyes ----------------------------------------------
@@ -974,7 +1090,7 @@ def check_photos(listing_dir):
 # pre-push hook. vercel is one-time setup, so it left the recurring runbook.
 # publish was already a rung. status is "where am I", so it is the screen this
 # opens on. run.py is a real action, but a DETECTABLE one. What is left is
-# one command, a roll-up and four choices. Nothing behind this screen changed:
+# one command, a roll-up and five choices. Nothing behind this screen changed:
 # every rung, prompt, default and refusal in the build flow is what it was, and
 # every script still runs standalone from the CLI.
 
@@ -1183,6 +1299,42 @@ def publish_action():
             "by hand.")
         return
     publish_rung(listing_dir, quiet=False)
+
+
+def mark_contacted_action():
+    """Home-screen bulk action: walk every published, not-yet-contacted lead
+    and offer to mark each one, one at a time.
+
+    reason: publish_rung() already offers this the moment a sample publish
+    succeeds, but a listing published in an earlier session -- or skipped at
+    that prompt -- never gets asked again without this. Defaults to No on
+    every listing for the same reason publish_rung()'s own prompt does: this
+    only records a send that already happened by hand (see
+    the-draft-is-automatic-the-send-is-not.md), never triggers one.
+    """
+    status, why = load_status()
+    if status is None:
+        say(f"\n  The listing roll-up is unavailable ({why}), so there is "
+            "nothing to walk.")
+        return
+    candidates = []
+    for brand in brands():
+        for name in listings(brand):
+            for agent in agent_dirs(brand, name):
+                if not status.published(brand, name):
+                    continue
+                if status.contacted(brand, name, agent):
+                    continue
+                candidates.append((brand, name, agent))
+    if not candidates:
+        say("\n  Nothing to mark -- every published lead is already recorded "
+            "as contacted.")
+        return
+    say(f"\n  {len(candidates)} published listing(s) not yet marked contacted:")
+    for brand, name, agent in candidates:
+        if confirm(f"  Mark agents/{brand}/{name}/{agent} as contacted?", False):
+            publish.record_contacted(brand, name, agent)
+            say("    Recorded.")
 
 
 # ---- --auto: hands-off run from pasted dump to 3 sample cuts -----------------
@@ -1487,7 +1639,7 @@ def reapply_brand(brand, pairs):
 
 
 def home():
-    """The one screen: where every listing is, then the four things to do."""
+    """The one screen: where every listing is, then the five things to do."""
     status, why = load_status()
     # reason: the roll-up opens every photo in every listing, the dump scan
     # re-reads scraper/dumps/, and the gate banner spawns check_pii.py over the
@@ -1521,6 +1673,7 @@ def home():
              else "Import new dumps (none pending)", import_dumps),
             ("3", "Publish a review link", publish_action),
             ("4", "Brand settings", brand_settings),
+            ("5", "Mark leads as contacted", mark_contacted_action),
         ]
         say("")
         for key, label, _ in menu:
@@ -1534,7 +1687,7 @@ def home():
             return
         action = next((f for k, _, f in menu if k == choice), None)
         if action is None:
-            say("  Pick 1-4, or q to quit.")
+            say("  Pick 1-5, or q to quit.")
             continue
         action()
         say("")
@@ -1645,10 +1798,14 @@ def main():
     if args and args[0] == "--auto":
         auto_flow(args[1:])
         return
+    if args and args[0] == "--sweep-published-samples":
+        sweep_published_samples(dry_run="--yes" not in args[1:])
+        return
     if args and args[0] not in ("--check-photos", "--build"):
         raise SystemExit(
             __doc__.strip().splitlines()[0] +
-            "\n\n    python3 tour.py [--build | --check-photos | --auto]")
+            "\n\n    python3 tour.py [--build | --check-photos | --auto | "
+            "--sweep-published-samples [--yes]]")
     # reason: --check-photos and --build are the two ways past the home screen.
     # The roll-up is worth a second of startup when you are deciding what to
     # work on and pure noise when you already know, so it is skippable -- but

@@ -30,7 +30,7 @@ python3 tour.py
 ```
 
 It opens on the roll-up — every listing, its photo count, its smallest photo and
-the one thing standing between it and a deliverable — then offers four things:
+the one thing standing between it and a deliverable — then offers five things:
 
 | | | |
 |---|---|---|
@@ -38,6 +38,7 @@ the one thing standing between it and a deliverable — then offers four things:
 | **2** | Import *n* new dumps | runs the scraper on dumps with no listing folder yet |
 | **3** | Publish a review link | the watermarked cuts, to the review bucket |
 | **4** | Brand settings | what a brokerage sets once, and re-applying it |
+| **5** | Mark leads as contacted | walks every published, not-yet-contacted listing |
 
 Which dumps are pending is worked out by checking whether
 `agents/<brand>/<listing>/<agent>` exists. There is no marker file and nothing to
@@ -196,6 +197,15 @@ genuinely-absent asset can be forced through once, per listing, with
 `--ignore-floorplan-check` — all three need a scope, and none is ever allowed
 to waive its check for a whole batch.
 
+**Resolving a missing-logo halt.** The Zillow dump never carries a brokerage's
+website, so there is nothing here to fetch it automatically from, and this
+project stays stdlib + ffmpeg/ffprobe only — no browser dependency added on
+its behalf. The fastest way to clear it: ask a Claude Code session with the
+Chrome tool to open the brokerage's own site, save its mark to
+`global_assets/logos/<brand>.png` (the exact slug the halt names), and rerun
+`--auto`. It picks the file up the same way it would if you had saved it by
+hand — see the brand-slug lookup above.
+
 It never builds a draft and never publishes. Checking the mp4 in `out/`, then
 running `publish.py` from the listing folder (above), stays the last manual
 step.
@@ -270,7 +280,37 @@ sends: there is no SMTP credential in this repo and no flag that adds one. If a
 field is blank in `config.json` the draft keeps the `{placeholder}` visible and
 the console tells you which — fill it in before you send.
 
-The local files in `out/` are never touched. `out/` stays the copy of record.
+`publish.py` itself never touches `out/` — that stays true whether it's run
+standalone or through `tour.py`, and is guarded by
+`tests/test_publish_gate.py`. **`tour.py`'s rung 4 does, one layer up:** once a
+publish it ran comes back confirmed, it deletes the `sample_` cuts `out/`
+just uploaded (`clear_published_cuts()`) — the CDN copy is the record from
+then on. It only ever removes a file that `outreach/links.csv` names as
+confirmed for that exact listing, and it never touches a `tour_` file. Running
+`publish.py` directly from a listing folder (as above) skips this — nothing
+but the upload itself happens. To catch up listings published before this
+existed, or by hand:
+```bash
+python3 tour.py --sweep-published-samples          # dry run: prints what it would remove
+python3 tour.py --sweep-published-samples --yes     # actually removes it
+```
+See [`a-confirmed-sample-publish-clears-its-own-cuts`](_rules/a-confirmed-sample-publish-clears-its-own-cuts.md).
+
+### Mark a lead as contacted
+
+Right after that publish succeeds, `tour.py` asks one more question: *"Mark this
+lead as contacted once you've sent the email?"* It defaults to **no**, same as
+every other prompt on this side of the send button — this only records that you
+already sent the draft above, it never sends anything itself. Say yes once the
+email is actually out and it appends a row to `outreach/contacted.csv`
+(`marked_at,brand,listing,agent`).
+
+Skipped that prompt, or published the listing in an earlier session? Choose
+**5. Mark leads as contacted** from the home screen — it walks every published,
+not-yet-contacted listing and asks the same question one at a time. Either way
+the result shows up as a `CONTACTED` column in `status.py`'s roll-up and in
+`leads.html`. See
+[`the-draft-is-automatic-the-send-is-not`](_rules/the-draft-is-automatic-the-send-is-not.md).
 
 ---
 
@@ -598,7 +638,7 @@ Rename the numeric prefix. That prefix is the only thing that sets order — the
 no manifest or sidecar file.
 ```bash
 mv photos/07_interior_living2.webp photos/05_interior_living2.webp
-python3 make_tour.py --keep-work     # full rebuild required
+python3 make_tour.py --keep-work     # full rebuild required, writes all six -- add --samples-only/--delivery-only for one family
 ```
 `--finish-only` reuses `work_silent.mp4` and would reship the old order. It warns,
 but it does not stop. Drop the flag after any rename.
@@ -623,13 +663,17 @@ prefixes for you in the current alphabetical order.
 
 ### Add, remove, or replace a photo
 ```bash
-python3 make_tour.py --keep-work     # full rebuild required
+python3 make_tour.py --keep-work     # full rebuild required, writes all six -- add --samples-only/--delivery-only for one family
 ```
 **`--finish-only` will not pick this up.** It reuses the already-stitched
 `work_silent.mp4`, which still contains the old photo set.
 
 Rule of thumb: anything that changes `photos/` needs a full rebuild. Anything that
 changes branding or music can use `--finish-only`.
+
+The next three recipes are bare `make_tour.py` calls — no `--samples-only` or
+`--delivery-only` — so each writes all **six** cuts, not the three you may
+actually want. Add the flag if you only need one family.
 
 ### Build without branding
 ```bash
@@ -654,6 +698,22 @@ python3 make_tour.py --720p --allow-lowres --keep-work
 ```
 Checking pacing, ordering, or branding placement before the real photos arrive.
 See §5 before sending the result to anyone.
+
+### More than ~20 photos
+```bash
+python3 make_tour.py
+```
+Nothing extra to run. Every build carries a `max_total_seconds` ceiling
+(default 90s, `[cfg]`) — a set that already fits is untouched, but a dump with
+more photos than that prints a loud trim report and drops the weakest ones by
+sharpness, keeping the rest in their original order:
+```
+6 of 32 photos trimmed to stay at or under 90s (26 kept, by sharpness):
+  14_hallway.jpg                  sharpness 12.4
+  ...
+```
+This is not a halt — the build continues with the kept set. To keep more (or
+fewer) than the default allows, set `max_total_seconds` in `config.json`.
 
 ## 3. Outputs
 

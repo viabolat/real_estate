@@ -53,13 +53,14 @@ reading *prose only* is a rule nothing enforces. That is the list worth shrinkin
 
 <!-- RULE-TABLE:start -->
 
-34 rules.
+36 rules.
 
 | Area | Rule | Guarded by |
 |---|---|---|
 | interface | [Anything with the same answer on every listing is inherited or derived, and never becomes a control](nothing-invariant-becomes-a-control.md) | *prose only* |
 | photos | [A soft cut is not MLS-ready, and its name will not tell you](a-soft-cut-is-not-mls-ready.md) | `tests/test_status_naming.py` |
 | photos | [Below-par photos build, and the shortfall is reported, never encoded in a filename](below-par-photos-build-and-are-reported.md) | `tests/test_naming.py` |
+| photos | [A photo set too large for `max_total_seconds` is trimmed by quality, not halted](excess-photos-are-trimmed-by-quality-never-halted.md) | `tests/test_photo_quality.py` |
 | photos | [Floor-plan detection flags a candidate; it never reorders, renames, or deletes](floor-plan-detection-is-flag-only.md) | `tests/test_floorplan.py`<br>`tests/test_auto_flow.py` |
 | photos | [No AI upscaling of listing photos](no-ai-upscaling-of-listing-photos.md) | *prose only* |
 | photos | [Photo order lives in the filename prefix and nowhere else](photo-order-lives-in-the-filename-prefix.md) | `tests/test_photo_order.py`<br>`tests/test_home_screen.py` |
@@ -80,6 +81,7 @@ reading *prose only* is a rule nothing enforces. That is the list worth shrinkin
 | card | [The lower third does not say what the card already says](the-lower-third-does-not-repeat-the-card.md) | *prose only* |
 | delivery | [A subset build must be structurally incapable of crossing families](a-subset-build-cannot-cross-families.md) | `tests/test_build_stage.py`<br>`tests/test_card_isolation.py` |
 | delivery | [Never send a `sample_` file as a deliverable, and never send a `tour_` file before sign-off](never-cross-the-sample-tour-boundary.md) | `tests/test_naming.py`<br>`tests/test_publish_gate.py` |
+| publishing | [A confirmed sample publish clears its own cuts](a-confirmed-sample-publish-clears-its-own-cuts.md) | `tests/test_publish_gate.py`<br>`tests/test_build_stage.py` |
 | publishing | [A publish never deletes the local cut](a-publish-never-deletes-the-local-cut.md) | `tests/test_publish_gate.py` |
 | publishing | [A publish verifies against the storage API, never the public URL](a-publish-verifies-against-the-storage-api.md) | *prose only* |
 | publishing | [An upload over the bucket's cap gets a compressed copy, not a silent failure](an-oversized-upload-compresses-a-review-copy.md) | `tests/test_publish_gate.py` |
@@ -92,6 +94,6 @@ reading *prose only* is a rule nothing enforces. That is the list worth shrinkin
 | pii | [The PII gate runs itself, and an unwired gate is reported, never assumed](the-pii-gate-runs-itself.md) | `tests/test_hook_wired.py` |
 | docs | [Docs do not go stale](docs-do-not-go-stale.md) | `tests/test_photo_order.py` |
 
-Unguarded rules: 6 of 34.
+Unguarded rules: 6 of 36.
 
 <!-- RULE-TABLE:end -->

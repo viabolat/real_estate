@@ -34,7 +34,7 @@ is worth answering on photos that are not yet good enough to build with.
 |---|---|---|
 | Which photos, in what order? | sorting `photos/` filenames | a manifest or an order key |
 | Which dumps are still unimported? | whether `agents/<brand>/<listing>/<agent>` exists | a marker file |
-| Which run is this listing on? | what is in `out/` — nothing / `sample_` / `tour_` | a stage key in `config.json` |
+| Which run is this listing on? | what is in `out/` — nothing / `sample_` / `tour_`, falling back to `outreach/links.csv` when `out/` has neither | a stage key in `config.json` |
 | Has it been published? | `outreach/links.csv`, read by header name | a marker file |
 | Can the stitch be reused? | `.last_build.json` vs `photo_state()` | assumption |
 | Are the photos good enough? | re-measuring `photos/` on every read | a suffix in a filename |
@@ -66,10 +66,17 @@ state and is still measured from `photos/`.
 `tour.py` opens on `status.py`'s roll-up — every listing and its one next action,
 plus the scrape-naming drift report — then offers: **1** build a tour, **2** import
 the dumps that have no listing folder yet, **3** publish a review link, **4** brand
-settings. Which dumps are pending is *derived* from whether
-`agents/<brand>/<listing>/<agent>` exists; there is no marker file and no manifest,
-for the same reason photo order lives in the filename prefix. `--build` skips the screen
-when you already know the listing.
+settings, **5** mark leads as contacted. Which dumps are pending is *derived* from
+whether `agents/<brand>/<listing>/<agent>` exists; there is no marker file and no
+manifest, for the same reason photo order lives in the filename prefix. `--build`
+skips the screen when you already know the listing.
+
+`outreach/contacted.csv` (`marked_at,brand,listing,agent`) is a manual annotation,
+never a pipeline gate: it records that a human sent the draft `publish_rung()`
+already wrote, nothing more. `publish_rung()` asks once, right after a publish
+succeeds, defaulting to No; item **5** walks every published, not-yet-contacted
+listing and asks the same question one at a time. See
+[`the-draft-is-automatic-the-send-is-not`](_rules/the-draft-is-automatic-the-send-is-not.md).
 
 ## Two runs, and how the tool knows which one it is on
 
@@ -92,6 +99,16 @@ listing that may never reply.
 photo order: a marker file beside the artifacts drifts out of sync with them and is
 then wrong in a way nothing detects. There is no stage key in `config.json` and
 there must never be one.
+
+A confirmed sample publish clears its own `sample_` cuts from `out/` once the
+upload is verified against the bucket (`tour.py`'s `publish_rung()`, via
+`clear_published_cuts()`) — the CDN copy is the record from then on. That makes
+"nothing built" and "published, then swept" look identical to the rule above, so
+`tour.stage()` and `status.py`'s `next_action()` both fall back to
+`outreach/links.csv` before concluding "ready to build." See
+[`a-confirmed-sample-publish-clears-its-own-cuts`](_rules/a-confirmed-sample-publish-clears-its-own-cuts.md).
+`tour.py --sweep-published-samples [--yes]` applies the same cleanup
+retroactively, across every listing, dry-run by default.
 
 **`.last_build.json` gains no new rung, and that is the point.** Its top-level key
 names the *intermediate lineage* — `draft` ↔ `work_draft.mp4`, `delivery` ↔

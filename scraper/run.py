@@ -25,6 +25,11 @@ photos already on disk and never overwrites a brand.json or config.json. So
 there is no "processed" folder to move dumps into, and no state to get out of
 sync with the folder -- leave them where they are and run it again.
 
+A dump that is a duplicate of one already scraped -- same company, address and
+agent -- is reported loudly and separately from a clean run, so a batch of
+re-pasted dumps cannot read as fresh work; it is not a failure and does not
+affect the exit code.
+
 A dump that fails does not stop the batch. The run reports which ones failed
 and exits non-zero, so a batch that half-worked cannot look like a clean one.
 
@@ -49,11 +54,24 @@ def dumps_in(path):
 
 
 def run_one(dump, lead_script, photos_script):
-    """Both scripts against one dump. True if both exited clean."""
+    """Both scripts against one dump. "new" | "duplicate" | "failed".
+
+    reason: each script now exits 3 for "already have this, did nothing" --
+    distinct from 0 (proceeded) and 2 (not a listing dump, a real failure) --
+    so a re-scraped dump can be reported as a no-op instead of looking like
+    fresh work in the batch summary. Either script calling it a duplicate is
+    enough to call the pair one: whichever side found nothing new to do is
+    exactly the resources-wasted signal this exists to surface.
+    """
     lead = subprocess.run([sys.executable, lead_script, dump])
     print()
     photos = subprocess.run([sys.executable, photos_script, dump])
-    return lead.returncode == 0 and photos.returncode == 0
+    codes = (lead.returncode, photos.returncode)
+    if any(c not in (0, 3) for c in codes):
+        return "failed"
+    if 3 in codes:
+        return "duplicate"
+    return "new"
 
 
 def main():
@@ -84,27 +102,29 @@ def main():
     if not single:
         print(f"{len(dumps)} dump(s) in {path}\n")
 
-    failed = []
+    new, duplicate, failed = [], [], []
     for i, dump in enumerate(dumps, start=1):
         if not single:
             label = f"[{i}/{len(dumps)}] {os.path.basename(dump)}"
             print(f"\n{'=' * len(label)}\n{label}\n{'=' * len(label)}")
         print("=== lead.py ===", flush=True)
         try:
-            ok = run_one(dump, lead_script, photos_script)
+            result = run_one(dump, lead_script, photos_script)
         except OSError as e:
             # reason: one unreadable or malformed dump must not throw away the
             # rest of the batch. Twenty pasted listings is twenty chances to
             # have saved one as a directory or a zero-byte file.
             print(f"  FAILED to run against {dump}: {e}")
-            ok = False
-        if not ok:
-            failed.append(os.path.basename(dump))
+            result = "failed"
+        {"new": new, "duplicate": duplicate, "failed": failed}[result].append(
+            os.path.basename(dump))
 
     if not single:
-        done = len(dumps) - len(failed)
         print(f"\n{'-' * 60}")
-        print(f"{done} of {len(dumps)} dump(s) processed cleanly")
+        print(f"{len(new)} new, {len(duplicate)} duplicate, {len(failed)} failed "
+              f"-- {len(dumps)} dump(s) total")
+        if duplicate:
+            print(f"duplicate (nothing downloaded/appended): {', '.join(duplicate)}")
         if failed:
             print(f"failed: {', '.join(failed)}")
         print("Run `python3 status.py` from the project root for the roll-up.")

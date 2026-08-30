@@ -43,6 +43,12 @@ means "nothing published" exactly as a missing leads.csv means "nothing scraped"
 The soft-photo verdict rides along on all of them and is measured from photos/,
 never read off a filename.
 
+print_rows() also carries a CONTACTED column, from contacted(brand, listing,
+agent) -- a thin wrapper over outreach/contacted.csv the same way published()
+wraps links.csv. It is a manual annotation on top of the pipeline state above,
+never a gate on what the NEXT column reports: a contacted, unpublished listing
+still reads "ready to build" if that is what out/ says.
+
 Usage:
     python3 status.py
     python3 status.py --long     # also show what each listing inherits
@@ -247,6 +253,24 @@ def published(brand, listing):
         return False
 
 
+def contacted(brand, listing, agent):
+    """Has the operator marked this lead as emailed?
+
+    Derived from outreach/contacted.csv, which tour.py's publish_rung() writes
+    only once the operator confirms the email was actually sent -- see
+    the-draft-is-automatic-the-send-is-not.md. A missing file or row is "not
+    yet", the same way a missing links.csv row is "not published". This is
+    orthogonal to next_action()'s pipeline-stage state: contacted is a manual
+    annotation on top of it, never a gate on what next_action() reports.
+    """
+    if not _publish:
+        return False
+    try:
+        return _publish.contacted(brand, listing, agent)
+    except Exception:
+        return False
+
+
 def next_action(listing_dir, cfg, n, worst, best, scraped=True, bcfg=None):
     """The one thing standing between this listing and a deliverable.
 
@@ -287,13 +311,21 @@ def next_action(listing_dir, cfg, n, worst, best, scraped=True, bcfg=None):
     # back off them. They no longer say anything about resolution, so the verdict
     # is measured from photos/ -- the same place it was always measured from.
     soft = " -- soft ({}px photos)".format(best) if best and best < GATE_720P else ""
+    listing = os.path.basename(os.path.dirname(listing_dir))
+    brand = os.path.basename(os.path.dirname(os.path.dirname(listing_dir)))
     if not counts["sample"] and not counts["tour"]:
+        # reason: a confirmed publish clears its own sample_ cuts from out/ (see
+        # a-confirmed-sample-publish-clears-its-own-cuts.md), which would
+        # otherwise look identical to "never built" here. Check links.csv
+        # before concluding that -- the derived stage must stay the same
+        # before and after that cleanup runs, or auto_targets() would re-select
+        # an already-published, awaiting-sign-off listing as fresh.
+        if published(brand, listing):
+            return f"sample published -- awaiting sign-off{soft}{origin}"
         tag = f" (soft: photos {best}px)" if best and best < GATE_1080P else ""
         return f"ready to build{tag}{origin}"
     if counts["tour"]:
         return f"delivered, {total} cuts{soft}{origin}"
-    listing = os.path.basename(os.path.dirname(listing_dir))
-    brand = os.path.basename(os.path.dirname(os.path.dirname(listing_dir)))
     if published(brand, listing):
         return f"sample published -- awaiting sign-off{soft}{origin}"
     return f"sample built -- publish the review link{soft}{origin}"
@@ -399,12 +431,14 @@ def print_rows(rows, long=False, out=print):
     set once per brand -- which is exactly what its Brand settings action does.
     """
     w = max(len(f"{b}/{l}/{a}") for b, l, a, *_ in rows)
-    out(f"{'BROKERAGE / LISTING / AGENT'.ljust(w)}  PHOTOS  SMALLEST  NEXT")
-    out("-" * (w + 40))
+    out(f"{'BROKERAGE / LISTING / AGENT'.ljust(w)}  PHOTOS  SMALLEST  CONTACTED  NEXT")
+    out("-" * (w + 50))
     for brand, listing, agent, n, worst, best, action, bcfg, cfg in rows:
         name = f"{brand}/{listing}/{agent}".ljust(w)
         px = f"{worst}px".rjust(8) if worst else "".rjust(8)
-        out(f"{name}  {str(n).rjust(6)}  {px}  {action}")
+        mark = ("yes" if listing != "-" and agent != "-"
+                and contacted(brand, listing, agent) else "")
+        out(f"{name}  {str(n).rjust(6)}  {px}  {mark.rjust(9)}  {action}")
         if long and cfg:
             out(f"{' ' * w}          logo={cfg.get('logo') or '(blank)'} "
                 f"music={cfg.get('music') or '(blank)'} card={cfg.get('card')}")
