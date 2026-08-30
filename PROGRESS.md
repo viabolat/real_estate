@@ -43,6 +43,76 @@ for whatever is in flight, which expire on ship) and `.claude/settings.local.jso
 
 ## 2. BUILT
 
+### 2026-08-30 — An oversized upload compresses a review copy instead of 413ing
+
+`keller_williams_realty/16_holmfield_ave`'s first real publish put two of three
+`sample_` cuts — `sample_branded` (77.8MB) and `sample_unbranded` (74.5MB) —
+against Supabase Storage and got `HTTP 400 EntityTooLarge` on both. Only
+`sample_vertical` (38.0MB) went through. `PRIMARY_CUT` is `sample_branded`, so
+no cut confirmed and no email draft was written even though the build had
+already succeeded and the operator had confirmed the upload interactively.
+
+The bucket (`listing-media`) has no per-bucket `file_size_limit` — checked
+directly against the Storage API's own bucket record — so the cap is the
+Supabase project's platform default, roughly 50MB, and not something a bucket
+setting can raise. A two-minute 720p `sample_` cut at `make_tour.py`'s `CRF 18`
+routinely lands past it.
+
+`publish.py` now carves the one retryable failure (`_too_large()`: a genuine
+413 `EntityTooLarge`, not an auth or path error) out of `upload()`'s existing
+fail-fast behavior. On that failure `main()` walks `UPLOAD_CRF_LADDER`
+(`23, 28, 32`), re-encoding `out/`'s file smaller into a throwaway temp copy
+via `_compressed_copy()` and retrying the same `PUT` at each rung until one
+clears the cap or the ladder runs out. `out/` is never touched — the ladder
+re-encodes the same local master into a new temp file each attempt and
+discards it once that `PUT` resolves either way, so `out/` and every paid
+`tour_` deliverable stay exactly as built. Verification (`present.get(name) !=
+size`) was updated to compare against the size actually written to the wire
+rather than `out/`'s original size — a compressed upload is legitimately
+smaller than the local master by design, and comparing against the wrong
+number would report every successful compressed upload as `UNVERIFIED`. A
+publish run that compressed anything says so at the end, so the trade-off
+(the public CDN copy is not byte-identical to `out/`) is disclosed, not
+silent.
+
+See [`an-oversized-upload-compresses-a-review-copy`](_rules/an-oversized-upload-compresses-a-review-copy.md).
+`tests/test_publish_gate.py`: 21 tests, no network. `python3 check_pii.py`: clean.
+
+### 2026-08-30 — 16 Holmfield Ave built with no logo, and no `brand.json` ever pointed at one
+
+`keller_williams_realty/16_holmfield_ave` ran through `--auto` clean and built
+the type-only card, even though `global_assets/logos/keller_williams_realty.png`
+had sat in the repo the whole time — `brand.json` had simply never been told
+about it, because `questions()`'s logo picker (asking a human to choose among
+several unrelated marks) is deliberately skipped under `auto=True`, and
+nothing else in `--auto` ever looked at `global_assets/logos/` on its own.
+
+That skip is still correct when a brand has several candidate marks to choose
+from. But a brokerage's *own* logo is not one of several — it lives at exactly
+one predictable path, `global_assets/logos/<brand>.png`, the same slug as the
+`agents/<brand>` folder. `_auto_build_one()` now tries that path before
+`preflight()` runs, adopts it the moment it exists, and saves it to
+`brand.json` with `save_brand()` — the same mechanism `questions()` already
+uses to persist a confirmed brokerage name — so every other listing under
+that brand inherits it from then on. When neither `cfg["logo"]` nor that
+fixed path resolves, the listing halts, the same shape and the same place as
+the phone check: printed, nothing built, the rest of the batch keeps going,
+nothing recorded. `--ignore-missing-logo-check` is the same one-shot,
+scope-required override as the other two.
+
+See [`auto-picks-up-the-brand-logo-by-slug`](_rules/auto-picks-up-the-brand-logo-by-slug.md).
+`tests/test_auto_flow.py`: 223 tests, ~2s, no ffmpeg. `python3 check_pii.py`: clean.
+
+One side effect worth knowing about: `the_collaborative_companies/brand.json`
+already points `logo` at a bare `tcc.png`, which resolves nowhere (not the
+listing folder, not the repo root) — that brand's builds were already
+shipping the type-only card silently. Its logo file is `global_assets/logos/
+tcc.png`, and the folder slug is `the_collaborative_companies`, so the two
+names disagree and the brand-slug lookup will not find it either. Its next
+`--auto` run will halt until `brand.json`'s `logo` is pointed at
+`global_assets/logos/tcc.png` directly, or the file is renamed/copied to
+`global_assets/logos/the_collaborative_companies.png`.
+
 ### 2026-08-30 — A pasted dump runs itself to the 3 samples, and stops for one photo
 
 **The ask, in the operator's words.** *"i want this to run so that after a .txt is

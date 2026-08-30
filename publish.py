@@ -49,6 +49,14 @@ Local files are never deleted. A public bucket must not become the only copy of 
 deliverable, and config.json is supposed to still explain what shipped months
 later.
 
+The project's Supabase plan caps a single upload at roughly 50MB -- no per-bucket
+override, just the platform default -- and a two-minute 720p sample_ cut at
+make_tour.py's CRF 18 routinely lands past it. A PUT that comes back 413 gets
+retried with a smaller re-encode (UPLOAD_CRF_LADDER), climbing crf until one
+clears the cap or the ladder runs out. That re-encode lives in a temp file for
+the length of one PUT and nothing else; out/ is never touched, and verification
+compares against whatever size actually reached the bucket, not out/'s.
+
 Every confirmed publish also writes one email draft to outreach/drafts/ --
 outreach/template.txt filled in with the agent's first name and the address from
 the listing's config.json, and the sample_branded link. It quotes the watermarked
@@ -62,13 +70,16 @@ link took the uploaded_at timestamp with it and the URL 404'd.
 """
 
 import argparse
+import contextlib
 import csv
 import datetime
 import json
 import os
 import re
 import socket
+import subprocess
 import sys
+import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -119,6 +130,14 @@ PREVIEW_BASE = f"{PREVIEW_HOST}/preview"
 TIMEOUT = 300                      # a 72 MB cut over a slow line
 ATTEMPTS = 3
 PRIMARY_CUT = "sample_branded"     # the one that gets quoted in an email
+# reason: the bucket has no per-bucket file_size_limit override -- confirmed
+# against the Storage API's own bucket record -- so a PUT past ~50MB 400s
+# with the project's own EntityTooLarge. Discovered 2026-08-30: a two-minute
+# 720p sample_ cut at make_tour.py's CRF 18 landed at 77.8MB. Each rung
+# re-encodes the same local file smaller; upload() stops climbing at the
+# first crf that clears the cap. See
+# _rules/an-oversized-upload-compresses-a-review-copy.md.
+UPLOAD_CRF_LADDER = (23, 28, 32)
 
 # Values copied out of .env.example and never filled in. See credentials().
 PLACEHOLDER = re.compile(
@@ -327,6 +346,42 @@ def upload(base, key, local_path, path):
         if attempt < ATTEMPTS:
             print(f"    attempt {attempt} failed ({last}), retrying...")
     return last
+
+
+def _too_large(detail):
+    """True if `detail` (an upload() error string) is the bucket's own "the
+    object is bigger than the project allows" response -- the one failure
+    worth retrying with a smaller file rather than the same bytes again."""
+    return "413" in detail and "EntityTooLarge" in detail
+
+
+@contextlib.contextmanager
+def _compressed_copy(local_path, crf):
+    """A CRF-`crf` re-encode of local_path, alive only inside this `with`.
+
+    reason: some cuts land past the bucket's upload cap (see
+    UPLOAD_CRF_LADDER above). out/ is the master and is never touched --
+    this is a second, smaller file that exists purely for the one PUT that
+    needs it. Cleanup rides NamedTemporaryFile's own teardown rather than a
+    manual delete call here, which is what keeps
+    test_nothing_in_publish_deletes_a_local_file meaningful: this file may
+    still never remove a DELIVERABLE, and this is not one.
+    """
+    with tempfile.NamedTemporaryFile(suffix=".mp4") as tmp:
+        try:
+            subprocess.run(
+                ["ffmpeg", "-y", "-loglevel", "error", "-i", local_path,
+                 "-c:v", "libx264", "-crf", str(crf), "-preset", "medium",
+                 "-c:a", "aac", "-b:a", "128k", tmp.name],
+                check=True, capture_output=True, text=True)
+        except FileNotFoundError:
+            yield None, "ffmpeg is not on PATH"
+            return
+        except subprocess.CalledProcessError as e:
+            detail = (e.stderr or "").strip()[:200]
+            yield None, detail or f"ffmpeg exited {e.returncode}"
+            return
+        yield tmp.name, os.path.getsize(tmp.name)
 
 
 def list_objects(base, key, prefix):
@@ -590,12 +645,41 @@ def main():
 
     print()
     failed = []
+    actual_size = {}
+    compressed = []
     for name, size, path in files:
+        local = os.path.join(listing_dir, "out", name)
         print(f"  uploading {name} ({human(size)})...")
-        err = upload(base, key, os.path.join(listing_dir, "out", name), path)
+        err = upload(base, key, local, path)
+        uploaded_size = size
+        if err and _too_large(err):
+            print(f"    {human(size)} is over the bucket's upload cap -- "
+                  "compressing a smaller review copy...")
+            last_crf = None
+            for crf in UPLOAD_CRF_LADDER:
+                last_crf = crf
+                with _compressed_copy(local, crf) as (tmp_path, result):
+                    if tmp_path is None:
+                        err = f"could not compress a smaller copy ({result})"
+                        break
+                    print(f"    crf {crf} -> {human(result)}, uploading...")
+                    err = upload(base, key, tmp_path, path)
+                    if not err:
+                        uploaded_size = result
+                if not err or not _too_large(err):
+                    break
+            if err and _too_large(err):
+                err = (f"still over the bucket's upload cap after "
+                       f"compressing down to crf {last_crf}. Shorten "
+                       "clip_seconds or the photo count, or raise the "
+                       "project's storage upload limit.")
         if err:
             print(f"    FAILED: {err}")
             failed.append(name)
+        else:
+            actual_size[name] = uploaded_size
+            if uploaded_size != size:
+                compressed.append(name)
 
     if len(failed) == len(files):
         # reason: the verification step used to run anyway and report "uploads
@@ -622,9 +706,10 @@ def main():
     for name, size, path in files:
         if name in failed:
             continue
-        if present.get(name) != size:
+        expected = actual_size.get(name, size)
+        if present.get(name) != expected:
             print(f"  UNVERIFIED: {name} is {present.get(name, 'absent')} at the "
-                  f"origin, expected {size}")
+                  f"origin, expected {expected}")
             failed.append(name)
             continue
         confirmed.append((name, path))
@@ -646,6 +731,10 @@ def main():
     for name, path in confirmed:
         mark = "  <- send this one" if PRIMARY_CUT in name else ""
         print(f"  {preview_url(path)}{mark}")
+    if compressed:
+        print(f"\n{len(compressed)} cut(s) were over the bucket's upload cap, "
+              f"so the CDN copy is a smaller re-encode ({', '.join(compressed)})."
+              " out/ still holds the original quality.")
     if confirmed:
         print("\nThese are served through a CDN, so a link can 404 for a few "
               "seconds\nbefore the edge catches up. That is not a failed upload.")

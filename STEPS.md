@@ -82,8 +82,10 @@ phone, brokerage, watermark path), and prints the resolution verdict the gate in
 would give. Neither JSON is ever overwritten if it already exists.
 
 Two fields it deliberately leaves blank, because they are yours: `logo` and `music`.
-Fill them in once per brokerage in `agents/<broker_name>/brand.json`. Until then the
-card falls back to the type-only design and the build is silent.
+Fill them in once per brokerage in `agents/<broker_name>/brand.json` — or, for the
+logo, drop the file at `global_assets/logos/<broker_name>.png` and let `--auto` find
+it (below). Until either happens the card falls back to the type-only design and the
+build is silent.
 
 To see where every listing stands:
 
@@ -164,27 +166,35 @@ python3 tour.py --auto                                # every pending dump/listi
 python3 tour.py --auto <brand>/<listing>               # just one -- also the resume, below
 python3 tour.py --auto <brand>/<listing> --ignore-floorplan-check   # force a false positive through
 python3 tour.py --auto <brand>/<listing> --ignore-missing-phone-check   # phone is genuinely unavailable
+python3 tour.py --auto <brand>/<listing> --ignore-missing-logo-check    # brokerage genuinely has no mark
 ```
 Imports every pending dump, then answers the same question set above from
 `config.json`/`brand.json` alone — never `input()` — for every listing with no
-cuts yet. It skips the logo and music picks outright rather than guess one:
-a brokerage with an unresolved logo or no `music.mp3` builds with neither, the
-same way a hand-run build with nothing set does. It builds the contact sheet,
-skips the draft rung entirely, and goes straight to the three `sample_` cuts.
+cuts yet. It skips the music pick outright rather than guess one: a brokerage
+with no `music.mp3` builds silent, the same way a hand-run build with nothing
+set does. The logo is different: before anything else, it checks
+`global_assets/logos/<brand>.png` — the brand folder's own slug, not a
+guess among several unrelated marks — and adopts it as the brand default
+the moment it exists. It builds the contact sheet, skips the draft rung
+entirely, and goes straight to the three `sample_` cuts.
 
-Before it stitches anything, it checks two things no default can safely
+Before it stitches anything, it checks three things no default can safely
 answer. First, whether `agent_phone` is blank — Zillow does not always expose
 one, especially for a team listing, and a card with no way to call back
-defeats the point of sending the video. Second, whether a photo in `photos/`
-is a floor plan or whole-house layout image, which must never appear in the
-video. A hit on either halts just that listing — printed, never guessed at or
-deleted — and the rest of the batch keeps going. Fix `config.json` or delete
-the file by hand and rerun `--auto`, bare or scoped to that `brand/listing`;
-nothing about either halt is written anywhere, so re-running from the top is
-the entire resume mechanism. A false positive on either check can be forced
-through once, per listing, with `--ignore-missing-phone-check` or
-`--ignore-floorplan-check` — both need a scope, and neither is ever allowed to
-waive its check for a whole batch.
+defeats the point of sending the video. Second, whether the brokerage's logo
+resolved anywhere — neither `config.json`/`brand.json`'s own `logo` nor the
+brand-slug lookup above — and would otherwise ship the type-only card without
+anyone deciding that on purpose. Third, whether a photo in `photos/` is a
+floor plan or whole-house layout image, which must never appear in the video.
+A hit on any halts just that listing — printed, never guessed at or deleted —
+and the rest of the batch keeps going. Fix `config.json`, add the logo file,
+or delete the photo by hand and rerun `--auto`, bare or scoped to that
+`brand/listing`; nothing about any halt is written anywhere, so re-running
+from the top is the entire resume mechanism. A false positive or a
+genuinely-absent asset can be forced through once, per listing, with
+`--ignore-missing-phone-check`, `--ignore-missing-logo-check`, or
+`--ignore-floorplan-check` — all three need a scope, and none is ever allowed
+to waive its check for a whole batch.
 
 It never builds a draft and never publishes. Checking the mp4 in `out/`, then
 running `publish.py` from the listing folder (above), stays the last manual
@@ -237,6 +247,14 @@ storage API lists the object at the right size — not that the public URL answe
 because the CDN edge may lag the upload by a few seconds. **A `/preview/` link
 that 404s immediately after a publish is usually a cold edge, not a failed
 upload.** Wait and retry before re-uploading.
+
+**A cut over the bucket's ~50MB cap compresses instead of failing.** A two-minute
+720p `sample_` cut can land past what the Supabase project accepts on a single
+`PUT`. When that happens `publish.py` re-encodes a smaller review-only copy of the
+same file, uploads that instead, and says so once the run finishes
+(`N cut(s) were over the bucket's upload cap...`). `out/` is never touched — only
+the copy that leaves the machine is smaller. See
+[`an-oversized-upload-compresses-a-review-copy`](_rules/an-oversized-upload-compresses-a-review-copy.md).
 
 **The email writes itself.** Every confirmed publish also leaves a ready-to-send
 draft at `outreach/drafts/<brand>__<listing>.txt` — the wording from
@@ -922,6 +940,7 @@ back end. See `IDEA.md` §2.
 | `UNVERIFIED: <file> is absent at the origin` | Upload reported success but the object is not there | Nothing was written to `links.csv`. Re-run the publish |
 | `Uploads finished but the listing check could not run` | Network dropped between upload and verification | Treat as unverified — re-run rather than sending the link |
 | `HTTP 401`/`403` on upload | Anon key instead of the `service_role` key | See §0a. The anon key cannot write to the bucket |
+| `HTTP 400 EntityTooLarge` on upload | Cut is past the bucket's ~50MB cap | Nothing to do — `publish.py` retries with a compressed copy automatically |
 
 **A failed build keeps its intermediates on purpose** so you can inspect them. Only a
 successful run cleans up — which also means a failed delivery build leaves the draft

@@ -19,6 +19,11 @@ may ever delete or move a photo. Concretely:
   * a blank agent_phone halts the same way a flagged photo does -- checked
     before any encode -- and --ignore-missing-phone-check is the same kind of
     one-shot, scope-required override.
+  * a brokerage's own mark at global_assets/logos/<brand>.png is adopted
+    automatically and saved as the brand default -- unlike the ambiguous
+    picker in questions(), which stays skipped under auto. Its absence halts
+    the same way, with the same kind of override,
+    --ignore-missing-logo-check.
 """
 import ast
 import json
@@ -249,10 +254,12 @@ class AutoBuildOneIntegration(unittest.TestCase):
         os.makedirs(os.path.join(self.listing_dir, "photos"))
         for name in ("010_a.jpg", "020_b.jpg"):
             open(os.path.join(self.listing_dir, "photos", name), "wb").close()
-        # A phone is already on file here -- these tests exercise the
-        # floor-plan halt, not the phone one. See MissingPhoneHaltsAuto below.
+        # A phone and a logo are already on file here -- these tests exercise
+        # the floor-plan halt, not the phone or logo ones. See
+        # MissingPhoneHaltsAuto and LogoAutoAdoption below.
+        open(os.path.join(self.listing_dir, "logo.png"), "wb").close()
         with open(os.path.join(self.listing_dir, "config.json"), "w") as f:
-            json.dump({"agent_phone": "6175551234"}, f)
+            json.dump({"agent_phone": "6175551234", "logo": "logo.png"}, f)
 
         self.prev = (self.tour.LISTINGS_ROOT, self.tour.preflight,
                      self.tour.run_build, self.tour.floorplan.detect)
@@ -345,8 +352,12 @@ class MissingPhoneHaltsAuto(unittest.TestCase):
          self.tour.floorplan.detect) = self.prev
 
     def test_blank_agent_phone_halts_before_any_build(self):
+        # ignore_missing_logo=True: this fixture has no global_assets/logos/
+        # sandbox of its own, and this test's concern is the phone gate, not
+        # the logo one -- see LogoAutoAdoption below for that gate.
         result = self.tour._auto_build_one("compass", self.listing_dir,
-                                           ignore_floorplan=False)
+                                           ignore_floorplan=False,
+                                           ignore_missing_logo=True)
         self.assertEqual(result, "flagged")
         self.assertEqual(self.build_calls, [],
                          "a blank agent_phone must not reach the contact sheet")
@@ -354,7 +365,8 @@ class MissingPhoneHaltsAuto(unittest.TestCase):
     def test_ignore_missing_phone_check_proceeds_to_the_sample_build(self):
         result = self.tour._auto_build_one("compass", self.listing_dir,
                                            ignore_floorplan=False,
-                                           ignore_missing_phone=True)
+                                           ignore_missing_phone=True,
+                                           ignore_missing_logo=True)
         self.assertEqual(result, "built")
         self.assertEqual(self.build_calls[0], ["--contact-sheet"])
         self.assertIn("--samples-only", self.build_calls[1])
@@ -369,7 +381,8 @@ class MissingPhoneHaltsAuto(unittest.TestCase):
         try:
             self.tour._auto_build_one("compass", self.listing_dir,
                                       ignore_floorplan=False,
-                                      ignore_missing_phone=True)
+                                      ignore_missing_phone=True,
+                                      ignore_missing_logo=True)
         finally:
             self.tour.save_config = prev_save_config
             self.tour.save_state = prev_save_state
@@ -378,10 +391,118 @@ class MissingPhoneHaltsAuto(unittest.TestCase):
         self.assertNotIn("ignore-missing-phone", blob)
 
 
+class LogoAutoAdoption(unittest.TestCase):
+    """A brokerage's own mark at global_assets/logos/<brand>.png is not a
+    guess -- unlike questions()'s picker, which asks a human to choose among
+    several unrelated marks -- so --auto adopts it the moment the file
+    exists and saves it as the brand default. When that fixed path does not
+    exist either, and cfg["logo"] resolves to nothing else, the listing
+    halts the same way a blank agent_phone does: before any encode, printed
+    rather than guessed at. See _auto_build_one and
+    _rules/auto-picks-up-the-brand-logo-by-slug.md.
+    """
+
+    def setUp(self):
+        self.tour = helpers.tour_module()
+        self.tmp = tempfile.mkdtemp(prefix="logo_auto_")
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.agents = os.path.join(self.tmp, "agents")
+        self.listing_dir = os.path.join(self.agents, "acme", "1_main_st")
+        os.makedirs(os.path.join(self.listing_dir, "photos"))
+        open(os.path.join(self.listing_dir, "photos", "010_a.jpg"), "wb").close()
+        with open(os.path.join(self.listing_dir, "config.json"), "w") as f:
+            json.dump({"agent_phone": "6175551234"}, f)
+
+        # mkdtemp() happens above, outside anything tour.ROOT touches, and
+        # cleanup below deletes that LOCAL path -- never tour.ROOT itself --
+        # the same discipline test_home_screen.py's TestRollUpDegrades uses,
+        # so a failed patch can never point shutil.rmtree at the real repo.
+        self.prev = (self.tour.ROOT, self.tour.LISTINGS_ROOT, self.tour.preflight,
+                     self.tour.run_build, self.tour.floorplan.detect)
+        self.tour.ROOT = self.tmp
+        self.tour.LISTINGS_ROOT = self.agents
+        self.tour.preflight = lambda listing_dir, cfg: {"1080p": [], "720p": []}
+        self.tour.floorplan.detect = lambda paths: []
+        self.build_calls = []
+        self.tour.run_build = lambda listing_dir, flags: (
+            self.build_calls.append(list(flags)), 0)[1]
+        self.addCleanup(self._restore)
+
+    def _restore(self):
+        (self.tour.ROOT, self.tour.LISTINGS_ROOT, self.tour.preflight,
+         self.tour.run_build, self.tour.floorplan.detect) = self.prev
+
+    def _drop_brand_logo(self):
+        d = os.path.join(self.tmp, "global_assets", "logos")
+        os.makedirs(d, exist_ok=True)
+        open(os.path.join(d, "acme.png"), "wb").close()
+
+    def test_a_matching_brand_logo_is_adopted_and_the_build_proceeds(self):
+        self._drop_brand_logo()
+        result = self.tour._auto_build_one("acme", self.listing_dir,
+                                           ignore_floorplan=False)
+        self.assertEqual(result, "built")
+        self.assertEqual(self.build_calls[0], ["--contact-sheet"])
+
+    def test_a_matching_brand_logo_is_saved_as_the_brand_default(self):
+        self._drop_brand_logo()
+        self.tour._auto_build_one("acme", self.listing_dir, ignore_floorplan=False)
+        with open(os.path.join(self.agents, "acme", "brand.json")) as f:
+            saved = json.load(f)
+        self.assertEqual(saved.get("logo"), "global_assets/logos/acme.png")
+
+    def test_no_matching_logo_halts_before_any_build(self):
+        result = self.tour._auto_build_one("acme", self.listing_dir,
+                                           ignore_floorplan=False)
+        self.assertEqual(result, "flagged")
+        self.assertEqual(self.build_calls, [],
+                         "a missing brand logo must not reach the contact sheet")
+
+    def test_ignore_missing_logo_check_proceeds_with_the_type_only_card(self):
+        result = self.tour._auto_build_one("acme", self.listing_dir,
+                                           ignore_floorplan=False,
+                                           ignore_missing_logo=True)
+        self.assertEqual(result, "built")
+        self.assertEqual(self.build_calls[0], ["--contact-sheet"])
+
+    def test_ignore_missing_logo_check_never_reaches_saved_config_or_state(self):
+        saved = {}
+        prev_save_config, prev_save_state = self.tour.save_config, self.tour.save_state
+        self.tour.save_config = lambda listing_dir, cfg: saved.setdefault(
+            "config", dict(cfg))
+        self.tour.save_state = lambda listing_dir, rung, cfg, preset: saved.setdefault(
+            "state", dict(cfg))
+        try:
+            self.tour._auto_build_one("acme", self.listing_dir,
+                                      ignore_floorplan=False,
+                                      ignore_missing_logo=True)
+        finally:
+            self.tour.save_config = prev_save_config
+            self.tour.save_state = prev_save_state
+        blob = repr(saved).lower()
+        self.assertNotIn("ignore_missing_logo", blob)
+        self.assertNotIn("ignore-missing-logo", blob)
+
+    def test_an_already_resolving_logo_is_left_untouched(self):
+        """A listing-local logo.png already resolves -- the brand-slug lookup
+        must not override an explicit, already-working choice, and must not
+        write a brand.json that was never asked for."""
+        open(os.path.join(self.listing_dir, "logo.png"), "wb").close()
+        with open(os.path.join(self.listing_dir, "config.json"), "w") as f:
+            json.dump({"agent_phone": "6175551234", "logo": "logo.png"}, f)
+        result = self.tour._auto_build_one("acme", self.listing_dir,
+                                           ignore_floorplan=False)
+        self.assertEqual(result, "built")
+        self.assertFalse(
+            os.path.exists(os.path.join(self.agents, "acme", "brand.json")),
+            "an already-resolving logo must not trigger a brand save")
+
+
 class AutoFlowRequiresAScopeForTheOverride(unittest.TestCase):
     """--ignore-floorplan-check with no brand/listing would silently waive the
     floor-plan check for an entire batch -- refuse rather than allow that.
-    Same reasoning, same rule, for --ignore-missing-phone-check.
+    Same reasoning, same rule, for --ignore-missing-phone-check and
+    --ignore-missing-logo-check.
     """
 
     def test_bare_override_with_no_scope_refuses(self):
@@ -393,6 +514,11 @@ class AutoFlowRequiresAScopeForTheOverride(unittest.TestCase):
         tour = helpers.tour_module()
         with self.assertRaises(SystemExit):
             tour.auto_flow(["--ignore-missing-phone-check"])
+
+    def test_bare_missing_logo_override_with_no_scope_refuses(self):
+        tour = helpers.tour_module()
+        with self.assertRaises(SystemExit):
+            tour.auto_flow(["--ignore-missing-logo-check"])
 
 
 if __name__ == "__main__":

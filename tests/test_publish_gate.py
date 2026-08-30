@@ -13,6 +13,7 @@ No network: the gate and the path builder are pure, the HTTP call is behind them
 import contextlib
 import io
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -146,6 +147,57 @@ class TestCredentials(unittest.TestCase):
                 mock.patch.object(publish, "DOTENV", "/nonexistent/.env"):
             url, key = publish.credentials()
         self.assertEqual(url, "https://hmfdjqebkdtkackdshta.supabase.co")
+
+
+class TestTooLarge(unittest.TestCase):
+    """Guards _rules/an-oversized-upload-compresses-a-review-copy.md: only a
+    genuine 413 EntityTooLarge is worth retrying with a smaller file."""
+
+    def test_the_real_supabase_413_is_detected(self):
+        detail = ('HTTP 400 {"statusCode":"413","error":"Payload too large",'
+                   '"message":"The object exceeded the maximum allowed size",'
+                   '"code":"EntityTooLarge"}')
+        self.assertTrue(publish._too_large(detail))
+
+    def test_an_auth_or_path_error_is_not_retried_as_too_large(self):
+        for detail in ("HTTP 403 {\"message\":\"Invalid key\"}",
+                       "HTTP 404 {\"message\":\"Bucket not found\"}",
+                       "HTTP 500 internal error"):
+            self.assertFalse(publish._too_large(detail), detail)
+
+
+class TestCompressedCopy(unittest.TestCase):
+    """No real ffmpeg here -- these check the contract around it: a missing
+    binary or a failed encode reports cleanly and yields no path, and the
+    context manager never leaves a file behind."""
+
+    def test_a_missing_ffmpeg_yields_none_and_a_message(self):
+        with mock.patch.object(publish.subprocess, "run",
+                                side_effect=FileNotFoundError):
+            with publish._compressed_copy("in.mp4", 23) as (path, detail):
+                self.assertIsNone(path)
+                self.assertIn("PATH", detail)
+
+    def test_a_failed_encode_yields_none_and_the_stderr(self):
+        err = subprocess.CalledProcessError(1, ["ffmpeg"], stderr="bad input\n")
+        with mock.patch.object(publish.subprocess, "run", side_effect=err):
+            with publish._compressed_copy("in.mp4", 23) as (path, detail):
+                self.assertIsNone(path)
+                self.assertIn("bad input", detail)
+
+    def test_the_temp_file_is_gone_after_the_block_exits(self):
+        captured = {}
+
+        def fake_run(cmd, **kwargs):
+            captured["path"] = cmd[-1]
+            with open(cmd[-1], "wb") as f:
+                f.write(b"fake mp4 bytes")
+
+        with mock.patch.object(publish.subprocess, "run", side_effect=fake_run):
+            with publish._compressed_copy("in.mp4", 23) as (path, size):
+                self.assertTrue(os.path.exists(path))
+                self.assertEqual(size, len(b"fake mp4 bytes"))
+        self.assertFalse(os.path.exists(captured["path"]))
 
 
 class TestDotenv(unittest.TestCase):

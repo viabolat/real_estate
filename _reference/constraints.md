@@ -56,3 +56,10 @@ reasoning stops them being reintroduced.
   inherits its logo — which is the normal case — reported `logo blank/missing`
   forever. Any new asset check in `status.py` must read the merged config, not the
   listing's file alone.
+- The Supabase project caps a single Storage upload at roughly 50MB — confirmed
+  via the Storage API's own bucket record, which has no per-bucket
+  `file_size_limit` override, so this is the platform default and not something a
+  bucket setting can raise. A two-minute 720p `sample_` cut at `CRF 18` routinely
+  exceeds it. `publish.py` re-encodes a smaller copy and retries rather than
+  failing — see
+  [`an-oversized-upload-compresses-a-review-copy`](../_rules/an-oversized-upload-compresses-a-review-copy.md).

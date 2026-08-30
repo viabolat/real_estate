@@ -134,6 +134,18 @@ Two things this file does that make_tour.py cannot:
   run a video build without asking" is deliberately narrowed; the interactive
   flow above is unchanged, byte for byte, whenever --auto is not the argument
   typed.
+
+  The logo is the one branding pick --auto does NOT leave unset the way it
+  leaves music unset. questions()'s own picker still skips outright -- choosing
+  among several unrelated marks in global_assets/logos/ stays a human call --
+  but a brokerage's OWN mark sits at a fixed, predictable path,
+  global_assets/logos/<brand>.png, the same slug as the agents/<brand> folder.
+  That one match is not a guess, so --auto adopts it the moment the file
+  exists and saves it as the brand default. When it does not exist -- and
+  cfg["logo"] has no other value that resolves either -- the listing halts,
+  the same shape as the phone and floor-plan checks: printed, nothing built,
+  the rest of the batch keeps going. Add the file at that path, or force the
+  type-only card through once with --ignore-missing-logo-check.
 """
 
 import glob
@@ -525,7 +537,10 @@ def questions(listing_dir, brand, cfg, auto=False):
     exceptions: each only fires when nothing already resolves, and guessing
     which brokerage mark or which track is a choice only a human should make,
     so under auto they are skipped outright and cfg["logo"]/cfg["music"] are
-    left unset rather than defaulted.
+    left unset rather than defaulted here. (cfg["logo"] may already be set by
+    the time this runs under --auto -- _auto_build_one resolves a brand's own
+    global_assets/logos/<brand>.png before calling this, which is a single
+    unambiguous match rather than the guess this picker skips.)
     """
     rule("What goes on screen")
     was_brokerage = cfg.get("brokerage")
@@ -1177,10 +1192,11 @@ def auto_targets(scope=None):
             if stage(os.path.join(LISTINGS_ROOT, brand, name)) == "sample"]
 
 
-def _auto_build_one(brand, listing_dir, ignore_floorplan, ignore_missing_phone=False):
-    """Run one listing through --auto: the phone check, contact sheet, the
-    floor-plan check, then -- if clean -- the 3 sample_ cuts. Returns "built" /
-    "flagged" / "error".
+def _auto_build_one(brand, listing_dir, ignore_floorplan, ignore_missing_phone=False,
+                     ignore_missing_logo=False):
+    """Run one listing through --auto: the logo lookup, the phone check,
+    contact sheet, the floor-plan check, then -- if clean -- the 3 sample_
+    cuts. Returns "built" / "flagged" / "error".
     """
     rule(os.path.relpath(listing_dir, ROOT))
     if not photos(listing_dir):
@@ -1188,6 +1204,23 @@ def _auto_build_one(brand, listing_dir, ignore_floorplan, ignore_missing_phone=F
         return "error"
     offer_prefixes(listing_dir, auto=True)
     cfg = load_config(listing_dir, brand)
+
+    # reason: questions()'s own logo picker asks a human to choose among
+    # several unrelated marks in global_assets/logos/, which is why auto=True
+    # skips it outright -- guessing among several is not this brand's call to
+    # make silently. But a brokerage's OWN mark sits at a fixed, predictable
+    # path -- global_assets/logos/<brand>.png, the same slug as the
+    # agents/<brand> folder it is under -- so that one match is not a guess.
+    # Adopt it here, before preflight, so the preflight report reflects it,
+    # and save it as the brand default the same way a confirmed brokerage
+    # name is saved below in questions(). See
+    # _rules/auto-picks-up-the-brand-logo-by-slug.md.
+    if not resolve(listing_dir, cfg.get("logo")):
+        brand_logo = asset_path("logo", f"{brand}.png")
+        if resolve(listing_dir, brand_logo):
+            cfg["logo"] = brand_logo
+            save_brand(brand, {**load_brand(brand), "logo": brand_logo})
+
     report = preflight(listing_dir, cfg)
     cfg = questions(listing_dir, brand, cfg, auto=True)
 
@@ -1208,6 +1241,17 @@ def _auto_build_one(brand, listing_dir, ignore_floorplan, ignore_missing_phone=F
             f"{brand}/{os.path.basename(listing_dir)}\n"
             "  If the number is genuinely unavailable, force through once "
             "with --ignore-missing-phone-check.")
+        return "flagged"
+
+    if not ignore_missing_logo and not resolve(listing_dir, cfg.get("logo")):
+        say(f"\n  Halted -- no logo for {brand} at "
+            f"global_assets/logos/{brand}.png.\n"
+            f"  The card would fall back to the type-only design.\n"
+            f"  Add the file there, then rerun:\n"
+            f"    python3 tour.py --auto "
+            f"{brand}/{os.path.basename(listing_dir)}\n"
+            "  If this brokerage genuinely has no mark, force the "
+            "type-only card through once with --ignore-missing-logo-check.")
         return "flagged"
 
     if run_build(listing_dir, ["--contact-sheet"]) != 0:
@@ -1247,14 +1291,17 @@ def _auto_build_one(brand, listing_dir, ignore_floorplan, ignore_missing_phone=F
 def auto_flow(args):
     """python3 tour.py --auto [brand/listing] [--ignore-floorplan-check]
                              [--ignore-missing-phone-check]
+                             [--ignore-missing-logo-check]
 
     Imports pending dumps, then walks every listing with no cuts yet straight
     through to the 3 sample_ cuts -- stopping a listing only on a photo the
-    floor-plan detector flags, or a blank agent_phone. See the module
-    docstring's --auto paragraph for what this deliberately does not do.
+    floor-plan detector flags, a blank agent_phone, or a brand with no logo at
+    global_assets/logos/<brand>.png. See the module docstring's --auto
+    paragraph for what this deliberately does not do.
     """
     ignore_floorplan = "--ignore-floorplan-check" in args
     ignore_missing_phone = "--ignore-missing-phone-check" in args
+    ignore_missing_logo = "--ignore-missing-logo-check" in args
     scope = next((a for a in args if not a.startswith("--")), None)
     if ignore_floorplan and not scope:
         raise SystemExit(
@@ -1264,6 +1311,10 @@ def auto_flow(args):
         raise SystemExit(
             "--ignore-missing-phone-check needs a brand/listing scope:\n"
             "    python3 tour.py --auto <brand>/<listing> --ignore-missing-phone-check")
+    if ignore_missing_logo and not scope:
+        raise SystemExit(
+            "--ignore-missing-logo-check needs a brand/listing scope:\n"
+            "    python3 tour.py --auto <brand>/<listing> --ignore-missing-logo-check")
 
     pending = unimported_dumps()
     if pending:
@@ -1281,7 +1332,7 @@ def auto_flow(args):
     built = flagged = errors = 0
     for brand, listing_dir in targets:
         result = _auto_build_one(brand, listing_dir, ignore_floorplan,
-                                 ignore_missing_phone)
+                                 ignore_missing_phone, ignore_missing_logo)
         built += result == "built"
         flagged += result == "flagged"
         errors += result == "error"

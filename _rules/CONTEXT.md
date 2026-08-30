@@ -53,7 +53,7 @@ reading *prose only* is a rule nothing enforces. That is the list worth shrinkin
 
 <!-- RULE-TABLE:start -->
 
-31 rules.
+33 rules.
 
 | Area | Rule | Guarded by |
 |---|---|---|
@@ -73,6 +73,7 @@ reading *prose only* is a rule nothing enforces. That is the list worth shrinkin
 | build | [`draft.mp4` is not a deliverable and does not go in `out/`](draft-mp4-is-not-a-deliverable.md) | `tests/test_naming.py` |
 | build | [`vertical()` takes two sources per family, and that is not redundancy](vertical-takes-two-sources-per-family.md) | `tests/test_card_isolation.py` |
 | card | [`--auto` halts a listing with no `agent_phone`, the same way it halts on a floor plan](auto-halts-on-a-blank-agent-phone.md) | `tests/test_auto_flow.py` |
+| card | [`--auto` adopts a brand's own logo by slug, and halts rather than ship the type-only card silently](auto-picks-up-the-brand-logo-by-slug.md) | `tests/test_auto_flow.py` |
 | card | [Branding is held off wherever the card is on screen, and the watermark is not](branding-is-held-off-under-the-card.md) | `tests/test_finish_window.py` |
 | card | [The card never rides in `work_silent.mp4`](the-card-never-rides-in-work-silent.md) | `tests/test_card_isolation.py` |
 | card | [The lower third does not say what the card already says](the-lower-third-does-not-repeat-the-card.md) | *prose only* |
@@ -80,6 +81,7 @@ reading *prose only* is a rule nothing enforces. That is the list worth shrinkin
 | delivery | [Never send a `sample_` file as a deliverable, and never send a `tour_` file before sign-off](never-cross-the-sample-tour-boundary.md) | `tests/test_naming.py`<br>`tests/test_publish_gate.py` |
 | publishing | [A publish never deletes the local cut](a-publish-never-deletes-the-local-cut.md) | `tests/test_publish_gate.py` |
 | publishing | [A publish verifies against the storage API, never the public URL](a-publish-verifies-against-the-storage-api.md) | *prose only* |
+| publishing | [An upload over the bucket's cap gets a compressed copy, not a silent failure](an-oversized-upload-compresses-a-review-copy.md) | `tests/test_publish_gate.py` |
 | publishing | [Only `sample_` cuts publish, and `make_tour.py` never uploads](only-sample-cuts-publish.md) | `tests/test_publish_gate.py` |
 | outreach | [The draft is written automatically; the send is not, and never becomes a flag](the-draft-is-automatic-the-send-is-not.md) | `tests/test_outreach_draft.py` |
 | outreach | [The recorded link is the last field on its line, and nothing is ever appended after it](the-recorded-link-is-the-last-field.md) | `tests/test_outreach_draft.py` |
@@ -89,6 +91,6 @@ reading *prose only* is a rule nothing enforces. That is the list worth shrinkin
 | pii | [The PII gate runs itself, and an unwired gate is reported, never assumed](the-pii-gate-runs-itself.md) | `tests/test_hook_wired.py` |
 | docs | [Docs do not go stale](docs-do-not-go-stale.md) | `tests/test_photo_order.py` |
 
-Unguarded rules: 6 of 31.
+Unguarded rules: 6 of 33.
 
 <!-- RULE-TABLE:end -->
