@@ -163,6 +163,7 @@ never writes it — doing so would lock the build out of its own folder.
 python3 tour.py --auto                                # every pending dump/listing
 python3 tour.py --auto <brand>/<listing>               # just one -- also the resume, below
 python3 tour.py --auto <brand>/<listing> --ignore-floorplan-check   # force a false positive through
+python3 tour.py --auto <brand>/<listing> --ignore-missing-phone-check   # phone is genuinely unavailable
 ```
 Imports every pending dump, then answers the same question set above from
 `config.json`/`brand.json` alone — never `input()` — for every listing with no
@@ -171,15 +172,19 @@ a brokerage with an unresolved logo or no `music.mp3` builds with neither, the
 same way a hand-run build with nothing set does. It builds the contact sheet,
 skips the draft rung entirely, and goes straight to the three `sample_` cuts.
 
-Before it stitches anything, it scores every photo in `photos/` for the one
-judgment call no default can safely make: whether it is a floor plan or
-whole-house layout image, which must never appear in the video. A hit halts
-just that listing — the file is named, never deleted or renamed — and the rest
-of the batch keeps going. Delete the file by hand and rerun `--auto`, bare or
-scoped to that `brand/listing`; nothing about the halt is written anywhere, so
-re-running from the top is the entire resume mechanism. A false positive can
-be forced through once with `--ignore-floorplan-check`, which needs a scope —
-it is never allowed to waive the check for a whole batch.
+Before it stitches anything, it checks two things no default can safely
+answer. First, whether `agent_phone` is blank — Zillow does not always expose
+one, especially for a team listing, and a card with no way to call back
+defeats the point of sending the video. Second, whether a photo in `photos/`
+is a floor plan or whole-house layout image, which must never appear in the
+video. A hit on either halts just that listing — printed, never guessed at or
+deleted — and the rest of the batch keeps going. Fix `config.json` or delete
+the file by hand and rerun `--auto`, bare or scoped to that `brand/listing`;
+nothing about either halt is written anywhere, so re-running from the top is
+the entire resume mechanism. A false positive on either check can be forced
+through once, per listing, with `--ignore-missing-phone-check` or
+`--ignore-floorplan-check` — both need a scope, and neither is ever allowed to
+waive its check for a whole batch.
 
 It never builds a draft and never publishes. Checking the mp4 in `out/`, then
 running `publish.py` from the listing folder (above), stays the last manual

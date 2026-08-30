@@ -115,13 +115,18 @@ Two things this file does that make_tour.py cannot:
   --auto answers the same short question set from config.json/brand.json alone
   -- never input() -- and walks every listing that has no cuts yet straight
   through to the 3 sample_ cuts, skipping the draft rung entirely. Before it
-  stitches anything it scores every photo in photos/ for the one judgment call
-  no default can safely make: whether it is a floor plan or whole-house layout
-  image, which must never appear in the video (PROGRESS.md 4.2). A hit halts
-  that one listing -- printed, never deleted or renamed -- and the rest of the
-  batch keeps going. Delete the file by hand and rerun --auto, bare or scoped
-  to that brand/listing, to pick back up; nothing about that halt is recorded
-  anywhere, so re-running is the entire resume mechanism. It never builds a
+  stitches anything it checks two things a silent default cannot safely
+  answer: whether agent_phone is blank -- Zillow does not always expose one,
+  especially for a team listing, and a card with no way to reach anyone
+  defeats the point of sending the video -- and whether a photo in photos/ is
+  a floor plan or whole-house layout image, which must never appear in the
+  video (PROGRESS.md 4.2). A hit on either halts that one listing -- printed,
+  never guessed at or deleted -- and the rest of the batch keeps going. Fix
+  config.json or delete the photo by hand and rerun --auto, bare or scoped to
+  that brand/listing, to pick back up; nothing about either halt is recorded
+  anywhere, so re-running is the entire resume mechanism. A false positive on
+  either check can be forced through once, per listing, with
+  --ignore-missing-phone-check or --ignore-floorplan-check. It never builds a
   draft and never publishes -- the sample cuts already are the reviewed
   artifact, and publish.py's email draft can only be written from an
   already-uploaded public URL, so auto-publishing would skip the human look
@@ -1172,10 +1177,10 @@ def auto_targets(scope=None):
             if stage(os.path.join(LISTINGS_ROOT, brand, name)) == "sample"]
 
 
-def _auto_build_one(brand, listing_dir, ignore_floorplan):
-    """Run one listing through --auto: contact sheet, the floor-plan check,
-    then -- if clean -- the 3 sample_ cuts. Returns "built" / "flagged" /
-    "error".
+def _auto_build_one(brand, listing_dir, ignore_floorplan, ignore_missing_phone=False):
+    """Run one listing through --auto: the phone check, contact sheet, the
+    floor-plan check, then -- if clean -- the 3 sample_ cuts. Returns "built" /
+    "flagged" / "error".
     """
     rule(os.path.relpath(listing_dir, ROOT))
     if not photos(listing_dir):
@@ -1185,6 +1190,25 @@ def _auto_build_one(brand, listing_dir, ignore_floorplan):
     cfg = load_config(listing_dir, brand)
     report = preflight(listing_dir, cfg)
     cfg = questions(listing_dir, brand, cfg, auto=True)
+
+    # reason: under auto=True, ask("Agent phone", ...) above returns cfg's
+    # existing default in silence -- the whole point of --auto is to never
+    # stop and ask. A blank agent_phone (Zillow does not always expose one,
+    # especially for a team listing) would otherwise ride straight through to
+    # a card and lower third with no way to reach anyone. Catch it here,
+    # before any encode, the same way the floor-plan check catches a photo a
+    # human needs to look at.
+    if not ignore_missing_phone and not (cfg.get("agent_phone") or "").strip():
+        rel_config = os.path.relpath(os.path.join(listing_dir, "config.json"), ROOT)
+        say(f"\n  Halted -- no agent phone number in {rel_config}.\n"
+            f"  The card and lower third would show no way to reach "
+            f"{cfg.get('agent_name') or 'this agent'}.\n"
+            f"  Add \"agent_phone\" there, then rerun:\n"
+            f"    python3 tour.py --auto "
+            f"{brand}/{os.path.basename(listing_dir)}\n"
+            "  If the number is genuinely unavailable, force through once "
+            "with --ignore-missing-phone-check.")
+        return "flagged"
 
     if run_build(listing_dir, ["--contact-sheet"]) != 0:
         say("  The contact sheet failed.")
@@ -1222,18 +1246,24 @@ def _auto_build_one(brand, listing_dir, ignore_floorplan):
 
 def auto_flow(args):
     """python3 tour.py --auto [brand/listing] [--ignore-floorplan-check]
+                             [--ignore-missing-phone-check]
 
     Imports pending dumps, then walks every listing with no cuts yet straight
     through to the 3 sample_ cuts -- stopping a listing only on a photo the
-    floor-plan detector flags. See the module docstring's --auto paragraph for
-    what this deliberately does not do.
+    floor-plan detector flags, or a blank agent_phone. See the module
+    docstring's --auto paragraph for what this deliberately does not do.
     """
     ignore_floorplan = "--ignore-floorplan-check" in args
+    ignore_missing_phone = "--ignore-missing-phone-check" in args
     scope = next((a for a in args if not a.startswith("--")), None)
     if ignore_floorplan and not scope:
         raise SystemExit(
             "--ignore-floorplan-check needs a brand/listing scope:\n"
             "    python3 tour.py --auto <brand>/<listing> --ignore-floorplan-check")
+    if ignore_missing_phone and not scope:
+        raise SystemExit(
+            "--ignore-missing-phone-check needs a brand/listing scope:\n"
+            "    python3 tour.py --auto <brand>/<listing> --ignore-missing-phone-check")
 
     pending = unimported_dumps()
     if pending:
@@ -1250,7 +1280,8 @@ def auto_flow(args):
 
     built = flagged = errors = 0
     for brand, listing_dir in targets:
-        result = _auto_build_one(brand, listing_dir, ignore_floorplan)
+        result = _auto_build_one(brand, listing_dir, ignore_floorplan,
+                                 ignore_missing_phone)
         built += result == "built"
         flagged += result == "flagged"
         errors += result == "error"

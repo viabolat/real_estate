@@ -16,8 +16,12 @@ may ever delete or move a photo. Concretely:
     stays a manual, by-hand step.
   * --ignore-floorplan-check is read once from argv and must never land in
     what save_config()/save_state() write to disk.
+  * a blank agent_phone halts the same way a flagged photo does -- checked
+    before any encode -- and --ignore-missing-phone-check is the same kind of
+    one-shot, scope-required override.
 """
 import ast
+import json
 import os
 import shutil
 import sys
@@ -245,6 +249,10 @@ class AutoBuildOneIntegration(unittest.TestCase):
         os.makedirs(os.path.join(self.listing_dir, "photos"))
         for name in ("010_a.jpg", "020_b.jpg"):
             open(os.path.join(self.listing_dir, "photos", name), "wb").close()
+        # A phone is already on file here -- these tests exercise the
+        # floor-plan halt, not the phone one. See MissingPhoneHaltsAuto below.
+        with open(os.path.join(self.listing_dir, "config.json"), "w") as f:
+            json.dump({"agent_phone": "6175551234"}, f)
 
         self.prev = (self.tour.LISTINGS_ROOT, self.tour.preflight,
                      self.tour.run_build, self.tour.floorplan.detect)
@@ -303,15 +311,88 @@ class AutoBuildOneIntegration(unittest.TestCase):
         self.assertNotIn("ignore-floorplan", blob)
 
 
+class MissingPhoneHaltsAuto(unittest.TestCase):
+    """A blank agent_phone halts the same way a flagged photo does -- before
+    any encode, printed rather than guessed at -- because Zillow does not
+    always expose one (especially for a team listing), and a card with no way
+    to reach anyone defeats the point of sending the video. See
+    _auto_build_one and PROGRESS.md.
+    """
+
+    def setUp(self):
+        self.tour = helpers.tour_module()
+        self.tmp = tempfile.mkdtemp(prefix="missing_phone_")
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.agents = os.path.join(self.tmp, "agents")
+        self.listing_dir = os.path.join(self.agents, "compass", "1_main_st")
+        os.makedirs(os.path.join(self.listing_dir, "photos"))
+        open(os.path.join(self.listing_dir, "photos", "010_a.jpg"), "wb").close()
+        # No config.json at all -- agent_phone is blank, same as a fresh scrape
+        # that never found one.
+
+        self.prev = (self.tour.LISTINGS_ROOT, self.tour.preflight,
+                     self.tour.run_build, self.tour.floorplan.detect)
+        self.tour.LISTINGS_ROOT = self.agents
+        self.tour.preflight = lambda listing_dir, cfg: {"1080p": [], "720p": []}
+        self.tour.floorplan.detect = lambda paths: []
+        self.build_calls = []
+        self.tour.run_build = lambda listing_dir, flags: (
+            self.build_calls.append(list(flags)), 0)[1]
+        self.addCleanup(self._restore)
+
+    def _restore(self):
+        (self.tour.LISTINGS_ROOT, self.tour.preflight, self.tour.run_build,
+         self.tour.floorplan.detect) = self.prev
+
+    def test_blank_agent_phone_halts_before_any_build(self):
+        result = self.tour._auto_build_one("compass", self.listing_dir,
+                                           ignore_floorplan=False)
+        self.assertEqual(result, "flagged")
+        self.assertEqual(self.build_calls, [],
+                         "a blank agent_phone must not reach the contact sheet")
+
+    def test_ignore_missing_phone_check_proceeds_to_the_sample_build(self):
+        result = self.tour._auto_build_one("compass", self.listing_dir,
+                                           ignore_floorplan=False,
+                                           ignore_missing_phone=True)
+        self.assertEqual(result, "built")
+        self.assertEqual(self.build_calls[0], ["--contact-sheet"])
+        self.assertIn("--samples-only", self.build_calls[1])
+
+    def test_ignore_missing_phone_check_never_reaches_saved_config_or_state(self):
+        saved = {}
+        prev_save_config, prev_save_state = self.tour.save_config, self.tour.save_state
+        self.tour.save_config = lambda listing_dir, cfg: saved.setdefault(
+            "config", dict(cfg))
+        self.tour.save_state = lambda listing_dir, rung, cfg, preset: saved.setdefault(
+            "state", dict(cfg))
+        try:
+            self.tour._auto_build_one("compass", self.listing_dir,
+                                      ignore_floorplan=False,
+                                      ignore_missing_phone=True)
+        finally:
+            self.tour.save_config = prev_save_config
+            self.tour.save_state = prev_save_state
+        blob = repr(saved).lower()
+        self.assertNotIn("ignore_missing_phone", blob)
+        self.assertNotIn("ignore-missing-phone", blob)
+
+
 class AutoFlowRequiresAScopeForTheOverride(unittest.TestCase):
     """--ignore-floorplan-check with no brand/listing would silently waive the
     floor-plan check for an entire batch -- refuse rather than allow that.
+    Same reasoning, same rule, for --ignore-missing-phone-check.
     """
 
     def test_bare_override_with_no_scope_refuses(self):
         tour = helpers.tour_module()
         with self.assertRaises(SystemExit):
             tour.auto_flow(["--ignore-floorplan-check"])
+
+    def test_bare_missing_phone_override_with_no_scope_refuses(self):
+        tour = helpers.tour_module()
+        with self.assertRaises(SystemExit):
+            tour.auto_flow(["--ignore-missing-phone-check"])
 
 
 if __name__ == "__main__":

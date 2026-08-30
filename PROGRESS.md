@@ -97,6 +97,32 @@ sweep, so no listing's cuts can end up built twice.
 `tests/test_floorplan.py` and `tests/test_auto_flow.py` guard both halves. 212
 tests, ~2s, no ffmpeg. `python3 check_pii.py`: clean.
 
+### 2026-08-30 — The first `--auto` listing shipped with no way to call back
+
+The first real listing run through `--auto` end to end — imported, built,
+published — belonged to a team agent whose `leads.csv` row had no
+`agent_phone` (Zillow does not always expose one for a team listing), so
+`questions(auto=True)` silently kept the blank default, same as it silently
+keeps any other already-known value. The card and lower third built and
+published with an address, a name and a brokerage, and no number. The
+operator caught it after the sample cuts were already on the public bucket
+and asked for a way to catch this before it ships again.
+
+`_auto_build_one()` now checks `cfg.get("agent_phone")` right after
+`questions(auto=True)`, before the contact sheet or any encode — the cheapest
+possible point to stop. A blank phone halts that one listing exactly the way a
+flagged floor-plan photo does: printed, not guessed at, the rest of the batch
+keeps going, and nothing about the halt is recorded — filling in
+`agent_phone` in `config.json` and re-running `--auto` (bare or scoped) is the
+entire resume mechanism. `--ignore-missing-phone-check` is the same shape as
+`--ignore-floorplan-check`: a one-shot override that always needs a
+`brand/listing` scope and never reaches `save_config()`/`save_state()`.
+
+This was a same-mechanism extension, not a new pattern — the phone check and
+the floor-plan check now share one halt/resume story in `_auto_build_one()`.
+See [`auto-halts-on-a-blank-agent-phone`](_rules/auto-halts-on-a-blank-agent-phone.md).
+`tests/test_auto_flow.py`: 216 tests, ~2s, no ffmpeg. `python3 check_pii.py`: clean.
+
 ### 2026-08-30 — The review rungs clear themselves, and a view of agents/ by agent
 
 **The ask, in the operator's words.** *"we have to have the codebase after the 3
