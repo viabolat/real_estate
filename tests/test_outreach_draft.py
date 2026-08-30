@@ -131,15 +131,15 @@ class TestDraft(unittest.TestCase):
         self.assertIn("agent_first", missing)
         self.assertIn("{agent_first}", text)
 
-    def test_the_draft_lands_in_outreach_and_never_in_a_listing(self):
+    def test_the_draft_lands_inside_the_listing_agent_folder(self):
+        """reason: the draft used to land in a flat outreach/drafts/ tree, apart
+        from the out/ cuts that produced it. It now lands right beside them, so
+        agents/<brand>/<listing>/<agent>/ holds everything for that property."""
         d = self.listing(agent_name="Sean O'Brien", address="46 Beacon St #5")
-        with tempfile.TemporaryDirectory() as out:
-            with mock.patch.object(publish, "DRAFTS", os.path.join(out, "drafts")):
-                path, _ = publish.write_draft(d, "corcoran", "46_beacon_5", URL)
-            self.assertTrue(path.startswith(out), path)
-            self.assertEqual(os.path.basename(path), "corcoran__46_beacon_5.txt")
-        self.assertNotIn(os.path.join("agents", ""), publish.DRAFTS)
-        self.assertTrue(publish.DRAFTS.endswith(os.path.join("outreach", "drafts")))
+        path, _ = publish.write_draft(d, URL)
+        self.assertEqual(path, os.path.join(d, publish.DRAFT_FILENAME))
+        self.assertEqual(os.path.basename(path), "outreach_draft.txt")
+        self.assertTrue(os.path.isfile(path))
 
     def test_nothing_in_publish_sends_mail(self):
         """PROGRESS.md 5.1: drafting is automatic, sending never is."""

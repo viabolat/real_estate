@@ -17,8 +17,9 @@ out/*.mp4` loop at the end of a build, would put the unwatermarked
 the two families exist to hold. Publishing also stays out of `make_tour.py` for
 three separate reasons — it is stdlib + ffmpeg only, it holds `.build.lock` through
 a six-minute encode where a network timeout would fail a good build, and it is
-contractually blind to the `agents/<brand>/<listing>` layout that a collision-free
-remote path needs. The remote path is `<brand>/<listing>/<file>`, never the bare
+contractually blind to the `agents/<brand>/<listing>/<agent>` layout that a
+collision-free remote path needs. The remote path is `<brand>/<listing>/<file>`,
+agent-blind on purpose — never the bare
 filename: with `x-upsert` a flat bucket lets one listing silently overwrite
 another's, which is the collision `output_prefix` already solved locally.
 

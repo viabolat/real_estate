@@ -40,8 +40,8 @@ the one thing standing between it and a deliverable — then offers four things:
 | **4** | Brand settings | what a brokerage sets once, and re-applying it |
 
 Which dumps are pending is worked out by checking whether
-`agents/<brand>/<listing>` exists. There is no marker file and nothing to tidy
-between runs — delete a listing folder and its dump is offered again.
+`agents/<brand>/<listing>/<agent>` exists. There is no marker file and nothing to
+tidy between runs — delete a listing folder and its dump is offered again.
 
 `python3 tour.py --build` skips the screen when you already know the listing.
 
@@ -213,9 +213,9 @@ tells you to read the sheet yourself, which is the check that actually matters.
 
 ### Send the client a review link
 ```bash
-cd agents/<brand>/<listing>
-python3 ../../../publish.py --dry-run   # what would go public, and the exact URLs
-python3 ../../../publish.py             # the same, then asks, then uploads
+cd agents/<brand>/<listing>/<agent>
+python3 ../../../../publish.py --dry-run   # what would go public, and the exact URLs
+python3 ../../../../publish.py             # the same, then asks, then uploads
 ```
 `tour.py` offers this as rung 4 straight after a **sample** build — that is the
 run whose whole purpose is to be reviewed. After a delivery-only run it prints the
@@ -257,7 +257,8 @@ the copy that leaves the machine is smaller. See
 [`an-oversized-upload-compresses-a-review-copy`](_rules/an-oversized-upload-compresses-a-review-copy.md).
 
 **The email writes itself.** Every confirmed publish also leaves a ready-to-send
-draft at `outreach/drafts/<brand>__<listing>.txt` — the wording from
+draft at `agents/<brand>/<listing>/<agent>/outreach_draft.txt` — right beside the
+photos and `out/` cuts that produced it — with the wording from
 `outreach/template.txt`, the agent's first name and the address from the listing's
 `config.json`, and the `sample_branded` link. Open it, read it, paste it into your
 mail client. `--dry-run` prints the draft instead of writing it, so you can see
@@ -392,7 +393,7 @@ ones it found — check those two lines if branding doesn't appear.
 Supported photo extensions: `.jpg .jpeg .png .webp .tif .tiff .bmp .heic`
 
 **Run from the folder that holds `photos/`** — normally a listing folder,
-`agents/<brand>/<listing>/`. Every path in the script is relative to your working
+`agents/<brand>/<listing>/<agent>/`. Every path in the script is relative to your working
 directory. The one exception: an asset path that does not resolve there is retried
 beside `make_tour.py`, which is what lets `viabolat.png` and the shared
 `global_assets/` library work from any listing folder without being copied in.
@@ -476,7 +477,7 @@ By hand:
 ```bash
 # in the listing folder, config.json:
 #   {"brand_persistent": false, "brand_in": 2.0, "brand_out": 8.5}
-python3 ../../../make_tour.py --finish-only
+python3 ../../../../make_tour.py --finish-only
 ```
 `brand_out` must be greater than `brand_in` or the build refuses to start — an
 inverted window is a valid filtergraph in which the overlay simply never appears.
@@ -489,7 +490,7 @@ appears over a card in either position.
 ```bash
 # in the listing folder, config.json:
 #   {"card": "both", "card_seconds": 5.0}
-python3 ../../../make_tour.py --keep-work    # full rebuild required
+python3 ../../../../make_tour.py --keep-work    # full rebuild required
 ```
 `card` is `none`, `intro`, `outro` or `both`; `outro` is what `tour.py` writes on a
 new listing. The card is drawn by ffmpeg from `address`, `agent_name`,
@@ -510,7 +511,7 @@ lengths.
 ```bash
 # in the listing folder, config.json:
 #   {"address": "46 Beacon St, Unit 5", "agent_name": "...", "agent_phone": "..."}
-python3 ../../../make_tour.py --finish-only
+python3 ../../../../make_tour.py --finish-only
 ```
 No Canva export, no PNG. The lower third is drawn from those three fields, and any
 of them may be blank — blanks are dropped and the rest close up. A

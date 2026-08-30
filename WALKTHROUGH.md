@@ -32,9 +32,9 @@ npx vercel --prod
 file in `scraper/dumps/`. One listing per file.
 
 > Already have a folder of photos that never came from a scrape? Drop it in as
-> `agents/<brand>/<listing>/photos/` and skip to **Step 8** — `tour.py` will offer
-> it and ask for the address, agent and phone itself. The roll-up marks it
-> *unverifiable* and nothing renames it: the scrape is the only thing that names
+> `agents/<brand>/<listing>/<agent>/photos/` and skip to **Step 8** — `tour.py`
+> will offer it and ask for the address, agent and phone itself. The roll-up marks
+> it *unverifiable* and nothing renames it: the scrape is the only thing that names
 > folders, and it cannot name a listing it has no row for.
 
 **Step 5.** Start the tool:
@@ -49,7 +49,8 @@ python3 tour.py
 
 **Step 8.** Run `python3 tour.py` again and choose **1. Build a tour**.
 
-**Step 9.** Pick the brand, then the listing. Answer the questions it asks.
+**Step 9.** Pick the brand, then the listing, then the agent. Answer the questions
+it asks.
 
 **Step 10.** Work through the three rungs, confirming each one:
 
@@ -63,8 +64,8 @@ python3 tour.py
 **Step 11.** At the publish prompt, answer **yes**. Review the file list and the
 URLs, and confirm.
 
-**Step 12.** Open `outreach/drafts/<brand>__<listing>.txt`, read it, and paste it
-into your mail client. The link is already in it. Send.
+**Step 12.** Open `agents/<brand>/<listing>/<agent>/outreach_draft.txt`, read it,
+and paste it into your mail client. The link is already in it. Send.
 
 `python3 status.py` now reads `sample published -- awaiting sign-off` for this
 listing. If the client never replies, nothing further is spent on it.

@@ -10,14 +10,15 @@ gallery -- just parse the text and download.
 
 Photos land in the build tree, not beside this script:
 
-    agents/<broker_name>/<street_address>/photos/
+    agents/<broker_name>/<street_address>/<agent_name>/photos/
 
 which is exactly the layout make_tour.py expects as its working directory, so a
-scrape drops in ready to build with no moving or renaming. Both folder names are
-slugified straight from the same dump fields lead.py writes to the
-broker_name and address columns, so the folder and the CSV row always agree -- the
-scrape is the naming authority and nothing renames these by hand. status.py
-re-checks it on every run.
+scrape drops in ready to build with no moving or renaming. All three folder
+names are slugified straight from the same dump fields lead.py writes to the
+broker_name, address and agent_name columns, so the folder and the CSV row
+always agree -- the scrape is the naming authority and nothing renames these by
+hand. A blank agent name gets the UNASSIGNED_AGENT placeholder rather than a
+silent empty path segment. status.py re-checks it on every run.
 
 Also scaffolds the two config files from the dump, never overwriting either:
 agents/<broker_name>/brand.json (pacing and card defaults; logo and music left
@@ -134,11 +135,20 @@ def jpeg_size(path):
             f.seek(struct.unpack(">H", size)[0] - 2, 1)
 
 
-def target_for(text: str):
-    """(brand, listing) -- the folder this dump scaffolds -- or None if it is not one.
+# reason: an agent-blank dump still has to land somewhere the naming authority
+# can find again. "unknown_brokerage" is the same fallback one line down, for
+# the same reason: a silent empty path segment cannot be told apart from a
+# missing folder, but this placeholder can be searched for and corrected once
+# the real name is known (status.py's drift audit is the correction path).
+UNASSIGNED_AGENT = "unassigned_agent"
 
-    reason: main() derived this pair inline, and tour.py's home screen has to
-    derive the SAME pair to decide whether a dump has already been imported. Two
+
+def target_for(text: str):
+    """(brand, listing, agent) -- the folder this dump scaffolds -- or None if
+    it is not one.
+
+    reason: main() derived this inline, and tour.py's home screen has to derive
+    the SAME tuple to decide whether a dump has already been imported. Two
     copies of the folder-naming decision is a second naming authority, which is
     what _rules/the-scrape-names-the-folders.md forbids, and a near-miss would
     report an imported listing as
@@ -146,13 +156,15 @@ def target_for(text: str):
 
     None is the refusal: with no photo URLs and no address there is nothing to
     name the folder after, and the slug defaults would turn a garbage dump into
-    agents/unknown_brokerage/listing/ -- a folder the naming authority can never
-    match.
+    agents/unknown_brokerage/listing/unassigned_agent/ -- a folder the naming
+    authority can never match.
     """
     address = field(text, "streetAddress")
     if not extract_photo_urls(text) and not address:
         return None
-    return slugify(field(text, "brokerName"), "unknown_brokerage"), slugify(address)
+    return (slugify(field(text, "brokerName"), "unknown_brokerage"),
+            slugify(address),
+            slugify(field(text, "agentName"), UNASSIGNED_AGENT))
 
 
 def report_resolution(out_dir):
@@ -304,8 +316,9 @@ def main():
     # --out-dir the operator has pointed us somewhere arbitrary and there is no
     # agents/<broker>/<listing> above it to write a brand.json into.
     if not args.out_dir:
-        listing_dir = os.path.dirname(out_dir)
-        scaffold(repo_root, os.path.dirname(listing_dir), listing_dir,
+        listing_dir = os.path.dirname(out_dir)                    # agents/brand/listing/agent
+        brand_dir = os.path.dirname(os.path.dirname(listing_dir))  # agents/brand
+        scaffold(repo_root, brand_dir, listing_dir,
                  broker, address, agent, phone, display_address)
     report_resolution(out_dir)
 

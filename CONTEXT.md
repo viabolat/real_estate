@@ -7,7 +7,7 @@ marker file and no status key in `config.json`.
 
 | # | Stage | Runs | Writes | Gate |
 |---|---|---|---|---|
-| 1 | Scrape | `scraper/run.py` | `leads.csv` row + `agents/<brand>/<listing>/` | photos land, and the resolution verdict is printed before anything is worth building |
+| 1 | Scrape | `scraper/run.py` | `leads.csv` row + `agents/<brand>/<listing>/<agent>/` | photos land, and the resolution verdict is printed before anything is worth building |
 | 2 | Build | `make_tour.py --samples-only` | the three `sample_` cuts in `out/` | the operator walks the three rungs below |
 | 3 | Publish | `publish.py` | the cuts to the review bucket + `outreach/links.csv` + an email draft | **the client signs off.** Nothing is sent by the machine |
 | 4 | Deliver | `make_tour.py --delivery-only` | the three `tour_` cuts in `out/` | the paid deliverable leaves |
@@ -33,7 +33,7 @@ is worth answering on photos that are not yet good enough to build with.
 | Question | Answered by | Never by |
 |---|---|---|
 | Which photos, in what order? | sorting `photos/` filenames | a manifest or an order key |
-| Which dumps are still unimported? | whether `agents/<brand>/<listing>` exists | a marker file |
+| Which dumps are still unimported? | whether `agents/<brand>/<listing>/<agent>` exists | a marker file |
 | Which run is this listing on? | what is in `out/` — nothing / `sample_` / `tour_` | a stage key in `config.json` |
 | Has it been published? | `outreach/links.csv`, read by header name | a marker file |
 | Can the stitch be reused? | `.last_build.json` vs `photo_state()` | assumption |
@@ -67,8 +67,8 @@ state and is still measured from `photos/`.
 plus the scrape-naming drift report — then offers: **1** build a tour, **2** import
 the dumps that have no listing folder yet, **3** publish a review link, **4** brand
 settings. Which dumps are pending is *derived* from whether
-`agents/<brand>/<listing>` exists; there is no marker file and no manifest, for the
-same reason photo order lives in the filename prefix. `--build` skips the screen
+`agents/<brand>/<listing>/<agent>` exists; there is no marker file and no manifest,
+for the same reason photo order lives in the filename prefix. `--build` skips the screen
 when you already know the listing.
 
 ## Two runs, and how the tool knows which one it is on
@@ -122,8 +122,8 @@ reason a sample cut exists, so it appears on `sample_unbranded.mp4` too.
 lower thirds, `viabolat.png`), `agents/<brand>/brand.json`, `outreach/template.txt`,
 `_rules/`, `_reference/`, `IDEA.md`, `STEPS.md`.
 
-**Product** — new every listing: `agents/<brand>/<listing>/` — `photos/`,
-`config.json`, `out/`, and the email draft in `outreach/drafts/`.
+**Product** — new every listing: `agents/<brand>/<listing>/<agent>/` — `photos/`,
+`config.json`, `out/`, and `outreach_draft.txt`, the email draft, right beside them.
 
 `brand.json` is the factory layer for one brokerage. It holds what every listing that
 brokerage owns shares — and **no agent identity**, because a brokerage has many

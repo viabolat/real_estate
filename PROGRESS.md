@@ -20,7 +20,8 @@ Two things do not travel with the repo:
   `brand.json`, and all six output cuts. A fresh clone has code and docs, no listings.
 - **`scraper/leads.csv` is gitignored** — by a repo-level rule, so the protection
   travels with the clone (it was once covered only by a global `*.csv` rule, which
-  does not). It is the **naming authority** — `agents/<slug(broker_name)>/<slug(address)>`
+  does not). It is the **naming authority** —
+  `agents/<slug(broker_name)>/<slug(address)>/<slug(agent_name)>`
   is derived from it, and `status.py` validates every folder against it. Without it,
   `status.py` cannot run the folder-name check and there is nothing to re-derive
   names from.
@@ -42,6 +43,59 @@ for whatever is in flight, which expire on ship) and `.claude/settings.local.jso
 ---
 
 ## 2. BUILT
+
+### 2026-08-30 — `agents/`, `prospects/` and the outreach draft unify under company/address/agent
+
+One property's outputs were scattered three ways: photos and `out/` cuts under
+`agents/<brand>/<listing>/`, a review-view symlink under
+`prospects/<agent>__<phone>/`, and the cold-email draft under
+`outreach/drafts/<brand>__<listing>.txt`. `compass/41_worcester_sq_penthouse` had
+three unrelated places to look for one deliverable.
+
+`agents/<brand>/<listing>` grows a third, scrape-named segment:
+`agents/<brand>/<listing>/<agent>`, sourced the same way as the first two —
+`scraper/photos.py`'s `target_for()` now returns a 3-tuple, with a new
+`UNASSIGNED_AGENT = "unassigned_agent"` placeholder for a blank `agentName`
+(mirrors the existing `"unknown_brokerage"` fallback) rather than a silent empty
+path segment. Every consumer threaded from `(brand, listing)` to
+`(brand, listing, agent)`: `status.py`'s `survey()`/`next_action()`/`audit()`,
+`prospects.py`'s `rebuild()`, `publish.py`'s `remote_path()`/`write_draft()`, and
+every listing-walking function in `tour.py`, including a new `agent_dirs()`
+helper and a third "Agent" pick step in `choose_listing()`.
+
+The flat `outreach/drafts/` tree is retired. The draft now writes to
+`agents/<brand>/<listing>/<agent>/outreach_draft.txt`, beside the `photos/` and
+`out/` that produced it. `publish.py`'s remote bucket layout and
+`outreach/links.csv`'s schema deliberately stay agent-blind
+(`<brand>/<listing>/<file>`) — real `links.csv` rows already reference brands no
+longer present under `agents/` at all, so it is a decoupled historical log, not
+something this restructuring should retrofit. `remote_path()` now validates the
+third segment exists (and fails closed on a stale 2-level leftover path) but
+never includes it in the string it returns; `output_prefix` already keeps two
+agents' identically-named cuts from colliding at the CDN layer.
+
+`prospects/` keeps its shape and its own index key (slugified `agent_name` +
+phone digits) — a different identity than the folder's `<agent>` slug, since the
+two can legitimately run out of step (a folder can still sit on
+`unassigned_agent` while `config.json` already carries the real name). Its
+symlinks now point three levels deep and are named
+`<brand>__<listing>__<agent>`. Correcting a placeholder once the real name is
+known is `status.py`'s existing drift audit, extended to 3-tuples — no new
+rename automation was built for it.
+
+Two pre-existing bugs surfaced by re-reading the affected functions directly,
+not by the original ask, and fixed as part of this change: `tour.py`'s
+`_auto_build_one()` rerun-hint strings were truncating to just the agent segment
+(`os.path.basename(listing_dir)` instead of a full relative path), and
+`brand_settings()`/`reapply_brand()` were reading `config.json` one level too
+shallow, which would have silently reported "nothing to apply" for every
+listing.
+
+Five real listings already on disk were migrated by hand into the new layout.
+See [`the-scrape-names-the-folders`](_rules/the-scrape-names-the-folders.md) and
+[`a-blank-agent-name-gets-a-placeholder-slug`](_rules/a-blank-agent-name-gets-a-placeholder-slug.md).
+`tests/test_naming.py`, `tests/test_auto_flow.py`, `tests/test_home_screen.py`:
+239 tests, ~0.6s, no ffmpeg. `python3 check_pii.py`: clean.
 
 ### 2026-08-30 — An oversized upload compresses a review copy instead of 413ing
 

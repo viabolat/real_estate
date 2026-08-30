@@ -14,11 +14,13 @@ opening three files per listing by hand. With one brokerage that is fine; the
 lead list already covers five.
 
 It also re-checks every folder name against scraper/leads.csv -- the scrape is the
-naming authority for agents/<broker_name>/<address> -- and prints the mv for any
-folder that has drifted off it. A folder with no lead row behind it at all is
-reported separately as unverifiable rather than passing silently: the check keys
-on agent_phone out of config.json, so a folder that never had a config.json was
-exactly the hand-named case it could not see.
+naming authority for agents/<broker_name>/<address>/<agent_name> -- and prints the
+mv for any folder that has drifted off it. A folder with no lead row behind it at
+all is reported separately as unverifiable rather than passing silently: the check
+keys on agent_phone out of config.json, so a folder that never had a config.json was
+exactly the hand-named case it could not see. A blank agent_name scrapes to the
+UNASSIGNED_AGENT placeholder rather than a silent empty path segment; the same
+drift check is how a placeholder gets corrected once the real name is known.
 
 Being the read-only overview, it has to survive whatever is actually in a folder:
 a directory named 01_front.jpg, an unreadable or truncated photo, a broken symlink.
@@ -84,6 +86,7 @@ def _load_scraper():
 
 _photos = _load_scraper()
 jpeg_size, slugify = _photos.jpeg_size, _photos.slugify
+UNASSIGNED_AGENT = _photos.UNASSIGNED_AGENT
 
 
 def _load_publish():
@@ -106,15 +109,16 @@ _publish = _load_publish()
 
 
 def scraped_names():
-    """{normalized agent phone: (brand_slug, listing_slug)} from leads.csv.
+    """{normalized agent phone: (brand_slug, listing_slug, agent_slug)} from leads.csv.
 
     reason: the scrape is the naming authority -- agents/<slug(broker_name)>/
-    <slug(address)>, both columns straight out of leads.csv. Folders were hand-named
-    before that rule existed and drifted (coldwell_banker/2_comm_ave against a lead
-    row reading "Coldwell Banker Realty - Boston" / "2 Commonwealth Ave"). Renaming
-    them once fixes today; checking it on every status run is what keeps it fixed.
-    Matched on agent phone rather than address text, because address formatting
-    varies between the config and the CSV and a phone number does not.
+    <slug(address)>/<slug(agent_name)>, all three columns straight out of
+    leads.csv. Folders were hand-named before that rule existed and drifted
+    (coldwell_banker/2_comm_ave against a lead row reading "Coldwell Banker
+    Realty - Boston" / "2 Commonwealth Ave"). Renaming them once fixes today;
+    checking it on every status run is what keeps it fixed. Matched on agent
+    phone rather than address text, because address formatting varies between
+    the config and the CSV and a phone number does not.
     """
     path = os.path.join(ROOT, "scraper", "leads.csv")
     if not os.path.isfile(path):
@@ -125,7 +129,8 @@ def scraped_names():
             digits = re.sub(r"\D", "", r.get("agent_phone") or "")
             if digits:
                 out[digits] = (slugify(r["broker_name"], "unknown_brokerage"),
-                               slugify(r["address"]))
+                               slugify(r["address"]),
+                               slugify(r.get("agent_name"), UNASSIGNED_AGENT))
     return out
 
 
@@ -287,8 +292,8 @@ def next_action(listing_dir, cfg, n, worst, best, scraped=True, bcfg=None):
         return f"ready to build{tag}{origin}"
     if counts["tour"]:
         return f"delivered, {total} cuts{soft}{origin}"
-    brand = os.path.basename(os.path.dirname(listing_dir))
-    listing = os.path.basename(listing_dir)
+    listing = os.path.basename(os.path.dirname(listing_dir))
+    brand = os.path.basename(os.path.dirname(os.path.dirname(listing_dir)))
     if published(brand, listing):
         return f"sample published -- awaiting sign-off{soft}{origin}"
     return f"sample built -- publish the review link{soft}{origin}"
@@ -314,16 +319,23 @@ def survey():
         bcfg = _json(os.path.join(brand_dir, "brand.json"))
         listed = _dirs(brand_dir)
         if not listed:
-            rows.append((brand, "-", 0, None, None, "no listings yet", bcfg, {}))
+            rows.append((brand, "-", "-", 0, None, None, "no listings yet", bcfg, {}))
         for listing in listed:
-            ld = os.path.join(brand_dir, listing)
-            cfg = _json(os.path.join(ld, "config.json"))
-            n, worst, best = photo_stats(ld)
-            rows.append((brand, listing, n, worst, best,
-                         next_action(ld, cfg, n, worst, best,
-                                     scraped=(brand, listing) in known,
-                                     bcfg=bcfg),
-                         bcfg, cfg))
+            listing_dir = os.path.join(brand_dir, listing)
+            agents = _dirs(listing_dir)
+            if not agents:
+                rows.append((brand, listing, "-", 0, None, None,
+                             "no agent folder -- rerun photos.py", bcfg, {}))
+                continue
+            for agent in agents:
+                ld = os.path.join(listing_dir, agent)
+                cfg = _json(os.path.join(ld, "config.json"))
+                n, worst, best = photo_stats(ld)
+                rows.append((brand, listing, agent, n, worst, best,
+                             next_action(ld, cfg, n, worst, best,
+                                         scraped=(brand, listing, agent) in known,
+                                         bcfg=bcfg),
+                             bcfg, cfg))
     return rows, truth, known
 
 
@@ -338,18 +350,21 @@ def audit(rows, truth, known):
     unverifiable separately rather than letting absence read as agreement.
     """
     drift, unverifiable = [], []
-    for brand, listing, _n, _w, _b, _a, _bc, cfg in rows:
-        if listing == "-":                      # "no listings yet" placeholder
+    for brand, listing, agent, _n, _w, _b, _a, _bc, cfg in rows:
+        if listing == "-" or agent == "-":       # placeholder rows, nothing to check
             continue
         # reason: the phone match is unchanged and still runs on every folder,
         # including ones whose *name* matches the scrape -- a folder called
-        # gibson/169_k_st_1 carrying another agent's phone is worse drift, not
-        # less, and skipping it on the name alone would have hidden exactly that.
+        # gibson/169_k_st_1/j_doe carrying another agent's phone is worse drift,
+        # not less, and skipping it on the name alone would have hidden exactly
+        # that. This is also the correction path for a placeholder agent slug:
+        # once the real agent_phone resolves to a lead row, "unassigned_agent"
+        # drifts against the real agent slug like any other mismatch.
         want = truth.get(re.sub(r"\D", "", cfg.get("agent_phone") or ""))
-        if want and (brand, listing) != want:
-            drift.append((brand, listing, want))
-        elif not want and (brand, listing) not in known:
-            unverifiable.append((brand, listing, bool(cfg)))
+        if want and (brand, listing, agent) != want:
+            drift.append((brand, listing, agent, want))
+        elif not want and (brand, listing, agent) not in known:
+            unverifiable.append((brand, listing, agent, bool(cfg)))
     return drift, unverifiable
 
 
@@ -358,16 +373,16 @@ def print_audit(drift, unverifiable, out=print):
     if drift:
         out(f"\n{len(drift)} folder name(s) do not match the scrape "
             f"(leads.csv is the naming authority):")
-        for brand, listing, (tb, tl) in drift:
-            out(f"  agents/{brand}/{listing}")
-            out(f"    mv agents/{brand}/{listing} agents/{tb}/{tl}")
+        for brand, listing, agent, (tb, tl, ta) in drift:
+            out(f"  agents/{brand}/{listing}/{agent}")
+            out(f"    mv agents/{brand}/{listing}/{agent} agents/{tb}/{tl}/{ta}")
     if unverifiable:
         out(f"\n{len(unverifiable)} folder(s) have no lead row to check against "
             f"(not renamed -- unverifiable):")
-        for brand, listing, has_cfg in unverifiable:
+        for brand, listing, agent, has_cfg in unverifiable:
             why = ("config.json has no agent_phone matching leads.csv"
                    if has_cfg else "no config.json, so nothing to match on")
-            out(f"  agents/{brand}/{listing} -- {why}")
+            out(f"  agents/{brand}/{listing}/{agent} -- {why}")
         out("  These predate the scrape or their lead row is gone. The scrape "
             "cannot name them; renaming by hand would invent a second "
             "authority. Leave them, or re-scrape the listing.")
@@ -383,18 +398,18 @@ def print_rows(rows, long=False, out=print):
     home screen told the operator to add a logo per listing and never said it is
     set once per brand -- which is exactly what its Brand settings action does.
     """
-    w = max(len(f"{b}/{l}") for b, l, *_ in rows)
-    out(f"{'BROKERAGE / LISTING'.ljust(w)}  PHOTOS  SMALLEST  NEXT")
+    w = max(len(f"{b}/{l}/{a}") for b, l, a, *_ in rows)
+    out(f"{'BROKERAGE / LISTING / AGENT'.ljust(w)}  PHOTOS  SMALLEST  NEXT")
     out("-" * (w + 40))
-    for brand, listing, n, worst, best, action, bcfg, cfg in rows:
-        name = f"{brand}/{listing}".ljust(w)
+    for brand, listing, agent, n, worst, best, action, bcfg, cfg in rows:
+        name = f"{brand}/{listing}/{agent}".ljust(w)
         px = f"{worst}px".rjust(8) if worst else "".rjust(8)
         out(f"{name}  {str(n).rjust(6)}  {px}  {action}")
         if long and cfg:
             out(f"{' ' * w}          logo={cfg.get('logo') or '(blank)'} "
                 f"music={cfg.get('music') or '(blank)'} card={cfg.get('card')}")
 
-    brands_missing = sorted({r[0] for r in rows if "brand.json" in r[5]})
+    brands_missing = sorted({r[0] for r in rows if "brand.json" in r[6]})
     if brands_missing:
         out(f"\n{len(brands_missing)} brokerage(s) need a logo or music set once: "
             f"{', '.join(brands_missing)}")

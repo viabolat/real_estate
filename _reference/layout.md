@@ -10,30 +10,36 @@ constrain any of it live in [`../_rules/`](../_rules/CONTEXT.md); this file is t
 shape, not the law.
 
 ```
-agents/<brand>/brand.json     per-brand defaults — tour.py ONLY, see below
-agents/<brand>/<listing>/     photos/, config.json, out/  — cwd for a build
-prospects/<agent>__<phone>/   agents/ viewed by agent instead of brand — symlinks, gitignored
-global_assets/logos/          shared branding, referenced by config.json
+agents/<brand>/brand.json           per-brand defaults — tour.py ONLY, see below
+agents/<brand>/<listing>/<agent>/   photos/, config.json, out/, outreach_draft.txt  — cwd for a build
+prospects/<agent>__<phone>/         agents/ viewed by agent instead of brand — symlinks, gitignored
+global_assets/logos/                shared branding, referenced by config.json
 global_assets/music/
 global_assets/lower_thirds/
-scraper/                      Zillow dump -> leads.csv + a scaffolded listing
-publish.py                    sample_ cuts -> the public review bucket. NEVER tour_
-status.py                     read-only: every listing and its one next action.
-                              Names the run each is on -- see the two-run rule
-floorplan.py                  flags a likely floor plan/site map photo -- never
-                              reorders or deletes. Called from tour.py --auto
-hooks/pre-push                runs check_pii.py. Arm per clone -- see Running it
-tests/                        stdlib unittest guards for the non-negotiables below
+scraper/                            Zillow dump -> leads.csv + a scaffolded listing
+publish.py                          sample_ cuts -> the public review bucket. NEVER tour_
+status.py                           read-only: every listing and its one next action.
+                                    Names the run each is on -- see the two-run rule
+floorplan.py                        flags a likely floor plan/site map photo -- never
+                                    reorders or deletes. Called from tour.py --auto
+hooks/pre-push                      runs check_pii.py. Arm per clone -- see Running it
+tests/                              stdlib unittest guards for the non-negotiables below
 ```
 
-`<brand>` and `<listing>` are **not named by hand.** Both are slugified straight from
-the scrape — `broker_name` and `address` in `scraper/leads.csv` — by
-`scraper/photos.py`, so the folder and the lead row can never disagree. The
-slug drops apostrophes rather than turning them into separators, so
-`Gibson Sotheby's International Realty` is `gibson_sothebys_international_realty`,
-not `gibson_sotheby_s_...`. `status.py` re-checks every folder against `leads.csv` on
-each run — matched on agent phone, since address text formatting varies and a phone
-number does not — and prints the `mv` for anything that has drifted.
+`<brand>`, `<listing>` and `<agent>` are **not named by hand.** All three are
+slugified straight from the scrape — `broker_name`, `address` and `agent_name` in
+`scraper/leads.csv` — by `scraper/photos.py`'s `target_for()`, so the folder and the
+lead row can never disagree. The slug drops apostrophes rather than turning them into
+separators, so `Gibson Sotheby's International Realty` is
+`gibson_sothebys_international_realty`, not `gibson_sotheby_s_...`. A blank
+`agentName` (Zillow does not always expose one, especially for a team listing) gets
+the explicit placeholder `unassigned_agent` rather than a silent empty path segment
+— see [`a-blank-agent-name-gets-a-placeholder-slug`](../_rules/a-blank-agent-name-gets-a-placeholder-slug.md).
+`status.py` re-checks every folder against `leads.csv` on each run — matched on
+agent phone, since address text formatting varies and a phone number does not — and
+prints the `mv` for anything that has drifted, agent included: a folder still sitting
+on `unassigned_agent` once the phone resolves to a lead row with a real name drifts
+like any other mismatch.
 
 One consequence, accepted deliberately: `Coldwell Banker Realty - Boston` and
 `Coldwell Banker Realty - Waltham` are two brand folders with two `brand.json` files,
@@ -61,42 +67,52 @@ tool that edits files the operator is not looking at.
 
 ## What a listing folder holds
 
-`agents/<brand>/<listing>/` is the working directory for a build, and everything
-under `agents/` is gitignored — it holds client photos and, in `config.json`, an
-agent's name and phone number. Nothing in it travels to another clone, which is why
-no contract file lives there: it would be invisible the moment the repo was cloned.
+`agents/<brand>/<listing>/<agent>/` is the working directory for a build, and
+everything under `agents/` is gitignored — it holds client photos and, in
+`config.json`, an agent's name and phone number. Nothing in it travels to another
+clone, which is why no contract file lives there: it would be invisible the moment
+the repo was cloned. Company, address and agent sit in one folder on purpose — the
+photos, the build, and the cold-email draft that follows from it are one deliverable,
+not three things scattered across the repo.
 
 ```
-agents/<brand>/brand.json          the factory layer for one brokerage. NO agent identity
-agents/<brand>/<listing>/
-   photos/                         numbered in tour order; the prefix IS the order
-   config.json                     the per-listing schema -- the single record of a build
-   out/                            the six cuts. Its contents ARE the build stage
-   .last_build.json                can the stitch be reused? Not which family
-   .build.lock                     held by a running build, O_EXCL, released via atexit
-   draft.mp4                       only from --draft. Deliberately NOT in out/
+agents/<brand>/brand.json            the factory layer for one brokerage. NO agent identity
+agents/<brand>/<listing>/<agent>/
+   photos/                           numbered in tour order; the prefix IS the order
+   config.json                       the per-listing schema -- the single record of a build
+   out/                              the six cuts. Its contents ARE the build stage
+   outreach_draft.txt                the cold-email draft, written by publish.py
+   .last_build.json                  can the stitch be reused? Not which family
+   .build.lock                       held by a running build, O_EXCL, released via atexit
+   draft.mp4                         only from --draft. Deliberately NOT in out/
 ```
 
 ## `prospects/` — the same listings, viewed by agent
 
-`agents/<brand>/<listing>` is grouped by brokerage, which cannot answer "everything
-tied to one agent" — a brand.json holds no agent identity (above), and one
-brokerage can have several agents. `prospects/` is that other view: one directory
-per agent, holding a symlink to every listing folder that agent is behind.
+`agents/<brand>/<listing>/<agent>` is grouped by brokerage first, which cannot
+answer "everything tied to one agent" — a brand.json holds no agent identity
+(above), and one brokerage can have several agents. `prospects/` is that other
+view: one directory per agent, holding a symlink to every listing folder that
+agent is behind.
 
 ```
-prospects/<agent_slug>__<phone_digits>/<brand>__<listing>   -> ../../agents/<brand>/<listing>
+prospects/<agent_slug>__<phone_digits>/<brand>__<listing>__<agent>   -> ../../agents/<brand>/<listing>/<agent>
 ```
 
 Keyed on slugified `agent_name` **and** the digits of `agent_phone`, not name alone
 — `leads.csv` already has two agents named the same at different brokerages, and
-name-only would merge them. Built and rebuilt by `prospects.py`, called from
-`tour.py`'s home screen and from `status.py`'s own `__main__` — never hand-maintained,
-the same way `leads.html` is regenerated from `leads.csv` rather than patched.
-Wiped and rewritten from scratch on every call: a listing removed from `agents/`
-just stops appearing here, no separate cleanup needed. It is gitignored like
-`agents/` itself — the directory names carry an agent's name and phone number,
-which is exactly the PII `agents/` is already gitignored to keep off the repo.
+name-only would merge them. That index key is a different identity than the
+`<agent>` path segment: a folder can still sit on the `unassigned_agent` placeholder
+while `config.json` already carries the real `agent_name`/`agent_phone`, so the
+symlink can legitimately point at a folder one step ahead of its own name — the
+correction path is `status.py`'s drift audit, not a rename here. Built and rebuilt
+by `prospects.py`, called from `tour.py`'s home screen and from `status.py`'s own
+`__main__` — never hand-maintained, the same way `leads.html` is regenerated from
+`leads.csv` rather than patched. Wiped and rewritten from scratch on every call: a
+listing removed from `agents/` just stops appearing here, no separate cleanup
+needed. It is gitignored like `agents/` itself — the directory names carry an
+agent's name and phone number, which is exactly the PII `agents/` is already
+gitignored to keep off the repo.
 
 ## What a build reads
 

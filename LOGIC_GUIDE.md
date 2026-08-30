@@ -373,6 +373,54 @@ re-publish uploads the new names alongside rather than replacing them.
 
 ---
 
+### 2026-08-30 — `agents/`, `prospects/` and the outreach draft unify under company/address/agent
+**What:** `agents/<brand>/<listing>` grew a third, scrape-named path segment:
+`agents/<brand>/<listing>/<agent>`, sourced the same way as the first two —
+`scraper/photos.py`'s `target_for()` slugifies `agentName` off the scrape, with an
+explicit `UNASSIGNED_AGENT = "unassigned_agent"` placeholder for a blank one rather
+than a silent empty path segment. `status.py`'s `survey()`/`audit()`/`next_action()`,
+`prospects.py`'s `rebuild()`, `publish.py`'s `remote_path()`/`write_draft()`, and
+every listing-walking function in `tour.py` were threaded from `(brand, listing)` to
+`(brand, listing, agent)`. The flat `outreach/drafts/<brand>__<listing>.txt` tree is
+retired; the cold-email draft now writes to
+`agents/<brand>/<listing>/<agent>/outreach_draft.txt`, beside the `photos/` and
+`out/` that produced it. `prospects/` stays, unchanged in shape except its symlinks
+now point three levels deep and are named `<brand>__<listing>__<agent>`. Five real
+listings already on disk were migrated by hand into the new layout.
+
+**Why:** the three were scattered — photos and cuts under `agents/`, the review-view
+symlink under `prospects/`, the email draft under `outreach/drafts/` — so one
+property's whole output lived in three unrelated places. `company/address/agent` in
+one folder means `agents/<brand>/<listing>/<agent>/` now holds everything for that
+listing.
+
+**Alternatives rejected:**
+- *Make `publish.py`'s remote bucket layout and `outreach/links.csv` schema
+  three-level too.* Rejected after reading real `links.csv` rows: they already
+  reference brands no longer present under `agents/` at all — it is a decoupled
+  historical log, not something this restructuring should retrofit. `remote_path()`
+  stays agent-blind (`<brand>/<listing>/<file>`); it validates the third segment
+  exists but never includes it in the returned path, and `output_prefix` already
+  keeps two agents' identically-named cuts from colliding at the CDN layer.
+- *Rename `prospects/`'s by-agent index key to match the new `<agent>` path
+  segment.* Rejected: the index key (slugified `agent_name` + phone digits) is a
+  different identity than the folder's `<agent>` slug, and the two can legitimately
+  run out of step — a folder can still sit on `unassigned_agent` while
+  `config.json` already carries the real name and phone. Correcting that is
+  `status.py`'s existing drift audit, extended to 3-tuples; no new rename
+  automation was built for it.
+
+**Accepted risks:** two pre-existing bugs would have shipped silently under the new
+depth if not caught by re-reading the affected functions directly: `tour.py`'s
+`_auto_build_one()` rerun-hint strings were truncating to just the agent segment
+(`os.path.basename(listing_dir)` instead of a full relative path), and
+`brand_settings()`/`reapply_brand()` were reading `config.json` one level too
+shallow, which would have silently reported "nothing to apply" for every listing.
+Both are fixed as part of this change, guarded by the existing suite plus new tests
+in `tests/test_naming.py`, `tests/test_auto_flow.py` and `tests/test_home_screen.py`.
+
+---
+
 ### [YYYY-MM-DD] — [Decision Title]
 <!-- Template. Copy this stanza above for the next entry; leave this one empty. -->
 **What:**

@@ -170,28 +170,35 @@ class AutoTargets(unittest.TestCase):
         self.tour.LISTINGS_ROOT = self.agents
         self.addCleanup(setattr, self.tour, "LISTINGS_ROOT", self.prev_root)
 
-    def make(self, brand, listing, *out_names):
-        d = os.path.join(self.agents, brand, listing)
+    def make(self, brand, listing, agent, *out_names):
+        d = os.path.join(self.agents, brand, listing, agent)
         os.makedirs(os.path.join(d, "out"), exist_ok=True)
         for n in out_names:
             open(os.path.join(d, "out", n), "wb").close()
         return d
 
     def test_a_listing_with_no_cuts_is_a_target(self):
-        d = self.make("acme", "1_main_st")
+        d = self.make("acme", "1_main_st", "agent_a")
         self.assertEqual(self.tour.auto_targets(), [("acme", d)])
 
     def test_a_listing_with_sample_cuts_is_excluded(self):
-        self.make("acme", "1_main_st", "sample_branded.mp4",
+        self.make("acme", "1_main_st", "agent_a", "sample_branded.mp4",
                   "sample_unbranded.mp4", "sample_vertical.mp4")
         self.assertEqual(self.tour.auto_targets(), [])
 
     def test_scoped_to_one_listing(self):
-        self.make("acme", "1_main_st")
-        self.make("acme", "2_oak_ave")
+        self.make("acme", "1_main_st", "agent_a")
+        self.make("acme", "2_oak_ave", "agent_b")
         self.assertEqual(
             self.tour.auto_targets(scope="acme/1_main_st"),
-            [("acme", os.path.join(self.agents, "acme", "1_main_st"))])
+            [("acme", os.path.join(self.agents, "acme", "1_main_st", "agent_a"))])
+
+    def test_scoped_to_one_agent(self):
+        self.make("acme", "1_main_st", "agent_a")
+        self.make("acme", "1_main_st", "agent_b")
+        self.assertEqual(
+            self.tour.auto_targets(scope="acme/1_main_st/agent_a"),
+            [("acme", os.path.join(self.agents, "acme", "1_main_st", "agent_a"))])
 
     def test_scoped_to_a_nonexistent_listing_raises(self):
         with self.assertRaises(SystemExit):
@@ -202,7 +209,7 @@ class AutoTargets(unittest.TestCase):
         so calling auto_targets() again -- as a rerun after a manual photo
         deletion would -- finds the exact same listing, unchanged.
         """
-        self.make("acme", "1_main_st")
+        self.make("acme", "1_main_st", "agent_a")
         first = self.tour.auto_targets()
         second = self.tour.auto_targets()
         self.assertEqual(first, second)

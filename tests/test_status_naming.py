@@ -197,52 +197,63 @@ class TestThePipelineStatesAreDistinguishable(unittest.TestCase):
 class TestDriftClassification(unittest.TestCase):
     """Three buckets: agrees, drifted, unverifiable. Nothing falls through."""
 
-    TRUTH = {"1001": ("brokerage_one", "11_first_st"),
-             "2002": ("brokerage_two", "22_second_st")}
+    TRUTH = {"1001": ("brokerage_one", "11_first_st", "agent_a"),
+             "2002": ("brokerage_two", "22_second_st", "agent_b")}
     KNOWN = set(TRUTH.values())
 
-    def classify(self, brand, listing, cfg):
+    def classify(self, brand, listing, agent, cfg):
         """The exact expression main() uses, over a synthetic truth table."""
         import re
         want = self.TRUTH.get(re.sub(r"\D", "", cfg.get("agent_phone") or ""))
-        if want and (brand, listing) != want:
+        if want and (brand, listing, agent) != want:
             return "drift"
-        if not want and (brand, listing) not in self.KNOWN:
+        if not want and (brand, listing, agent) not in self.KNOWN:
             return "unverifiable"
         return "agrees"
 
     def test_a_matching_folder_agrees(self):
         self.assertEqual(self.classify(
-            "brokerage_two", "22_second_st", {"agent_phone": "2002"}), "agrees")
+            "brokerage_two", "22_second_st", "agent_b", {"agent_phone": "2002"}),
+            "agrees")
 
     def test_a_renamed_folder_drifts(self):
         """The shape of the bug this check was written for."""
         self.assertEqual(self.classify(
-            "hand_named", "1_first", {"agent_phone": "1001"}), "drift")
+            "hand_named", "1_first", "agent_a", {"agent_phone": "1001"}), "drift")
 
     def test_a_configless_legacy_folder_is_unverifiable_not_silent(self):
         """The bug: this used to classify as 'agrees' by falling through."""
-        self.assertEqual(self.classify("brewester", "9_w_cedar", {}),
+        self.assertEqual(self.classify("brewester", "9_w_cedar", "j_doe", {}),
                          "unverifiable")
-        self.assertEqual(self.classify("corcoran", "46_beacon_5", {}),
+        self.assertEqual(self.classify("corcoran", "46_beacon_5", "j_doe", {}),
                          "unverifiable")
 
     def test_a_right_name_with_a_wrong_phone_still_drifts(self):
         """Name matches one lead row, config points at another. Worse, not less."""
         self.assertEqual(self.classify(
-            "brokerage_one", "11_first_st", {"agent_phone": "2002"}), "drift")
+            "brokerage_one", "11_first_st", "agent_a", {"agent_phone": "2002"}),
+            "drift")
 
     def test_a_known_name_with_no_phone_is_not_flagged(self):
         """The scrape named it; a blank phone is not evidence against that."""
-        self.assertEqual(self.classify("brokerage_two", "22_second_st", {}),
-                         "agrees")
+        self.assertEqual(self.classify(
+            "brokerage_two", "22_second_st", "agent_b", {}), "agrees")
 
     def test_punctuation_does_not_affect_the_match(self):
         """The match normalizes to digits, which is why it beats address text."""
         for form in ("2002", "20-02", "(20) 02", "+20 02", "20.02", " 2002 "):
             self.assertEqual(self.classify(
-                "brokerage_two", "22_second_st", {"agent_phone": form}),
+                "brokerage_two", "22_second_st", "agent_b", {"agent_phone": form}),
                 "agrees", form)
+
+    def test_a_placeholder_agent_drifts_once_the_real_name_is_known(self):
+        """The correction path for scraper.photos.UNASSIGNED_AGENT: once the
+        config's agent_phone resolves to a lead row, a folder still sitting on
+        the placeholder slug drifts against the real agent slug like any other
+        mismatch."""
+        self.assertEqual(self.classify(
+            "brokerage_one", "11_first_st", "unassigned_agent",
+            {"agent_phone": "1001"}), "drift")
 
 
 class TestScrapedNamesReadsTheAuthority(unittest.TestCase):
@@ -254,6 +265,7 @@ class TestScrapedNamesReadsTheAuthority(unittest.TestCase):
         self.assertIn("agent_phone", src)
         self.assertIn("broker_name", src)
         self.assertIn("address", src)
+        self.assertIn("agent_name", src)
 
     def test_a_missing_leads_csv_is_not_an_error(self):
         """status.py is read-only and must run on a clone with no scrape yet."""

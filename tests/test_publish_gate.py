@@ -71,28 +71,54 @@ class TestTheGate(unittest.TestCase):
 class TestRemotePath(unittest.TestCase):
 
     def test_path_is_nested_under_brand_and_listing(self):
-        d = os.path.join(AGENTS, "corcoran", "46_beacon_5")
+        d = os.path.join(AGENTS, "corcoran", "46_beacon_5", "sean_obrien")
         self.assertEqual(publish.remote_path(d, "x.mp4"),
                          "corcoran/46_beacon_5/x.mp4")
 
     def test_two_listings_by_one_agent_do_not_collide(self):
         """reason: the flat filename is identical -- only the folder separates them."""
         name = "sean_obrien_sample_branded.mp4"
-        a = publish.remote_path(os.path.join(AGENTS, "corcoran", "46_beacon_5"), name)
-        b = publish.remote_path(os.path.join(AGENTS, "corcoran", "9_w_cedar"), name)
+        a = publish.remote_path(
+            os.path.join(AGENTS, "corcoran", "46_beacon_5", "sean_obrien"), name)
+        b = publish.remote_path(
+            os.path.join(AGENTS, "corcoran", "9_w_cedar", "sean_obrien"), name)
         self.assertNotEqual(a, b)
 
     def test_a_bare_cut_name_still_does_not_collide(self):
         """A blank agent_name leaves bare sample_branded.mp4 in every listing."""
-        a = publish.remote_path(os.path.join(AGENTS, "brand_a", "l1"), "sample_branded.mp4")
-        b = publish.remote_path(os.path.join(AGENTS, "brand_b", "l1"), "sample_branded.mp4")
+        a = publish.remote_path(
+            os.path.join(AGENTS, "brand_a", "l1", "unassigned_agent"),
+            "sample_branded.mp4")
+        b = publish.remote_path(
+            os.path.join(AGENTS, "brand_b", "l1", "unassigned_agent"),
+            "sample_branded.mp4")
         self.assertNotEqual(a, b)
+
+    def test_the_remote_path_stays_agent_blind(self):
+        """reason: outreach/links.csv already carries rows for brands no longer
+        under agents/ at all -- it is a decoupled historical log, not something
+        this restructuring retrofits. The agent folder is validated but never
+        appears in the returned path."""
+        a = publish.remote_path(
+            os.path.join(AGENTS, "corcoran", "46_beacon_5", "sean_obrien"),
+            "sample_branded.mp4")
+        b = publish.remote_path(
+            os.path.join(AGENTS, "corcoran", "46_beacon_5", "another_agent"),
+            "sample_branded.mp4")
+        self.assertEqual(a, b)
 
     def test_a_folder_outside_agents_is_refused(self):
         for bad in (REPO, os.path.join(REPO, "global_assets"),
                     os.path.join(AGENTS, "corcoran")):
             with self.assertRaises(ValueError, msg=bad):
                 publish.remote_path(bad, "x.mp4")
+
+    def test_a_stale_2_level_path_is_refused(self):
+        """A leftover pre-migration agents/<brand>/<listing> path must fail
+        closed, not silently resolve one level shallow."""
+        with self.assertRaises(ValueError):
+            publish.remote_path(os.path.join(AGENTS, "corcoran", "46_beacon_5"),
+                                "x.mp4")
 
     def test_preview_url_is_absolute_and_drops_the_extension(self):
         """reason: the link is pasted into a cold email and written to links.csv,

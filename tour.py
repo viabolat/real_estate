@@ -166,6 +166,14 @@ LISTINGS_ROOT = os.path.join(ROOT, "agents")
 ASSETS_ROOT = os.path.join(ROOT, "global_assets")
 SCRIPT = os.path.join(ROOT, "make_tour.py")
 PUBLISH = os.path.join(ROOT, "publish.py")
+# reason: this is its own copy of scraper.photos.UNASSIGNED_AGENT, not an
+# import of it -- choose_listing()'s manual picker must keep working even
+# when load_status()'s scraper import has failed (its degraded-import path
+# already exists for exactly this reason). See
+# _rules/two-slug-functions-one-apostrophe-rule.md and
+# TestUnassignedAgentPlaceholder in tests/test_naming.py, which guards the
+# two copies staying equal.
+UNASSIGNED_AGENT = "unassigned_agent"
 
 # kind -> (subdirectory of global_assets/, accepted extensions)
 KINDS = {
@@ -315,6 +323,10 @@ def brands():
 
 def listings(brand):
     return _dirs(os.path.join(LISTINGS_ROOT, brand))
+
+
+def agent_dirs(brand, listing):
+    return _dirs(os.path.join(LISTINGS_ROOT, brand, listing))
 
 
 def assets(kind):
@@ -1009,7 +1021,7 @@ def load_status():
 
 
 def unimported_dumps():
-    """[(filename, brand, listing)] for dumps with no folder under agents/.
+    """[(filename, brand, listing, agent)] for dumps with no folder under agents/.
 
     reason: DERIVED, never recorded. The alternative -- a .processed marker, or
     a manifest of handled dumps -- is the photo-order failure one level up:
@@ -1044,9 +1056,9 @@ def unimported_dumps():
         target = status._photos.target_for(text)
         if target is None:
             continue
-        brand, listing = target
-        if not os.path.isdir(os.path.join(LISTINGS_ROOT, brand, listing)):
-            out.append((name, brand, listing))
+        brand, listing, agent = target
+        if not os.path.isdir(os.path.join(LISTINGS_ROOT, brand, listing, agent)):
+            out.append((name, brand, listing, agent))
     return out
 
 
@@ -1177,19 +1189,32 @@ def publish_action():
 
 def auto_targets(scope=None):
     """[(brand, listing_dir)] not yet at the sample stage, optionally narrowed
-    to one "brand/listing". Re-derived from out/ on every call -- see stage()
+    to one "brand/listing/agent" -- or "brand/listing", expanding to every
+    agent folder under it. Re-derived from out/ on every call -- see stage()
     -- so nothing about a halted listing is ever recorded, and a manual photo
     deletion needs no separate "resume" state to pick back up from.
     """
     if scope:
-        brand, _, name = scope.partition("/")
-        listing_dir = os.path.join(LISTINGS_ROOT, brand, name)
-        if not os.path.isdir(listing_dir):
-            raise SystemExit(f"No such listing: {scope}")
-        return [(brand, listing_dir)] if stage(listing_dir) == "sample" else []
-    return [(brand, os.path.join(LISTINGS_ROOT, brand, name))
+        parts = scope.strip("/").split("/")
+        if len(parts) == 3:
+            brand, name, agent = parts
+            listing_dir = os.path.join(LISTINGS_ROOT, brand, name, agent)
+            if not os.path.isdir(listing_dir):
+                raise SystemExit(f"No such listing: {scope}")
+            return [(brand, listing_dir)] if stage(listing_dir) == "sample" else []
+        if len(parts) == 2:
+            brand, name = parts
+            ags = agent_dirs(brand, name)
+            if not ags:
+                raise SystemExit(f"No such listing: {scope}")
+            return [(brand, os.path.join(LISTINGS_ROOT, brand, name, a))
+                    for a in ags
+                    if stage(os.path.join(LISTINGS_ROOT, brand, name, a)) == "sample"]
+        raise SystemExit(f"No such listing: {scope}")
+    return [(brand, os.path.join(LISTINGS_ROOT, brand, name, agent))
             for brand in brands() for name in listings(brand)
-            if stage(os.path.join(LISTINGS_ROOT, brand, name)) == "sample"]
+            for agent in agent_dirs(brand, name)
+            if stage(os.path.join(LISTINGS_ROOT, brand, name, agent)) == "sample"]
 
 
 def _auto_build_one(brand, listing_dir, ignore_floorplan, ignore_missing_phone=False,
@@ -1238,7 +1263,7 @@ def _auto_build_one(brand, listing_dir, ignore_floorplan, ignore_missing_phone=F
             f"{cfg.get('agent_name') or 'this agent'}.\n"
             f"  Add \"agent_phone\" there, then rerun:\n"
             f"    python3 tour.py --auto "
-            f"{brand}/{os.path.basename(listing_dir)}\n"
+            f"{os.path.relpath(listing_dir, LISTINGS_ROOT)}\n"
             "  If the number is genuinely unavailable, force through once "
             "with --ignore-missing-phone-check.")
         return "flagged"
@@ -1249,7 +1274,7 @@ def _auto_build_one(brand, listing_dir, ignore_floorplan, ignore_missing_phone=F
             f"  The card would fall back to the type-only design.\n"
             f"  Add the file there, then rerun:\n"
             f"    python3 tour.py --auto "
-            f"{brand}/{os.path.basename(listing_dir)}\n"
+            f"{os.path.relpath(listing_dir, LISTINGS_ROOT)}\n"
             "  If this brokerage genuinely has no mark, force the "
             "type-only card through once with --ignore-missing-logo-check.")
         return "flagged"
@@ -1267,7 +1292,7 @@ def _auto_build_one(brand, listing_dir, ignore_floorplan, ignore_missing_phone=F
                 say(f"    {name}  ({why})")
             say(f"  Delete the file(s) by hand, then rerun:\n"
                 f"    python3 tour.py --auto "
-                f"{brand}/{os.path.basename(listing_dir)}\n"
+                f"{os.path.relpath(listing_dir, LISTINGS_ROOT)}\n"
                 "  A false positive can be forced through once with "
                 "--ignore-floorplan-check.")
             return "flagged"
@@ -1407,16 +1432,19 @@ def brand_settings():
     say(f"\n  Saved agents/{brand}/{BRAND_FILE}.")
 
     ls = listings(brand)
-    if not ls:
+    pairs = [(listing, agent) for listing in ls
+             for agent in agent_dirs(brand, listing)]
+    if not pairs:
         return
-    say(f"\n  {len(ls)} existing listing(s) keep the values they were scaffolded "
-        f"with.\n  That is deliberate -- config.json is the record of what "
-        f"produced a delivered\n  video. Re-applying overwrites those keys.")
-    if confirm(f"Re-apply {brand} defaults to its {len(ls)} listing(s)?", False):
-        reapply_brand(brand, ls)
+    say(f"\n  {len(pairs)} existing listing(s) keep the values they were "
+        f"scaffolded with.\n  That is deliberate -- config.json is the record "
+        f"of what produced a delivered\n  video. Re-applying overwrites those "
+        f"keys.")
+    if confirm(f"Re-apply {brand} defaults to its {len(pairs)} listing(s)?", False):
+        reapply_brand(brand, pairs)
 
 
-def reapply_brand(brand, ls):
+def reapply_brand(brand, pairs):
     """Push the brand's keys down into each listing, showing every change first.
 
     reason: shown before written, per listing, per key. This is the one action
@@ -1435,24 +1463,24 @@ def reapply_brand(brand, ls):
         say("  Nothing set on the brand to apply.")
         return
     planned = []
-    for name in ls:
-        listing_dir = os.path.join(LISTINGS_ROOT, brand, name)
+    for listing, agent in pairs:
+        listing_dir = os.path.join(LISTINGS_ROOT, brand, listing, agent)
         cfg = _read_json(os.path.join(listing_dir, "config.json"), "config.json")
         changes = {k: (cfg.get(k), v) for k, v in push.items() if cfg.get(k) != v}
         if changes:
-            planned.append((name, listing_dir, cfg, changes))
+            planned.append((listing, agent, listing_dir, cfg, changes))
     if not planned:
         say("  Every listing already matches the brand. Nothing to write.")
         return
     say("")
-    for name, _dir, _cfg, changes in planned:
-        say(f"  {brand}/{name}")
+    for listing, agent, _dir, _cfg, changes in planned:
+        say(f"  {brand}/{listing}/{agent}")
         for k, (was, now) in sorted(changes.items()):
             say(f"    {k}: {was if was not in (None, '') else '(unset)'} -> {now}")
     if not confirm(f"\nWrite these to {len(planned)} config.json file(s)?", False):
         say("  Nothing was written.")
         return
-    for _name, listing_dir, cfg, changes in planned:
+    for _listing, _agent, listing_dir, cfg, changes in planned:
         cfg.update({k: now for k, (_was, now) in changes.items()})
         save_config(listing_dir, cfg)
     say(f"  Updated {len(planned)} listing(s).")
@@ -1482,8 +1510,8 @@ def home():
             if pending:
                 say(f"\n  {len(pending)} dump(s) in scraper/dumps/ have no "
                     f"listing folder yet:")
-                for name, brand, listing in pending:
-                    say(f"    {name}  ->  agents/{brand}/{listing}")
+                for name, brand, listing, agent in pending:
+                    say(f"    {name}  ->  agents/{brand}/{listing}/{agent}")
             gate_banner()
             stale = False
 
@@ -1537,7 +1565,7 @@ def _new_folder_name(raw, what):
 
 
 def listing_actions():
-    """({(brand, listing): next_action}, {scraped names}) -- never raises.
+    """({(brand, listing, agent): next_action}, {scraped names}) -- never raises.
 
     reason: the picker used to list bare folder names, so a folder holding 39
     photos and one holding none looked identical and the operator had to guess
@@ -1552,7 +1580,8 @@ def listing_actions():
         rows, _truth, known = mod.survey()
     except Exception:
         return {}, None
-    return {(r[0], r[1]): r[5] for r in rows if r[1] != "-"}, known
+    return ({(r[0], r[1], r[2]): r[6] for r in rows if r[1] != "-" and r[2] != "-"},
+            known)
 
 
 def choose_listing():
@@ -1571,9 +1600,7 @@ def choose_listing():
         os.makedirs(os.path.join(LISTINGS_ROOT, brand), exist_ok=True)
 
     ls = listings(brand)
-    labelled = [(x, f"{x}   -- {actions[(brand, x)]}" if (brand, x) in actions
-                 else x) for x in ls]
-    name = pick("Listing", labelled or [], default=0,
+    name = pick("Listing", [(x, x) for x in ls] or [], default=0,
                 extra=("+", "+ New listing")) if ls else "+"
     if name == "+":
         raw = ask("New listing folder name (e.g. 46_beacon_5)").strip()
@@ -1581,17 +1608,28 @@ def choose_listing():
             raise SystemExit("No listing name given.")
         name = _new_folder_name(raw, "Listing name")
         made_by_hand = True
-    listing_dir = os.path.join(LISTINGS_ROOT, brand, name)
+
+    ags = agent_dirs(brand, name)
+    labelled = [(a, f"{a}   -- {actions[(brand, name, a)]}"
+                 if (brand, name, a) in actions else a) for a in ags]
+    agent = pick("Agent", labelled or [], default=0,
+                 extra=("+", "+ New agent")) if ags else "+"
+    if agent == "+":
+        raw = ask("Agent name (blank for unassigned)").strip()
+        agent = _new_folder_name(raw, "Agent name") if raw else UNASSIGNED_AGENT
+        made_by_hand = True
+
+    listing_dir = os.path.join(LISTINGS_ROOT, brand, name, agent)
     os.makedirs(os.path.join(listing_dir, "photos"), exist_ok=True)
     # reason: the note below used to fire only for a folder created in THIS
     # session, so picking an existing hand-named one said nothing and the state
     # first surfaced in status.py's audit long afterwards. Picking it is the
     # moment the operator can act on it.
-    if not made_by_hand and known is not None and (brand, name) not in known:
-        say(f"  Note: no leads.csv row behind {brand}/{name}, so status.py lists "
-            f"it as\n  unverifiable. It builds normally -- the question set will "
-            f"ask for the address,\n  agent and phone. The folder name is left "
-            f"alone: the scrape is what names folders.")
+    if not made_by_hand and known is not None and (brand, name, agent) not in known:
+        say(f"  Note: no leads.csv row behind {brand}/{name}/{agent}, so "
+            f"status.py lists it as\n  unverifiable. It builds normally -- the "
+            f"question set will ask for the address,\n  agent and phone. The "
+            f"folder name is left alone: the scrape is what names folders.")
     if made_by_hand:
         # reason: say it once, here, rather than letting status.py be the first
         # thing that mentions it. A hand-named folder has no lead row behind it,

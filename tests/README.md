@@ -53,7 +53,7 @@ executable. Add the key to `CLAUDE.md`, `IDEA.md`, `STEPS.md` and the module
 docstring, then add it to the `documented` set in the same pass.
 
 **`TestSlug` holds two slug functions to one apostrophe rule.**
-`scraper/photos.slugify` names `agents/<brand>/<listing>`;
+`scraper/photos.slugify` names `agents/<brand>/<listing>/<agent>`;
 `make_tour._slug` names the files inside. Both drop apostrophes rather than
 separating on them, so one agent's name has one spelling. They remain separate
 functions — `make_tour.py` must run from a listing folder with nothing but

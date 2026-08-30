@@ -3,13 +3,16 @@
 prospects.py
 
 Regenerates prospects/ -- one directory per agent, holding a symlink to every
-agents/<brand>/<listing> folder that agent is behind. Keyed on agent name AND
-phone, not name alone, because two different agents at two different
+agents/<brand>/<listing>/<agent> folder that agent is behind. Keyed on agent
+name AND phone, not name alone, because two different agents at two different
 brokerages can share a name -- the phone is what status.py's own drift check
-already treats as an agent's real identity (see audit() in status.py).
+already treats as an agent's real identity (see audit() in status.py). This
+prospects/ key is a different identity than the agent slug in the folder path
+-- the folder can legitimately still read "unassigned_agent" while this index
+already knows the real agent from config.json's agent_name/agent_phone.
 
-Nothing here is authoritative. agents/<brand>/<listing> is still the only
-place a listing actually lives, and the scrape is still the only thing
+Nothing here is authoritative. agents/<brand>/<listing>/<agent> is still the
+only place a listing actually lives, and the scrape is still the only thing
 allowed to name that folder -- see the-scrape-names-the-folders.md. This is a
 second VIEW of those folders, not a second copy of them: prospects/ is wiped
 and rewritten from scratch on every call, the same way leads.html is
@@ -50,8 +53,8 @@ def rebuild(rows, slugify, agents_dir=AGENTS, dest_dir=PROSPECTS):
     elif os.path.isdir(dest_dir):
         shutil.rmtree(dest_dir)
 
-    for brand, listing, _n, _w, _b, _a, _bc, cfg in rows:
-        if listing == "-":                       # "no listings yet" placeholder
+    for brand, listing, agent_dir, _n, _w, _b, _a, _bc, cfg in rows:
+        if listing == "-" or agent_dir == "-":    # placeholder rows, nothing to link
             continue
         agent = (cfg.get("agent_name") or "").strip()
         slug = slugify(agent, default="")
@@ -61,6 +64,6 @@ def rebuild(rows, slugify, agents_dir=AGENTS, dest_dir=PROSPECTS):
         key = f"{slug}__{phone}" if phone else slug
         key_dir = os.path.join(dest_dir, key)
         os.makedirs(key_dir, exist_ok=True)
-        target = os.path.join(agents_dir, brand, listing)
-        link = os.path.join(key_dir, f"{brand}__{listing}")
+        target = os.path.join(agents_dir, brand, listing, agent_dir)
+        link = os.path.join(key_dir, f"{brand}__{listing}__{agent_dir}")
         os.symlink(os.path.relpath(target, key_dir), link)

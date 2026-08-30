@@ -45,12 +45,13 @@ class TestUnimportedDumps(unittest.TestCase):
         pending = self.tour.unimported_dumps()
         self.assertEqual([p[0] for p in pending], ["paste1.txt"])
         self.assertEqual(pending[0][1:],
-                         ("example_brokerage_llc", "12_example_st_unit_3"))
+                         ("example_brokerage_llc", "12_example_st_unit_3",
+                          "a_person"))
 
     def test_the_folder_existing_is_the_whole_test(self):
         """No import is recorded anywhere -- the folder IS the record."""
-        _n, brand, listing = self.tour.unimported_dumps()[0]
-        os.makedirs(os.path.join(self.agents, brand, listing))
+        _n, brand, listing, agent = self.tour.unimported_dumps()[0]
+        os.makedirs(os.path.join(self.agents, brand, listing, agent))
         self.assertEqual(self.tour.unimported_dumps(), [])
 
     def test_detection_writes_nothing(self):
@@ -66,12 +67,22 @@ class TestUnimportedDumps(unittest.TestCase):
 
     def test_deleting_the_folder_re_offers_the_dump(self):
         """The failure a .processed marker would produce, asserted directly."""
-        _n, brand, listing = self.tour.unimported_dumps()[0]
-        made = os.path.join(self.agents, brand, listing)
+        _n, brand, listing, agent = self.tour.unimported_dumps()[0]
+        made = os.path.join(self.agents, brand, listing, agent)
         os.makedirs(made)
         self.assertEqual(self.tour.unimported_dumps(), [])
         shutil.rmtree(made)
         self.assertEqual(len(self.tour.unimported_dumps()), 1)
+
+    def test_a_blank_agent_name_gets_the_placeholder(self):
+        """No agentName in the dump -- the pending path still names a folder."""
+        with open(os.path.join(self.dumps, "paste2.txt"), "w") as f:
+            f.write('\n"streetAddress":"9 W Cedar","zpid":"222",'
+                    '"homeStatus":"FOR_SALE"\n"brokerName":"No Agent Realty"\n')
+        pending = {p[0]: p[1:] for p in self.tour.unimported_dumps()}
+        self.assertEqual(pending["paste2.txt"],
+                         ("no_agent_realty", "9_w_cedar",
+                          self.tour.UNASSIGNED_AGENT))
 
     def test_a_dump_that_is_not_a_listing_is_not_offered(self):
         """Mirrors photos.py's own refusal -- no urls and no address."""

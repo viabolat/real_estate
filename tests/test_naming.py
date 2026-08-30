@@ -148,5 +148,40 @@ class TestSlug(unittest.TestCase):
             self.assertEqual(m.out_path("tour_branded"), "out/tour_branded.mp4")
 
 
+class TestUnassignedAgentPlaceholder(unittest.TestCase):
+    """Guards _rules/a-blank-agent-name-gets-a-placeholder-slug.md:
+    target_for() names all three folder levels, and a blank agentName gets an
+    explicit placeholder rather than a silent empty path segment."""
+
+    def photos(self):
+        return helpers.scraper_module("photos")
+
+    def test_target_for_returns_a_3_tuple(self):
+        photos = self.photos()
+        text = '"streetAddress":"2 Commonwealth Ave","brokerName":"Compass","agentName":"Jane Doe"'
+        self.assertEqual(photos.target_for(text), ("compass", "2_commonwealth_ave", "jane_doe"))
+
+    def test_a_blank_agent_name_gets_the_placeholder(self):
+        photos = self.photos()
+        text = '"streetAddress":"2 Commonwealth Ave","brokerName":"Compass","agentName":""'
+        brand, listing, agent = photos.target_for(text)
+        self.assertEqual(agent, photos.UNASSIGNED_AGENT)
+
+    def test_a_missing_agent_name_field_gets_the_placeholder_too(self):
+        photos = self.photos()
+        text = '"streetAddress":"2 Commonwealth Ave","brokerName":"Compass"'
+        brand, listing, agent = photos.target_for(text)
+        self.assertEqual(agent, photos.UNASSIGNED_AGENT)
+
+    def test_tour_carries_its_own_copy_of_the_placeholder(self):
+        """reason: tour.py must survive a broken scraper/photos.py import
+        (status.load_status()'s degraded path), so it cannot import this
+        constant -- it keeps its own copy, which must still agree in value.
+        See _rules/two-slug-functions-one-apostrophe-rule.md."""
+        photos = self.photos()
+        tour = helpers.tour_module()
+        self.assertEqual(tour.UNASSIGNED_AGENT, photos.UNASSIGNED_AGENT)
+
+
 if __name__ == "__main__":
     unittest.main()

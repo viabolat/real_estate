@@ -150,7 +150,7 @@ It writes the answers into `config.json` and runs the exact commands spelled out
 below — the steps are what it does, not an alternative to it.
 
 1. Get originals from the photographer or the MLS back end (§2.1 / §2.2).
-2. Drop them in the listing's `photos/` — `agents/<brand>/<listing>/photos/` — using
+2. Drop them in the listing's `photos/` — `agents/<brand>/<listing>/<agent>/photos/` — using
    the existing ordering convention:
    `01_exterior_front.jpg`, `02_exterior_street.jpg`, ... `17_exterior_courtyard.jpg`
    The numeric prefix sets tour order; the rest of the name is for your own reference.
@@ -163,7 +163,7 @@ below — the steps are what it does, not an alternative to it.
    Supported extensions: `.jpg .jpeg .png .webp .tif .tiff .bmp .heic`
 3. **Check the order before spending anything on an encode.**
    ```bash
-   cd agents/<brand>/<listing> && python3 ../../../make_tour.py --contact-sheet
+   cd agents/<brand>/<listing>/<agent> && python3 ../../../../make_tour.py --contact-sheet
    ```
    ~1s, no encoding. Writes `contact_sheet.png` — every photo in a numbered grid, in
    the exact order the tour will play. It runs *before* the resolution gate on

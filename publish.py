@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """publish.py — puts the watermarked sample cuts, and only those, on the CDN.
 
-    cd agents/<brand>/<listing>
-    python3 ../../../publish.py            # table, confirmation, upload
-    python3 ../../../publish.py --dry-run  # table and URLs, nothing leaves the machine
+    cd agents/<brand>/<listing>/<agent>
+    python3 ../../../../publish.py            # table, confirmation, upload
+    python3 ../../../../publish.py --dry-run  # table and URLs, nothing leaves the machine
 
 The bucket behind /preview/ is PUBLIC. That is safe for exactly one reason: the
 only thing this script will ever put in it is a sample_ cut, which carries the
@@ -57,12 +57,14 @@ clears the cap or the ladder runs out. That re-encode lives in a temp file for
 the length of one PUT and nothing else; out/ is never touched, and verification
 compares against whatever size actually reached the bucket, not out/'s.
 
-Every confirmed publish also writes one email draft to outreach/drafts/ --
-outreach/template.txt filled in with the agent's first name and the address from
-the listing's config.json, and the sample_branded link. It quotes the watermarked
-cut and never the tour_ file. Nothing is sent, and there is no SMTP credential
-anywhere in this repo: PROGRESS.md 5.1 settled that mail leaving the machine is a
-separate, deliberate act, never a flag someone trips.
+Every confirmed publish also writes one email draft to the listing's own agent
+folder, agents/<brand>/<listing>/<agent>/outreach_draft.txt -- right beside the
+out/ cuts that produced it, rather than in a separate flat tree keyed by
+brand__listing. outreach/template.txt filled in with the agent's first name and
+the address from the listing's config.json, and the sample_branded link. It
+quotes the watermarked cut and never the tour_ file. Nothing is sent, and there
+is no SMTP credential anywhere in this repo: PROGRESS.md 5.1 settled that mail
+leaving the machine is a separate, deliberate act, never a flag someone trips.
 
 The link written to outreach/links.csv is the LAST field on its line, and the file
 is written with \n endings. It used to sit mid-row, so anything that grabbed the
@@ -119,7 +121,10 @@ LINKS = os.path.join(ROOT, "outreach", "links.csv")
 # the last field, so nothing can be swallowed into it.
 LINK_COLUMNS = ["uploaded_at", "brand", "listing", "cut", "url"]
 TEMPLATE = os.path.join(ROOT, "outreach", "template.txt")
-DRAFTS = os.path.join(ROOT, "outreach", "drafts")
+# reason: the draft used to live in a flat outreach/drafts/ tree, apart from
+# the out/ cuts that produced it. It now lands beside them, inside the
+# listing's own agent folder -- see write_draft().
+DRAFT_FILENAME = "outreach_draft.txt"
 
 BUCKET = "listing-media"
 # The live host, plus the rewrite in vercel.json. Absolute on purpose: this string
@@ -262,7 +267,7 @@ def publishable(name):
 
 
 def remote_path(listing_dir, filename):
-    """agents/<brand>/<listing>/ + x.mp4 -> "<brand>/<listing>/x.mp4".
+    """agents/<brand>/<listing>/<agent>/ + x.mp4 -> "<brand>/<listing>/x.mp4".
 
     reason: the bare filename collides. Two listings by the same agent both
     produce sean_obrien_sample_branded.mp4, and a listing with a blank
@@ -271,14 +276,22 @@ def remote_path(listing_dir, filename):
     solved locally with output_prefix, and it has to be solved again at the
     bucket. Refusing a directory that is not under agents/ keeps the layout
     knowledge honest: publish.py may know it, make_tour.py may not.
+
+    The remote layout stays agent-blind on purpose -- outreach/links.csv
+    already carries rows for brands no longer under agents/ at all, so it is a
+    decoupled historical log, not something this restructuring should retrofit.
+    The agent folder is walked past and validated (so a stale 2-level path
+    fails closed -- its grandparent basename lands on the repo dir, not
+    "agents") but never appears in the returned path.
     """
     full = os.path.abspath(listing_dir)
-    parent, listing = os.path.split(full)
+    parent, agent = os.path.split(full)
+    parent, listing = os.path.split(parent)
     grand, brand = os.path.split(parent)
-    if not listing or not brand or os.path.basename(grand) != "agents":
+    if not agent or not listing or not brand or os.path.basename(grand) != "agents":
         raise ValueError(
-            f"{full} is not agents/<brand>/<listing>. The remote path is "
-            "derived from the folder, and the scrape is what names the folder.")
+            f"{full} is not agents/<brand>/<listing>/<agent>. The remote path "
+            "is derived from the folder, and the scrape is what names the folder.")
     return f"{brand}/{listing}/{filename}"
 
 
@@ -497,11 +510,17 @@ def draft_text(listing_dir, url):
     return body, missing
 
 
-def write_draft(listing_dir, brand, listing, url):
-    """Write the draft and return (path, missing). Overwrites: it is derived."""
+def write_draft(listing_dir, url):
+    """Write the draft and return (path, missing). Overwrites: it is derived.
+
+    reason: the draft used to live in a flat outreach/drafts/ tree keyed by
+    brand__listing, apart from the out/ cuts that produced it. It now lands
+    beside them, inside the listing's own agent folder, so
+    agents/<brand>/<listing>/<agent>/ holds everything for that property in
+    one place.
+    """
     text, missing = draft_text(listing_dir, url)
-    os.makedirs(DRAFTS, exist_ok=True)
-    path = os.path.join(DRAFTS, f"{brand}__{listing}.txt")
+    path = os.path.join(listing_dir, DRAFT_FILENAME)
     with open(path, "w", encoding="utf-8") as f:
         f.write(text)
     return path, missing
@@ -626,9 +645,8 @@ def main():
         primary = next((p for n, _, p in files if PRIMARY_CUT in n), None)
         if primary:
             text, missing = draft_text(listing_dir, preview_url(primary))
-            brand, listing = remote_path(listing_dir, "x.mp4").split("/")[:2]
             print(f"\nThe draft this would write to "
-                  f"{os.path.relpath(DRAFTS, ROOT)}/{brand}__{listing}.txt:\n")
+                  f"{os.path.join(os.path.relpath(listing_dir, ROOT), DRAFT_FILENAME)}:\n")
             print("\n".join("  " + l for l in text.splitlines()))
             if missing:
                 print(f"\n  {len(missing)} placeholder(s) left unfilled "
@@ -724,8 +742,7 @@ def main():
         # is a one-word difference in a filename.
         primary = next((p for n, p in confirmed if PRIMARY_CUT in n), None)
         if primary:
-            draft, missing = write_draft(listing_dir, brand, listing,
-                                         preview_url(primary))
+            draft, missing = write_draft(listing_dir, preview_url(primary))
 
     print(f"\n{len(confirmed)} of {len(files)} confirmed at the origin.")
     for name, path in confirmed:

@@ -53,7 +53,7 @@ reading *prose only* is a rule nothing enforces. That is the list worth shrinkin
 
 <!-- RULE-TABLE:start -->
 
-33 rules.
+34 rules.
 
 | Area | Rule | Guarded by |
 |---|---|---|
@@ -64,6 +64,7 @@ reading *prose only* is a rule nothing enforces. That is the list worth shrinkin
 | photos | [No AI upscaling of listing photos](no-ai-upscaling-of-listing-photos.md) | *prose only* |
 | photos | [Photo order lives in the filename prefix and nowhere else](photo-order-lives-in-the-filename-prefix.md) | `tests/test_photo_order.py`<br>`tests/test_home_screen.py` |
 | scrape | [One dump per file, and a dump that is not a listing is refused](one-dump-per-file.md) | *prose only* |
+| naming | [A blank agent name gets `UNASSIGNED_AGENT`, never an empty path segment](a-blank-agent-name-gets-a-placeholder-slug.md) | `tests/test_naming.py`<br>`tests/test_status_naming.py`<br>`tests/test_home_screen.py` |
 | naming | [A folder with no lead row still gets a start line](a-folder-with-no-lead-row-still-starts.md) | `tests/test_status_naming.py` |
 | naming | [`brand.json` never carries `agent_name` or `agent_phone`](brand-json-carries-no-agent-identity.md) | `tests/test_brand_scope.py` |
 | naming | [The scrape names the folders; nothing else does](the-scrape-names-the-folders.md) | `tests/test_status_naming.py`<br>`tests/test_naming.py` |
@@ -91,6 +92,6 @@ reading *prose only* is a rule nothing enforces. That is the list worth shrinkin
 | pii | [The PII gate runs itself, and an unwired gate is reported, never assumed](the-pii-gate-runs-itself.md) | `tests/test_hook_wired.py` |
 | docs | [Docs do not go stale](docs-do-not-go-stale.md) | `tests/test_photo_order.py` |
 
-Unguarded rules: 6 of 33.
+Unguarded rules: 6 of 34.
 
 <!-- RULE-TABLE:end -->
