@@ -1,7 +1,7 @@
 """A brand is a brokerage, and a brokerage has many agents.
 
 Guards _rules/brand-json-carries-no-agent-identity.md: "brand.json never
-carries agent_name or agent_phone. A
+carries agent_name, agent_phone or agent_email. A
 brokerage has many agents; the folder is keyed on the brokerage."
 
 reason: tour.py's BRAND_KEYS carried agent_name and agent_phone, and questions()
@@ -24,7 +24,7 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import helpers
 
-AGENT = ("agent_name", "agent_phone")
+AGENT = ("agent_name", "agent_phone", "agent_email")
 # reason: deliberately not phone-shaped. check_pii.py scans every file
 # git would publish for \d{3}-\d{3}-\d{4}, and a test fixture that
 # trips the repo's own PII gate teaches people to ignore it.
@@ -58,6 +58,7 @@ class TestBrandScope(unittest.TestCase):
                 "brokerage": "Some Brokerage",
                 "agent_name": "First Agent",
                 "agent_phone": PHONE_SHAPED_ENOUGH,
+                "agent_email": "first.agent@example.com",
             })
             with open(os.path.join(tmp, "some_brokerage", "brand.json")) as f:
                 written = json.load(f)
@@ -79,7 +80,8 @@ class TestBrandScope(unittest.TestCase):
             os.makedirs(os.path.join(tmp, "some_brokerage"))
             with open(os.path.join(tmp, "some_brokerage", "brand.json"), "w") as f:
                 json.dump({"logo": "l.png", "agent_name": "First Agent",
-                           "agent_phone": PHONE_SHAPED_ENOUGH}, f)
+                           "agent_phone": PHONE_SHAPED_ENOUGH,
+                           "agent_email": "first.agent@example.com"}, f)
             got = self.tour.load_brand("some_brokerage")
         finally:
             self.tour.LISTINGS_ROOT = prev

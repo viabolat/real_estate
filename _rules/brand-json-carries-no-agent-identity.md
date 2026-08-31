@@ -7,7 +7,7 @@ guarded_by:
 source: CLAUDE.md@717ce32 L418-434
 ---
 
-# `brand.json` never carries `agent_name` or `agent_phone`
+# `brand.json` never carries `agent_name`, `agent_phone` or `agent_email`
 
 A brokerage has many agents; the folder is keyed on the brokerage. See the
 `brand.json` note above. `tour.py` enforced this at neither end for a while:
@@ -23,3 +23,7 @@ and `load_brand()` strips them on the way back in, so a hand-edited or legacy fi
 cannot reintroduce them either; `tests/test_brand_scope.py` fails if either returns
 by any route. `brokerage` stays — it is the same string for every listing a brand
 owns, which is what a brand default *is*.
+
+`agent_email` joined `AGENT_KEYS` later, for the same reason: it never touches the
+card or lower third, but it is still one agent's identity, not the brokerage's, and
+the same two agents-per-brokerage collision applies.

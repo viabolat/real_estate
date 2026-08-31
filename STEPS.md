@@ -309,8 +309,13 @@ Skipped that prompt, or published the listing in an earlier session? Choose
 **5. Mark leads as contacted** from the home screen — it walks every published,
 not-yet-contacted listing and asks the same question one at a time. Either way
 the result shows up as a `CONTACTED` column in `status.py`'s roll-up and in
-`leads.html`. See
+`leads.html`, which also gets a derived `FOLLOW UP` column — 5 days after
+`marked_at` — computed at render time, never stored. See
 [`the-draft-is-automatic-the-send-is-not`](_rules/the-draft-is-automatic-the-send-is-not.md).
+
+If a listing's `config.json` has an `agent_email`, `leads.html` shows that
+instead of whatever (possibly blank) email Zillow's scrape carried — see
+[`brand-json-carries-no-agent-identity`](_rules/brand-json-carries-no-agent-identity.md).
 
 ---
 

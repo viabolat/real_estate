@@ -25,6 +25,7 @@ video months later.
 | `brand_in` / `brand_out` | `0.8` / `6.5` | only read when not persistent; out > in |
 | `lower_third` / `logo` / `music` / `watermark` | the plain filenames | repo-relative paths into `global_assets/`. `tour.py`'s `DEFAULTS` pins `watermark` to `global_assets/logos/viabolat.png` — the bare filename does not resolve from a listing folder, and a watermark that will not resolve now refuses the sample build. `--auto` additionally resolves a blank `logo` against `global_assets/logos/<brand>.png` — the brand folder's own slug — before anything else runs, and saves it to `brand.json` when it exists; when it does not, and nothing else resolves either, `--auto` halts that listing rather than ship the type-only card unasked. See [`auto-picks-up-the-brand-logo-by-slug`](../_rules/auto-picks-up-the-brand-logo-by-slug.md) |
 | `address` / `agent_name` / `agent_phone` | `""` | the lower third's three lines, and the card's body. Any may be blank |
+| `agent_email` | `""` | not read by `make_tour.py` — no lower third or card line. `scraper/lead.py`'s `write_html_table()` reads it straight off this file to fill or override `leads.html`'s `agent_email` column, since Zillow does not always expose one at scrape time and this is cheaper than a hand-edit of the append-only `leads.csv` |
 | `brokerage` | `""` | card only, and only when there is no logo |
 | `output_prefix` | `""` | what leads the output filenames. Blank derives it from `agent_name`; blank both leaves the bare `tour_`/`sample_` names. `tour.py` writes the brand folder here when `agent_name` is blank — `make_tour.py` must never learn the `agents/<brand>/<listing>/<agent>` layout itself |
 | `card` | `"none"` | `intro` \| `outro` \| `both`. `tour.py` writes `outro` on a new listing; a bare CLI run in an older folder is unchanged |
@@ -40,6 +41,6 @@ Two keys are deliberately absent and must stay absent:
 - **no build-stage key** — the run is derived from `out/`; see
   [`../CONTEXT.md`](../CONTEXT.md)
 
-And two that may never be inherited from `brand.json`: `agent_name` and
-`agent_phone`. See
+And three that may never be inherited from `brand.json`: `agent_name`,
+`agent_phone` and `agent_email`. See
 [`brand-json-carries-no-agent-identity`](../_rules/brand-json-carries-no-agent-identity.md).

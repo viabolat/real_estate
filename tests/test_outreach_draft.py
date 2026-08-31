@@ -25,6 +25,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO not in sys.path:
     sys.path.insert(0, REPO)
 import publish
+import helpers
 
 URL = ("https://real-estate.viabolat.com/preview/corcoran/46_beacon_5/"
        "sean_obrien_sample_branded")
@@ -130,6 +131,41 @@ class TestContactedRecord(unittest.TestCase):
                  mock.patch.object(publish, "CONTACTED", contacted):
                 publish.record_contacted("corcoran", "46_beacon_5", "sean_obrien")
             self.assertFalse(os.path.isfile(links))
+
+    def test_marking_contacted_refreshes_leads_html(self):
+        """reason: leads.html's CONTACTED column used to go stale the moment a
+        lead was marked contacted from anywhere but a fresh scrape -- nothing
+        called write_html_table() again. record_contacted() now refreshes it
+        itself, so every caller (the publish rung, the bulk mark-contacted
+        action, or a one-off script) gets a correct page for free."""
+        with tempfile.TemporaryDirectory() as d:
+            contacted = os.path.join(d, "contacted.csv")
+            leads_csv = os.path.join(d, "leads.csv")
+            leads_html = os.path.join(d, "leads.html")
+            lead = helpers.scraper_module("lead")
+            with open(leads_csv, "w", newline="", encoding="utf-8") as f:
+                w = csv.DictWriter(f, fieldnames=lead.CSV_FIELDS)
+                w.writeheader()
+                w.writerow({
+                    "address": "46 Beacon St #5", "zip": "02116",
+                    "city": "Boston", "state": "MA", "price": "500000",
+                    "beds": "2", "baths": "1", "zpid": "1001",
+                    "status": "FOR_SALE", "type": "CONDO",
+                    "agent_name": "Sean O'Brien", "agent_email": "",
+                    "agent_phone": "1001", "broker_name": "Corcoran",
+                    "mls_id": "", "contact_role": "", "contact_name": "",
+                })
+            with mock.patch.object(publish, "CONTACTED", contacted), \
+                 mock.patch.object(publish, "LEADS_CSV", leads_csv), \
+                 mock.patch.object(publish, "LEADS_HTML", leads_html):
+                self.assertFalse(os.path.isfile(leads_html))
+                publish.record_contacted("corcoran", "46_beacon_st_5", "sean_obrien")
+                self.assertTrue(os.path.isfile(leads_html))
+                with open(leads_html, encoding="utf-8") as f:
+                    page = f.read()
+            row_line = next(l for l in page.splitlines() if "Corcoran" in l)
+            self.assertTrue(row_line.lstrip().startswith("<tr><td>contacted</td>"),
+                             row_line)
 
 
 class TestDraft(unittest.TestCase):

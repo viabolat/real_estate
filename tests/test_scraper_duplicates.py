@@ -150,7 +150,7 @@ class TestLeadHtmlContactedColumn(unittest.TestCase):
                 page = f.read()
         self.assertIn("<th>contacted</th>", page)
 
-    def test_a_row_in_contacted_csv_is_marked_yes(self):
+    def test_a_row_in_contacted_csv_is_marked_contacted(self):
         with tempfile.TemporaryDirectory() as tmp:
             csv_path = os.path.join(tmp, "leads.csv")
             html_path = os.path.join(tmp, "leads.html")
@@ -168,9 +168,10 @@ class TestLeadHtmlContactedColumn(unittest.TestCase):
             with open(html_path, encoding="utf-8") as f:
                 page = f.read()
         row_line = next(l for l in page.splitlines() if "Corcoran" in l)
-        self.assertTrue(row_line.rstrip().endswith("<td>yes</td></tr>"), row_line)
+        self.assertTrue(row_line.lstrip().startswith("<tr><td>contacted</td>"),
+                         row_line)
 
-    def test_a_lead_absent_from_contacted_csv_is_blank(self):
+    def test_a_lead_absent_from_contacted_csv_is_new(self):
         with tempfile.TemporaryDirectory() as tmp:
             csv_path = os.path.join(tmp, "leads.csv")
             html_path = os.path.join(tmp, "leads.html")
@@ -181,7 +182,7 @@ class TestLeadHtmlContactedColumn(unittest.TestCase):
             with open(html_path, encoding="utf-8") as f:
                 page = f.read()
         row_line = next(l for l in page.splitlines() if "Corcoran" in l)
-        self.assertTrue(row_line.rstrip().endswith("<td></td></tr>"), row_line)
+        self.assertTrue(row_line.lstrip().startswith("<tr><td>new</td>"), row_line)
 
 
 class TestRunOneClassification(unittest.TestCase):

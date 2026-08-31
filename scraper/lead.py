@@ -10,12 +10,16 @@ property summary, listing agent (name/phone/brokerage/MLS ID/email), and who
 actually receives the lead if the Contact Agent button is clicked (may differ
 from the listing agent on Premier Agent ad slots). Also appends a row to
 leads.csv and regenerates leads.html, a browser-viewable table of all leads.
-leads.html carries one derived CONTACTED column, joined against
-outreach/contacted.csv by slugifying each row the same way scraper/photos.py's
-target_for() already names its folder, so the table and agents/ can never
-disagree about which lead a row is (see lead._load_photos()'s docstring for why
-that reuse has to stay a lazy, function-scoped load rather than a module-level
-import of photos.py).
+leads.html carries two derived columns, first in the table: CONTACTED, reading
+"contacted" or "new", and FOLLOW UP, a date FOLLOW_UP_DAYS after the row's
+outreach/contacted.csv timestamp (blank until contacted). Both are joined
+against outreach/contacted.csv by slugifying each row the same way
+scraper/photos.py's target_for() already names its folder, so the table and
+agents/ can never disagree about which lead a row is (see
+lead._load_photos()'s docstring for why that reuse has to stay a lazy,
+function-scoped load rather than a module-level import of photos.py). The
+agent_email column is likewise overridden from that listing's config.json
+when set, since Zillow does not always expose one at scrape time.
 
 Usage:
     python3 lead.py paste.txt
@@ -25,7 +29,9 @@ Usage:
 import re
 import argparse
 import csv
+import datetime
 import html
+import json
 import os
 import sys
 
@@ -243,53 +249,106 @@ CONTACTED_CSV = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "outreach", "contacted.csv")
 
+AGENTS_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "agents")
 
-def _contacted_keys():
-    """{(brand, listing, agent)} already marked in outreach/contacted.csv.
+FOLLOW_UP_DAYS = 5
+
+
+def _contacted_marked_at():
+    """{(brand, listing, agent): marked_at} from outreach/contacted.csv.
 
     reason: publish.py owns writing this file (record_contacted()), but
     publish.py itself loads scraper/photos.py for jpeg_size -- importing
     publish.py from here would load photos.py a second time through that
     path, the same cycle _load_photos()'s docstring avoids. Reading the
     documented columns (marked_at,brand,listing,agent) directly needs no
-    import and invents no second writer for the file.
+    import and invents no second writer for the file. Keyed by marked_at
+    rather than a bare set of keys so the derived follow-up column below can
+    compute FOLLOW_UP_DAYS from the actual timestamp, not just membership.
     """
     if not os.path.isfile(CONTACTED_CSV):
-        return set()
+        return {}
     try:
         with open(CONTACTED_CSV, newline="", encoding="utf-8") as f:
             rows = list(csv.DictReader(f))
     except OSError:
-        return set()
+        return {}
     return {(r.get("brand", "").strip(), r.get("listing", "").strip(),
-             r.get("agent", "").strip()) for r in rows}
+             r.get("agent", "").strip()): r.get("marked_at", "").strip()
+            for r in rows}
+
+
+def _follow_up_date(marked_at):
+    """marked_at + FOLLOW_UP_DAYS, as YYYY-MM-DD -- "" if marked_at cannot be
+    parsed (a hand-edited row, a test fixture), never the reason the page
+    fails to render.
+    """
+    try:
+        when = datetime.datetime.fromisoformat(marked_at)
+    except (TypeError, ValueError):
+        return ""
+    return (when + datetime.timedelta(days=FOLLOW_UP_DAYS)).strftime("%Y-%m-%d")
+
+
+def _agent_email_override(key):
+    """config.json's agent_email for agents/<brand>/<listing>/<agent>/, or ""
+
+    reason: Zillow does not always expose an agentEmail -- lead.py's own
+    docstring already says so of agent_phone -- and re-scraping is not always
+    possible. A human who finds the address by other means can fill it in on
+    the listing's own config.json (never brand.json -- see
+    brand-json-carries-no-agent-identity.md) and have it show here, without
+    hand-editing the append-only leads.csv this table mirrors.
+    """
+    path = os.path.join(AGENTS_DIR, *key, "config.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            cfg = json.load(f)
+    except (OSError, ValueError):
+        return ""
+    return (cfg.get("agent_email") or "").strip()
 
 
 def write_html_table(csv_path: str, html_path: str) -> None:
     """Mirror leads.csv as a real, styled HTML table -- open leads.html in a browser.
 
-    Adds one derived column, CONTACTED, joined against outreach/contacted.csv
-    by slugifying broker_name/address/agent_name the same way
-    scraper/photos.py's target_for() already names the folder for this row --
-    so this table and agents/ can never disagree about which lead a row is.
+    Adds three derived columns, joined against outreach/contacted.csv and the
+    listing's own config.json by slugifying broker_name/address/agent_name the
+    same way scraper/photos.py's target_for() already names the folder for
+    this row -- so this table and agents/ can never disagree about which lead
+    a row is:
+      * CONTACTED -- "contacted" once outreach/contacted.csv has a row.
+      * FOLLOW UP -- FOLLOW_UP_DAYS after that row's marked_at, blank until
+        contacted.
+      * agent_email -- overridden by config.json's own agent_email when set,
+        since Zillow does not always expose one at scrape time.
     """
     with open(csv_path, "r", newline="", encoding="utf-8") as f:
         rows = list(csv.DictReader(f))
 
     photos = _load_photos()
-    marked = _contacted_keys()
-    header = "".join(f"<th>{html.escape(key)}</th>" for key in CSV_FIELDS)
-    header += "<th>contacted</th>"
+    marked = _contacted_marked_at()
+    header = "<th>contacted</th><th>follow up</th>"
+    header += "".join(f"<th>{html.escape(key)}</th>" for key in CSV_FIELDS)
     body_lines = []
     for row in rows:
-        cells = "".join(f"<td>{html.escape(row.get(key) or '')}</td>" for key in CSV_FIELDS)
         is_contacted = False
+        follow_up = ""
         if photos is not None:
             key = (photos.slugify(row.get("broker_name"), "unknown_brokerage"),
                    photos.slugify(row.get("address")),
                    photos.slugify(row.get("agent_name"), photos.UNASSIGNED_AGENT))
-            is_contacted = key in marked
-        cells += f"<td>{'yes' if is_contacted else ''}</td>"
+            marked_at = marked.get(key)
+            is_contacted = marked_at is not None
+            if is_contacted:
+                follow_up = _follow_up_date(marked_at)
+            email = _agent_email_override(key)
+            if email:
+                row = dict(row, agent_email=email)
+        cells = f"<td>{'contacted' if is_contacted else 'new'}</td>"
+        cells += f"<td>{html.escape(follow_up)}</td>"
+        cells += "".join(f"<td>{html.escape(row.get(key) or '')}</td>" for key in CSV_FIELDS)
         body_lines.append(f"<tr>{cells}</tr>")
 
     page = HTML_TEMPLATE.format(count=len(rows), header=header, body="\n".join(body_lines))

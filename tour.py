@@ -226,6 +226,7 @@ DEFAULTS = {
     "music": None,
     "agent_name": "",
     "agent_phone": "",
+    "agent_email": "",
     "brokerage": "",
     "address": "",
     "output_prefix": "",
@@ -250,15 +251,18 @@ DEFAULTS = {
 # under config.json without saying so. See
 # _rules/brand-json-carries-no-agent-identity.md.
 # brokerage stays: it is the same string for every listing a brand owns, which is
-# what a brand default IS. tests/test_brand_scope.py fails if the two agent keys
-# come back.
+# what a brand default IS. tests/test_brand_scope.py fails if the three agent
+# keys come back.
 BRAND_KEYS = ("logo", "music", "clip_seconds", "xfade_seconds",
               "brand_persistent", "brand_in", "brand_out",
               "card", "card_seconds", "card_style", "card_theme", "accent",
               "font", "brokerage")
 # Never inherited from a brand, at either end -- stripped on read as well as on
 # write, so a hand-edited or legacy brand.json cannot reintroduce them either.
-AGENT_KEYS = ("agent_name", "agent_phone")
+# agent_email joined agent_name/agent_phone here for the same reason: it is
+# leads.html's, not the card's, but it is still one agent's identity, and a
+# brokerage still has many agents.
+AGENT_KEYS = ("agent_name", "agent_phone", "agent_email")
 
 CARD_MODES = [("outro", "Outro card only (recommended)"),
               ("both", "Intro and outro"),
@@ -581,6 +585,9 @@ def questions(listing_dir, brand, cfg, auto=False):
     cfg["address"] = ask("Property address", cfg.get("address", ""), auto=auto)
     cfg["agent_name"] = ask("Agent name", cfg.get("agent_name", ""), auto=auto)
     cfg["agent_phone"] = ask("Agent phone", cfg.get("agent_phone", ""), auto=auto)
+    cfg["agent_email"] = ask("Agent email (optional -- shown in leads.html, "
+                              "not on the video)", cfg.get("agent_email", ""),
+                              auto=auto)
     cfg["brokerage"] = ask("Brokerage (card only, used when there is no logo)",
                            cfg.get("brokerage", ""), auto=auto)
     # reason: the agent's name and phone are deliberately NOT offered as brand

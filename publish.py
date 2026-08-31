@@ -129,6 +129,8 @@ LINKS = os.path.join(ROOT, "outreach", "links.csv")
 LINK_COLUMNS = ["uploaded_at", "brand", "listing", "cut", "url"]
 CONTACTED = os.path.join(ROOT, "outreach", "contacted.csv")
 CONTACTED_COLUMNS = ["marked_at", "brand", "listing", "agent"]
+LEADS_CSV = os.path.join(ROOT, "scraper", "leads.csv")
+LEADS_HTML = os.path.join(ROOT, "scraper", "leads.html")
 TEMPLATE = os.path.join(ROOT, "outreach", "template.txt")
 # reason: the draft used to live in a flat outreach/drafts/ tree, apart from
 # the out/ cuts that produced it. It now lands beside them, inside the
@@ -509,13 +511,46 @@ def published_cuts(brand, listing):
             and (r.get("cut") or "").strip()}
 
 
-def record_contacted(brand, listing, agent):
+def _refresh_leads_html():
+    """Regenerate scraper/leads.html so its derived CONTACTED column reflects
+    the row record_contacted() just wrote, immediately -- not only at the next
+    scrape. Same lazy, function-scoped, exec-by-path shape as _jpeg_size():
+    best-effort, since a missing/broken scraper must never fail the contacted
+    mark that already succeeded by the time this runs.
+    """
+    try:
+        import importlib.util
+        path = os.path.join(ROOT, "scraper", "lead.py")
+        spec = importlib.util.spec_from_file_location("_lead_publish", path)
+        mod = importlib.util.module_from_spec(spec)
+        sys.path.insert(0, os.path.dirname(path))
+        try:
+            spec.loader.exec_module(mod)
+        finally:
+            sys.path.pop(0)
+        # lead.py computes CONTACTED_CSV from its own __file__ at import time,
+        # so a freshly loaded copy defaults to the real repo path -- pin it to
+        # whatever this module is actually using for CONTACTED, or the join
+        # in write_html_table() reads the wrong file whenever CONTACTED is not
+        # the untouched default (every test that mocks it, for one).
+        mod.CONTACTED_CSV = CONTACTED
+        if os.path.isfile(LEADS_CSV):
+            mod.write_html_table(LEADS_CSV, LEADS_HTML)
+    except Exception:
+        pass
+
+
+def record_contacted(brand, listing, agent, when=None):
     """Append one row to outreach/contacted.csv -- marks a lead as emailed.
 
     reason: byte-for-byte the same append-by-header-name shape record_links()
     already uses. This only ever records that a human sent the email
     write_draft() already drafted; it does not send anything itself, so it
     does not touch the-draft-is-automatic-the-send-is-not.md's boundary.
+    `when` defaults to now -- every live caller wants that -- but takes a
+    datetime so a lead sent outside this flow (a client's own mail app) can
+    still be backfilled with its real send time rather than the moment
+    someone got around to recording it.
     """
     os.makedirs(os.path.dirname(CONTACTED), exist_ok=True)
     new = not os.path.isfile(CONTACTED)
@@ -524,9 +559,10 @@ def record_contacted(brand, listing, agent):
         if new:
             w.writeheader()
         w.writerow({
-            "marked_at": datetime.datetime.now().isoformat(timespec="seconds"),
+            "marked_at": (when or datetime.datetime.now()).isoformat(timespec="seconds"),
             "brand": brand, "listing": listing, "agent": agent,
         })
+    _refresh_leads_html()
 
 
 def contacted(brand, listing, agent):
