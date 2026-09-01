@@ -356,16 +356,16 @@ def _dirs(path):
                   if os.path.isdir(os.path.join(path, d)) and not d.startswith("."))
 
 
-def brands(root=LISTINGS_ROOT):
-    return _dirs(root)
+def brands(root=None):
+    return _dirs(LISTINGS_ROOT if root is None else root)
 
 
-def listings(brand, root=LISTINGS_ROOT):
-    return _dirs(os.path.join(root, brand))
+def listings(brand, root=None):
+    return _dirs(os.path.join(LISTINGS_ROOT if root is None else root, brand))
 
 
-def agent_dirs(brand, listing, root=LISTINGS_ROOT):
-    return _dirs(os.path.join(root, brand, listing))
+def agent_dirs(brand, listing, root=None):
+    return _dirs(os.path.join(LISTINGS_ROOT if root is None else root, brand, listing))
 
 
 def assets(kind):
