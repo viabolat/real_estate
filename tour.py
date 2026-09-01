@@ -5,6 +5,8 @@
     python3 tour.py --build         # skip it, go straight to the wizard
     python3 tour.py --check-photos  # optional: ask Claude to read the contact sheet
     python3 tour.py --auto          # hands-off: every pending dump through to 3 sample cuts
+    python3 tour.py --publish-pending  # every built, unpublished listing: open the
+                                     # branded cut, ask, upload -- one at a time
     python3 tour.py --sweep-published-samples [--yes]  # retroactively clear out/
                                      # sample_ cuts already confirmed on the bucket
 
@@ -63,6 +65,16 @@ both fall back to a links.csv lookup before concluding "nothing here yet." See
 a-confirmed-sample-publish-clears-its-own-cuts.md. --sweep-published-samples
 [--yes] applies that same cleanup retroactively, across every listing, dry-run by
 default.
+
+--auto's own halts mean a batch run usually ends with several listings built and
+several still flagged. --publish-pending is the matching batch entry for what is
+left once the built ones are ready: it walks every listing with a sample_ cut in
+out/ that links.csv has no record of yet, opens the branded cut for a look (macOS
+`open`; elsewhere it just prints the path) and then runs the exact same
+publish_rung() prompt publish_action() runs for one listing at a time --
+"Publish the sample cuts?", defaulting to No. It does not lower that bar or look
+at a single frame itself; it only removes the trip back to the home screen
+between listings. A No moves on to the next listing and uploads nothing.
 
 publish_rung() also asks, once, right after a publish succeeds: mark this lead as
 contacted once you've actually sent the draft? Default is No, same as every other
@@ -1308,6 +1320,45 @@ def publish_action():
     publish_rung(listing_dir, quiet=False)
 
 
+def publish_pending():
+    """Walk every listing with a sample_ cut in out/ that is not yet published,
+    open the branded cut for a look, then run the same rung-4 confirm gate
+    publish_action() runs for one listing at a time.
+
+    reason: --auto's own halts mean a batch run usually ends with some
+    listings built and some flagged; this is the batch entry for the built
+    ones, so getting all of them onto the review bucket does not mean a
+    home-screen trip per listing. It does not decide a video is good and
+    does not lower publish_rung()'s bar -- still one "Publish the sample
+    cuts?" per listing, defaulting to No, same as always.
+    """
+    candidates = []
+    for brand in brands():
+        for name in listings(brand):
+            for agent in agent_dirs(brand, name):
+                listing_dir = os.path.join(LISTINGS_ROOT, brand, name, agent)
+                if sample_cuts(listing_dir):
+                    candidates.append(listing_dir)
+    if not candidates:
+        say("\n  Nothing waiting -- no listing has an unpublished sample_ "
+            "cut in out/.")
+        return
+    say(f"\n  {len(candidates)} listing(s) have sample_ cuts built and not "
+        "yet published.")
+    opener = shutil.which("open")  # macOS; elsewhere, print the path instead
+    for listing_dir in candidates:
+        rule(os.path.relpath(listing_dir, ROOT))
+        cuts = sample_cuts(listing_dir)
+        branded = next((f for f in cuts if "_branded" in f), cuts[0])
+        path = os.path.join(listing_dir, "out", branded)
+        if opener:
+            subprocess.run([opener, path])
+            say(f"  Opened {os.path.relpath(path, ROOT)} for review.")
+        else:
+            say(f"  Review it yourself: {os.path.relpath(path, ROOT)}")
+        publish_rung(listing_dir, quiet=False)
+
+
 def mark_contacted_action():
     """Home-screen bulk action: walk every published, not-yet-contacted lead
     and offer to mark each one, one at a time.
@@ -1808,11 +1859,14 @@ def main():
     if args and args[0] == "--sweep-published-samples":
         sweep_published_samples(dry_run="--yes" not in args[1:])
         return
+    if args and args[0] == "--publish-pending":
+        publish_pending()
+        return
     if args and args[0] not in ("--check-photos", "--build"):
         raise SystemExit(
             __doc__.strip().splitlines()[0] +
             "\n\n    python3 tour.py [--build | --check-photos | --auto | "
-            "--sweep-published-samples [--yes]]")
+            "--publish-pending | --sweep-published-samples [--yes]]")
     # reason: --check-photos and --build are the two ways past the home screen.
     # The roll-up is worth a second of startup when you are deciding what to
     # work on and pure noise when you already know, so it is skippable -- but

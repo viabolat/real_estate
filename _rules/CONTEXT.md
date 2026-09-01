@@ -53,7 +53,7 @@ reading *prose only* is a rule nothing enforces. That is the list worth shrinkin
 
 <!-- RULE-TABLE:start -->
 
-37 rules.
+38 rules.
 
 | Area | Rule | Guarded by |
 |---|---|---|
@@ -84,6 +84,7 @@ reading *prose only* is a rule nothing enforces. That is the list worth shrinkin
 | delivery | [Never send a `sample_` file as a deliverable, and never send a `tour_` file before sign-off](never-cross-the-sample-tour-boundary.md) | `tests/test_naming.py`<br>`tests/test_publish_gate.py` |
 | publishing | [A confirmed sample publish clears its own cuts](a-confirmed-sample-publish-clears-its-own-cuts.md) | `tests/test_publish_gate.py`<br>`tests/test_build_stage.py` |
 | publishing | [A publish never deletes the local cut](a-publish-never-deletes-the-local-cut.md) | `tests/test_publish_gate.py` |
+| publishing | [A publish prompt has one owner, no matter how many listings ask it](a-publish-prompt-has-one-owner.md) | `tests/test_publish_pending.py` |
 | publishing | [A publish verifies against the storage API, never the public URL](a-publish-verifies-against-the-storage-api.md) | *prose only* |
 | publishing | [An upload over the bucket's cap gets a compressed copy, not a silent failure](an-oversized-upload-compresses-a-review-copy.md) | `tests/test_publish_gate.py` |
 | publishing | [Only `sample_` cuts publish, and `make_tour.py` never uploads](only-sample-cuts-publish.md) | `tests/test_publish_gate.py` |
@@ -95,6 +96,6 @@ reading *prose only* is a rule nothing enforces. That is the list worth shrinkin
 | pii | [The PII gate runs itself, and an unwired gate is reported, never assumed](the-pii-gate-runs-itself.md) | `tests/test_hook_wired.py` |
 | docs | [Docs do not go stale](docs-do-not-go-stale.md) | `tests/test_photo_order.py` |
 
-Unguarded rules: 6 of 37.
+Unguarded rules: 6 of 38.
 
 <!-- RULE-TABLE:end -->

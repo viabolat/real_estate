@@ -114,6 +114,7 @@ Everything above, plus the commands you'll reach for outside the happy path.
 | `python3 tour.py --build` | Jump straight to Build a tour, skipping the home screen. |
 | `python3 tour.py --sweep-published-samples` | Dry run: what published `sample_` cuts it would clear from `out/`. |
 | `python3 tour.py --sweep-published-samples --yes` | Actually clears them. |
+| `python3 tour.py --publish-pending` | Loops rung 4's publish prompt over every listing with an unpublished sample cut — still asks per listing, still defaults to no. |
 | `python3 status.py` | One line per listing: photo count, smallest photo, next action. |
 | `python3 status.py --long` | Same, plus what each listing inherits from its brand. |
 | `python3 scraper/run.py` | Import every `*.txt` in `scraper/dumps/`. |

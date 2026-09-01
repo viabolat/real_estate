@@ -391,6 +391,28 @@ python3 tour.py --sweep-published-samples --yes     # actually removes it
 ```
 See [`a-confirmed-sample-publish-clears-its-own-cuts`](_rules/a-confirmed-sample-publish-clears-its-own-cuts.md).
 
+### Publish every listing that is waiting, one prompt at a time
+
+```bash
+python3 tour.py --publish-pending
+```
+
+The home screen's **3. Publish a review link** takes one listing per trip. This
+is the same rung — the exact same `publish_rung()`, the exact same **"Publish the
+sample cuts?"** prompt, defaulting to **no** — looped over every listing that has
+an unpublished `sample_` cut sitting in `out/` right now, so a run that built five
+listings does not mean five separate trips back to the home screen to review and
+send them. Candidates come from `sample_cuts()`, the same check rung 4 already
+uses, not from `stage()`: `stage()` alone would re-offer a listing that is already
+published and swept, because a cleaned-up `out/` and a never-built `out/` look
+identical.
+
+For each candidate it opens the `_branded` cut for you to watch, then asks the
+prompt — one listing at a time, still, and still your call. Answering no moves on
+to the next one; nothing is skipped or auto-confirmed, and there is no `--yes`. A
+delivered-only listing (no `sample_` cut left in `out/`) is not a candidate and is
+never offered. See [`a-publish-prompt-has-one-owner`](_rules/a-publish-prompt-has-one-owner.md).
+
 ### Mark a lead as contacted
 
 Right after that publish succeeds, `tour.py` asks one more question: *"Mark this
