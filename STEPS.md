@@ -434,6 +434,27 @@ If a listing's `config.json` has an `agent_email`, `leads.html` shows that
 instead of whatever (possibly blank) email Zillow's scrape carried — see
 [`brand-json-carries-no-agent-identity`](_rules/brand-json-carries-no-agent-identity.md).
 
+### `needs_attention/` — why the build picker stops showing a listing
+
+Build's picker (**2. Build a tour**, or `--build`) does not list everything under
+`agents/` — it defaults to `needs_attention/`, a filtered view rebuilt fresh every
+time the roll-up runs. A listing drops out of it the moment you mark it contacted
+above, and reappears on its own once the same 5-day follow-up window `leads.html`
+already computes has passed — no separate step, nothing to undo. A listing with a
+`tour_` cut already built (delivered) drops out for good, the same way. Nothing
+in `agents/` moves or is renamed; `needs_attention/` is only symlinks, gitignored,
+regenerated on every roll-up the same way `prospects/` already is.
+
+If a client replies before the follow-up date and you need to rebuild sooner:
+
+```bash
+python3 tour.py --show-all
+```
+
+This sends the build picker straight to `agents/` instead, reaching every
+listing — snoozed or delivered included. See
+[`needs-attention-is-a-view-not-a-move`](_rules/needs-attention-is-a-view-not-a-move.md).
+
 ---
 
 ## 0c. One-time setup

@@ -13,6 +13,7 @@ shape, not the law.
 agents/<brand>/brand.json           per-brand defaults — tour.py ONLY, see below
 agents/<brand>/<listing>/<agent>/   photos/, config.json, out/, outreach_draft.txt  — cwd for a build
 prospects/<agent>__<phone>/         agents/ viewed by agent instead of brand — symlinks, gitignored
+needs_attention/<brand>/<listing>/  agents/ filtered to what's not archived or snoozed — symlinks, gitignored
 global_assets/logos/                shared branding, referenced by config.json
 global_assets/music/
 global_assets/lower_thirds/
@@ -113,6 +114,29 @@ listing removed from `agents/` just stops appearing here, no separate cleanup
 needed. It is gitignored like `agents/` itself — the directory names carry an
 agent's name and phone number, which is exactly the PII `agents/` is already
 gitignored to keep off the repo.
+
+## `needs_attention/` — `agents/`, filtered to what still needs a look
+
+`agents/` holds every listing forever, active and delivered side by side, which is
+exactly what makes it cluttered as more agents are added. `needs_attention/` is a
+second view over the same tree, filtered by [`needs-attention-is-a-view-not-a-move`](../_rules/needs-attention-is-a-view-not-a-move.md)'s
+three-tier rule, keeping the `agents/` tree shape rather than `prospects/`'s
+flattened agent-keyed one:
+
+```
+needs_attention/<brand>/<listing>/<agent>   -> ../../../agents/<brand>/<listing>/<agent>
+```
+
+Only **active** listings get a symlink here — not yet contacted, or contacted and
+past the follow-up window, and with no `tour_` cut yet. A listing just marked
+contacted, or already delivered (a `tour_` cut exists), simply has no entry until
+it becomes active again on its own; nothing is ever moved out of `agents/` to put
+it here or take it away. Built and rebuilt by `active_view.py`, called from the
+same `tour.py` roll-up call site as `prospects.rebuild()`, and read by `tour.py`'s
+own picker by default — `--show-all` reaches `agents/` directly, the only way in
+during a snooze window a client responds early. Gitignored and excluded from
+`.vercelignore` exactly like `prospects/`, for the same reason: it is a second
+path to the PII `agents/` already holds, not a new category of data.
 
 ## What a build reads
 

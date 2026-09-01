@@ -53,7 +53,7 @@ reading *prose only* is a rule nothing enforces. That is the list worth shrinkin
 
 <!-- RULE-TABLE:start -->
 
-38 rules.
+39 rules.
 
 | Area | Rule | Guarded by |
 |---|---|---|
@@ -69,6 +69,7 @@ reading *prose only* is a rule nothing enforces. That is the list worth shrinkin
 | naming | [A blank agent name gets `UNASSIGNED_AGENT`, never an empty path segment](a-blank-agent-name-gets-a-placeholder-slug.md) | `tests/test_naming.py`<br>`tests/test_status_naming.py`<br>`tests/test_home_screen.py` |
 | naming | [A folder with no lead row still gets a start line](a-folder-with-no-lead-row-still-starts.md) | `tests/test_status_naming.py` |
 | naming | [`brand.json` never carries `agent_name`, `agent_phone` or `agent_email`](brand-json-carries-no-agent-identity.md) | `tests/test_brand_scope.py` |
+| naming | [`needs_attention/` is a view, not a move](needs-attention-is-a-view-not-a-move.md) | `tests/test_active_view.py` |
 | naming | [The scrape names the folders; nothing else does](the-scrape-names-the-folders.md) | `tests/test_status_naming.py`<br>`tests/test_naming.py` |
 | naming | [The two slug functions agree on apostrophes, and are still two functions](two-slug-functions-one-apostrophe-rule.md) | `tests/test_naming.py` |
 | build | [A successful build deletes its own intermediates](a-build-deletes-its-own-intermediates.md) | `tests/test_cleanup_lineage.py` |
@@ -96,6 +97,6 @@ reading *prose only* is a rule nothing enforces. That is the list worth shrinkin
 | pii | [The PII gate runs itself, and an unwired gate is reported, never assumed](the-pii-gate-runs-itself.md) | `tests/test_hook_wired.py` |
 | docs | [Docs do not go stale](docs-do-not-go-stale.md) | `tests/test_photo_order.py` |
 
-Unguarded rules: 6 of 38.
+Unguarded rules: 6 of 39.
 
 <!-- RULE-TABLE:end -->

@@ -565,26 +565,58 @@ def record_contacted(brand, listing, agent, when=None):
     _refresh_leads_html()
 
 
-def contacted(brand, listing, agent):
-    """True once (brand, listing, agent) has a row in outreach/contacted.csv.
+def contacted_at(brand, listing, agent):
+    """The marked_at timestamp for (brand, listing, agent) in
+    outreach/contacted.csv, or None if it has no row there.
 
     reason: same read-by-header-name, tolerant-of-missing-file shape as
     published_listings()/published_cuts() -- a missing file means "nothing
-    marked" exactly as a missing leads.csv means "nothing scraped".
+    marked" exactly as a missing leads.csv means "nothing scraped". contacted()
+    below is the boolean view of this same read; kept as one implementation so
+    the two can never disagree.
     """
     if not os.path.isfile(CONTACTED):
-        return False
+        return None
     try:
         with open(CONTACTED, newline="", encoding="utf-8") as f:
             rows = list(csv.DictReader(f))
     except OSError:
-        return False
-    return any(
-        r.get("brand", "").strip() == brand
-        and r.get("listing", "").strip() == listing
-        and r.get("agent", "").strip() == agent
-        for r in rows
-    )
+        return None
+    for r in rows:
+        if (r.get("brand", "").strip() == brand
+                and r.get("listing", "").strip() == listing
+                and r.get("agent", "").strip() == agent):
+            return r.get("marked_at", "").strip()
+    return None
+
+
+def contacted(brand, listing, agent):
+    """True once (brand, listing, agent) has a row in outreach/contacted.csv."""
+    return contacted_at(brand, listing, agent) is not None
+
+
+def follow_up_date(marked_at):
+    """marked_at + scraper/lead.py's FOLLOW_UP_DAYS, as YYYY-MM-DD -- "" if
+    marked_at cannot be parsed or the scraper is unavailable.
+
+    reason: same lazy, function-scoped, exec-by-path shape as _jpeg_size() /
+    _refresh_leads_html() -- leads.html's own FOLLOW UP column already computes
+    this exact date; reusing scraper/lead.py's _follow_up_date() here means the
+    two can never drift apart into two different follow-up windows.
+    """
+    try:
+        import importlib.util
+        path = os.path.join(ROOT, "scraper", "lead.py")
+        spec = importlib.util.spec_from_file_location("_lead_followup", path)
+        mod = importlib.util.module_from_spec(spec)
+        sys.path.insert(0, os.path.dirname(path))
+        try:
+            spec.loader.exec_module(mod)
+        finally:
+            sys.path.pop(0)
+        return mod._follow_up_date(marked_at)
+    except Exception:
+        return ""
 
 
 # ---- the draft --------------------------------------------------------------

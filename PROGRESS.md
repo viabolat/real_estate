@@ -44,6 +44,39 @@ for whatever is in flight, which expire on ship) and `.claude/settings.local.jso
 
 ## 2. BUILT
 
+### 2026-09-01 — `needs_attention/`: a time-aware view over `agents/`, filtered by the follow-up window and delivery
+
+`agents/` holds every listing forever, active and delivered side by side, and the
+operator flagged it getting cluttered as more agents are added — in both
+Finder/CLI browsing and `tour.py`'s own build picker. The ask, in the operator's
+own words: once a client is emailed, don't show that listing again until its
+follow-up date; once delivered and paid, archive it and never show it again
+unless deliberately pulled out.
+
+`needs_attention/` is a second, gitignored symlink view over `agents/`, built the
+same way `prospects/` already is — wiped and rewritten from a fresh
+`status.survey()` on every roll-up, never a move, never a second record of a
+listing's state. New module `active_view.py` classifies each listing from facts
+already derived elsewhere: **archived** if a `tour_` cut already exists (delivery
+stands in for "paid" — there is no separate payment tracking in this repo);
+else **snoozed** if `publish.contacted_at()` has a row and its `follow_up_date()`
+hasn't arrived yet (the identical 5-day window `scraper/lead.py`'s `leads.html`
+column already computes, not a second constant); else **active**, which is the
+only tier that gets a symlink. `tour.py`'s build picker (`choose_listing()`)
+reads from this view by default; `--show-all` reaches `agents/` directly, for a
+client who responds before their follow-up date.
+
+Three `AskUserQuestion` rounds with the operator settled the open questions: a
+`tour_` cut as the stand-in for "purchased and paid"; one active-only view rather
+than a two-tier active/archived split; and the build picker defaulting to the
+same view rather than only the home-screen roll-up. New rule:
+[`needs-attention-is-a-view-not-a-move`](_rules/needs-attention-is-a-view-not-a-move.md).
+
+`tests/test_active_view.py`: 13 new tests (tiering at the exact `FOLLOW_UP_DAYS`
+boundary, archived-over-snoozed priority, stale-link removal on tier change,
+idempotency, and `choose_listing(show_all=...)` picker scope), all green.
+`_rules/reindex.py --check`: passes, 39 rules indexed.
+
 ### 2026-09-01 — `find_gaps.py` detects missing logos and blank agent emails; the fetch stays a live Chrome session
 
 `status.py` already flagged a missing brand logo loudly (`"logo blank/missing

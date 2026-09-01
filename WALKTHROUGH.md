@@ -105,7 +105,8 @@ Everything above, plus the commands you'll reach for outside the happy path.
 
 | Command | Does |
 |---|---|
-| `python3 tour.py` | Home screen: the roll-up, then build / import / brand settings / sweep. |
+| `python3 tour.py` | Home screen: the roll-up, then build / import / brand settings / sweep. Build's picker defaults to `needs_attention/` — not yet contacted, or past its follow-up window, and not delivered. |
+| `python3 tour.py --show-all` | Build's picker reaches every listing under `agents/`, including snoozed and delivered ones — for a client who responds before the follow-up date. |
 | `python3 tour.py --auto` | Every pending dump and unbuilt listing, hands-off, back to back. |
 | `python3 tour.py --auto <brand>/<listing>` | Just one listing — also how you resume after a halt. |
 | `python3 tour.py --auto <brand>/<listing> --ignore-floorplan-check` | Force past a floor-plan false positive, once. |

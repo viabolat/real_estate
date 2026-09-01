@@ -4,6 +4,7 @@ clips/
 out/
 agents/
 prospects/
+needs_attention/
 *.mp4
 
 # Secrets and leads. A .vercelignore takes precedence over .gitignore, so

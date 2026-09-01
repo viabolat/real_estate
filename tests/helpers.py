@@ -68,6 +68,17 @@ def prospects_module():
     return _repo_module("prospects_under_test", "prospects.py")
 
 
+def active_view_module():
+    """Import active_view.py once. Its rebuild() takes agents_dir/dest_dir as
+    arguments precisely so a test never has to touch the real needs_attention/."""
+    return _repo_module("active_view_under_test", "active_view.py")
+
+
+def publish_module():
+    """Import publish.py once, for contacted_at()/follow_up_date()."""
+    return _repo_module("publish_under_test", "publish.py")
+
+
 def floorplan_module():
     """Import floorplan.py once. Every function takes its inputs as arguments
     -- no cwd, no config.json -- so one import is safe to share."""

@@ -190,6 +190,7 @@ import shutil
 import subprocess
 import sys
 
+import active_view
 import floorplan
 import make_tour
 import prospects
@@ -355,16 +356,16 @@ def _dirs(path):
                   if os.path.isdir(os.path.join(path, d)) and not d.startswith("."))
 
 
-def brands():
-    return _dirs(LISTINGS_ROOT)
+def brands(root=LISTINGS_ROOT):
+    return _dirs(root)
 
 
-def listings(brand):
-    return _dirs(os.path.join(LISTINGS_ROOT, brand))
+def listings(brand, root=LISTINGS_ROOT):
+    return _dirs(os.path.join(root, brand))
 
 
-def agent_dirs(brand, listing):
-    return _dirs(os.path.join(LISTINGS_ROOT, brand, listing))
+def agent_dirs(brand, listing, root=LISTINGS_ROOT):
+    return _dirs(os.path.join(root, brand, listing))
 
 
 def assets(kind):
@@ -1291,6 +1292,11 @@ def roll_up(status):
         prospects.rebuild(rows, status.slugify)
     except OSError as e:
         say(f"\n  prospects/ index did not rebuild ({type(e).__name__}: {e}).")
+    try:
+        active_view.rebuild(rows, status.built_families)
+    except OSError as e:
+        say(f"\n  needs_attention/ index did not rebuild "
+            f"({type(e).__name__}: {e}).")
 
 
 def import_dumps():
@@ -1580,8 +1586,10 @@ def auto_flow(args):
         try:
             rows, _truth, _known = status.survey()
             prospects.rebuild(rows, status.slugify)
+            active_view.rebuild(rows, status.built_families)
         except OSError as e:
-            say(f"prospects/ index did not rebuild ({type(e).__name__}: {e}).")
+            say(f"prospects/ or needs_attention/ index did not rebuild "
+                f"({type(e).__name__}: {e}).")
 
 
 # ---- brand settings ----------------------------------------------------------
@@ -1696,7 +1704,7 @@ def reapply_brand(brand, pairs):
     say(f"  Updated {len(planned)} listing(s).")
 
 
-def home():
+def home(show_all=False):
     """The one screen: where every listing is, then the five things to do."""
     status, why = load_status()
     # reason: the roll-up opens every photo in every listing, the dump scan
@@ -1741,7 +1749,7 @@ def home():
         if choice in ("q", "quit", "exit"):
             return
         if choice == "1":
-            build_flow([])
+            build_flow([], show_all)
             return
         action = next((f for k, _, f in menu if k == choice), None)
         if action is None:
@@ -1795,10 +1803,36 @@ def listing_actions():
             known)
 
 
-def choose_listing():
-    """(brand, listing_dir), creating either inline."""
+def choose_listing(show_all=False):
+    """(brand, listing_dir), creating either inline.
+
+    show_all=False (the default) offers only what needs_attention/ currently
+    holds -- rebuilt fresh right here so a --build run that skipped the home
+    screen still sees a current view. Falls back to every listing under
+    agents/ whenever the active view can't be built, or is empty while
+    agents/ is not -- picking a listing should never look like "nothing here
+    yet" just because everything is snoozed or archived. --show-all skips
+    straight to that fallback on purpose, to reach one of those on demand.
+    """
+    root = LISTINGS_ROOT
+    if not show_all:
+        status, _why = load_status()
+        if status is not None:
+            try:
+                rows, _truth, _known = status.survey()
+                active_view.rebuild(rows, status.built_families)
+            except OSError:
+                pass
+            else:
+                if brands(active_view.NEEDS_ATTENTION):
+                    root = active_view.NEEDS_ATTENTION
+                elif brands(LISTINGS_ROOT):
+                    say("\n  Nothing needs attention right now -- showing "
+                        "everything under agents/. --show-all skips straight "
+                        "here next time.")
+
     actions, known = listing_actions()
-    bs = brands()
+    bs = brands(root)
     brand = pick("Brand", [(b, b) for b in bs] or [], default=0,
                  extra=("+", "+ New brand")) if bs else "+"
     made_by_hand = False
@@ -1810,7 +1844,7 @@ def choose_listing():
         made_by_hand = True
         os.makedirs(os.path.join(LISTINGS_ROOT, brand), exist_ok=True)
 
-    ls = listings(brand)
+    ls = listings(brand, root)
     name = pick("Listing", [(x, x) for x in ls] or [], default=0,
                 extra=("+", "+ New listing")) if ls else "+"
     if name == "+":
@@ -1820,7 +1854,7 @@ def choose_listing():
         name = _new_folder_name(raw, "Listing name")
         made_by_hand = True
 
-    ags = agent_dirs(brand, name)
+    ags = agent_dirs(brand, name, root)
     labelled = [(a, f"{a}   -- {actions[(brand, name, a)]}"
                  if (brand, name, a) in actions else a) for a in ags]
     agent = pick("Agent", labelled or [], default=0,
@@ -1853,6 +1887,11 @@ def choose_listing():
 
 def main():
     args = sys.argv[1:]
+    # reason: --show-all can ride alongside any other flag (or none) -- it only
+    # ever changes what choose_listing() offers, never which mode runs. Stripped
+    # out here so every check below still sees the mode flag it expects first.
+    show_all = "--show-all" in args
+    args = [a for a in args if a != "--show-all"]
     if args and args[0] == "--auto":
         auto_flow(args[1:])
         return
@@ -1866,25 +1905,26 @@ def main():
         raise SystemExit(
             __doc__.strip().splitlines()[0] +
             "\n\n    python3 tour.py [--build | --check-photos | --auto | "
-            "--publish-pending | --sweep-published-samples [--yes]]")
+            "--publish-pending | --sweep-published-samples [--yes]] "
+            "[--show-all]")
     # reason: --check-photos and --build are the two ways past the home screen.
     # The roll-up is worth a second of startup when you are deciding what to
     # work on and pure noise when you already know, so it is skippable -- but
     # only explicitly. The default is still the screen that answers "where am I".
     if args:
-        build_flow(args)
+        build_flow(args, show_all)
     else:
-        home()
+        home(show_all)
 
 
-def build_flow(args):
+def build_flow(args, show_all=False):
     """Pick a listing, ask the short set, walk the three rungs. Unchanged.
 
     reason: this is the whole of what main() used to be, moved down a level so a
     home screen could sit in front of it. Every rung, prompt, default, refusal
     and flag below is byte-for-byte what it was.
     """
-    brand, listing_dir = choose_listing()
+    brand, listing_dir = choose_listing(show_all)
     say(f"\n{os.path.relpath(listing_dir, ROOT)}")
 
     if not photos(listing_dir):
