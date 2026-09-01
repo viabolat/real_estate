@@ -44,6 +44,117 @@ for whatever is in flight, which expire on ship) and `.claude/settings.local.jso
 
 ## 2. BUILT
 
+### 2026-09-01 — `find_gaps.py` detects missing logos and blank agent emails; the fetch stays a live Chrome session
+
+`status.py` already flagged a missing brand logo loudly (`"logo blank/missing
+-- add it to brand.json"`), but there was no path from that message to
+actually acquiring the file, and no equivalent flag at all for a blank
+`agent_email` — Zillow rarely exposes one, and most of `leads.csv` is blank
+in that column. The operator asked for both gaps surfaced clearly and for
+Claude in Chrome to be usable to go find and fill them, keyed off
+`agent_name`/`broker_name` already in `leads.csv` — the same workflow an
+earlier session that day used manually to source four new Boston prospects.
+
+`scraper/find_gaps.py` is the new, strictly **read-only** half of that:
+reuses `photos.py`'s `slugify()`/`UNASSIGNED_AGENT` to derive the same
+`agents/<brand>/<listing>/<agent>/` key `target_for()` would from a raw dump
+(reproduced here from a `leads.csv` row, since `target_for()` itself needs
+dump text to run), sorts every brokerage's logo into `ok` / `available` /
+`near_miss` / `gap`, and lists every listing with a blank `agent_email`
+alongside `agent_name`/`broker_name`/`agent_phone` for context. `--open`/
+`--open-all` only call `webbrowser.open()` on a real gap — no fetch, no
+download, no write, ever. See
+[`find-gaps-detects-and-reports-it-never-writes`](_rules/find-gaps-detects-and-reports-it-never-writes.md).
+
+The fetch itself — the logo PNG landing on disk, and the `agent_email` write
+into `config.json` — happens in a live Claude Code + Chrome session
+following the workflow now documented in `STEPS.md`, right after the
+missing-logo `--auto` halt. That workflow is not automatable further: a
+logo landing on disk from the network is a download, and the Claude Code
+environment requires explicit per-file permission for every one, always —
+nothing written in this repo can waive or batch that. The `agent_email`
+write has no such gate; it is a plain edit to an already-gitignored
+`config.json`, never read by `make_tour.py`, so the operator asked for it to
+land with no per-agent confirmation.
+
+**Overrides a standing preference, on purpose.** §7 has read *"Logos and
+music are the operator's to supply; automate the rest"* since 2026-08-30.
+Chrome-assisted logo fetching directly overrides the logo half of that
+sentence. The operator confirmed this explicitly (not something this session
+inferred) when asked directly whether the standing preference should still
+hold — see the footnote on that bullet.
+
+Verified against this clone's own live state (which will differ from
+another clone's, since `agents/` is gitignored and machine-local — this is
+what the first `find_gaps.py` run on any given clone is actually for, not a
+fixed list): `coldwell_banker_realty_easton` and `insight_realty_group` had
+already resolved their logos by the time this shipped (both read `ok`);
+`donahue_real_estate_co` read `near_miss` against `global_assets/logos/
+donahue.png` (substring match); `engel_volkers_newton` read `available`
+against an exact, unclaimed `global_assets/logos/engel_volkers_newton.png`.
+Four listings — the same four Boston prospects from the same day — carried
+the blank `agent_email`.
+
+`tests/test_find_gaps.py`: 294 tests total, ~2s, no ffmpeg.
+`python3 check_pii.py`: clean.
+
+### 2026-09-01 — Two revisions to the gap workflow above, same day: Zillow moves first, and the fetch stops being optional
+
+Two corrections to the `find_gaps.py` workflow shipped the same day, after real
+use against live gaps turned up problems with the plan as first written.
+
+**Zillow's profile page moves to the front of the `agent_email` search order,
+and STEPS.md's claim about what it holds was wrong.** The original order
+(brokerage site → agent/team page → general search) explicitly skipped
+Zillow, on the read that its listing pages never expose an agent's email. The
+operator pointed out Zillow has a separate, dedicated profile page
+(`zillow.com/profile/<name>`) not covered by that reasoning, and asked for it
+checked first. Confirmed live, but with two hazards worth recording:
+
+- The profile page carries **two different contact surfaces**, easy to
+  conflate. The "Contact `<name>`" lead-capture forms (there are two — inline
+  and sidebar) are Name/Phone/Email/Message boxes where Email is the
+  *visitor's*, never the agent's, and are always empty. The agent's real
+  email, when Zillow has one on file, sits in a separate license/contact
+  block further down the page — a direct `mailto:` next to the agent's `tel:`
+  number, near "See license information." A `read_page` scoped to
+  `filter: "interactive"` or one that stops at the contact-form regions walks
+  right past it — confirmed on one agent's profile this session, where two
+  earlier passes missed a real `mailto:` that a full-page read
+  (`filter: "all"`) found immediately below the reviews section.
+- `zillow.com/profile/<Full%20Name>` is **not reliably unique**. Checked
+  against four agents this session, it silently resolved to a wrong person —
+  a different-city agent, a wholesaler, an unverifiable same-city
+  "Seller" — for three of the four. The only reliable disambiguation found:
+  locate the exact listing via its `zpid` (from `scraper/leads.csv`), confirm
+  "Listed by: `<name>` `<phone>`" matches the CSV row exactly, *then* trust
+  the profile search.
+
+`STEPS.md`'s "Fetching a logo or an agent email" section now documents both.
+
+**Running `find_gaps.py` after a new scrape stops being on-demand busywork
+and becomes a required step.** The original trigger-model decision — nothing
+fires automatically after `scraper/run.py`, `find_gaps.py` runs whenever
+someone feels like checking — undersold the actual risk: a brand-new
+brokerage from a scrape has *no* logo on file by construction, and a
+hand-run `tour.py` build (unlike `--auto`) doesn't halt on that, it silently
+ships the type-only card. The operator asked for the missing-logo case to be
+a mandated step, not an option. Nothing in the code changed — a script still
+can't summon a live Chrome session, and `--auto`'s existing hard halt and the
+manual build's existing silent fallback are both untouched, on purpose (see
+the operator's own choice between the two on offer). What changed is
+`STEPS.md` §0a: resolving a new brand's logo via `find_gaps.py` + a live
+Claude Code + Chrome session is now stated as required, right after the
+scrape, not as a fallback for when `--auto` halts.
+
+Verified against this clone's own live state: `engel_volkers_newton` — the
+one brand still `gap` after the original `find_gaps.py` build shipped —
+fetched via the now-mandatory workflow (Engel & Völkers' own wordmark, from
+Wikimedia Commons, cross-checked against the brokerage's own site before
+saving) and adopted at its exact brand slug,
+`global_assets/logos/engel_volkers_newton.png`. `find_gaps.py` now reports
+no brand logo gaps and no `agent_email` gaps on this clone.
+
 ### 2026-08-31 — A "contacted" tracker for leads
 
 There was no record of which leads had actually been emailed — `leads.csv` gave
@@ -1208,6 +1319,11 @@ once volume justifies it, and is not a reason to delay.
   `--auto` is not the argument typed.
 - **Explain why**, not just what, when automating something.
 - Logos and music are the operator's to supply; automate the rest.
+  **Narrowed 2026-09-01, on the operator's own instruction:** the logo half
+  now also covers Chrome-assisted *fetching*, not just a pointer to where one
+  is missing — `find_gaps.py` still only detects and reports; the fetch runs
+  in a live Claude Code + Chrome session. See
+  [`find-gaps-detects-and-reports-it-never-writes`](_rules/find-gaps-detects-and-reports-it-never-writes.md).
 - **Walk through the CLI.** Give the commands to run rather than executing the whole
   job — `tour.py` / `make_tour.py` are the interface and demonstrating them is the
   point.

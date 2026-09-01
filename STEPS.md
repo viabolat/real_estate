@@ -88,6 +88,22 @@ logo, drop the file at `global_assets/logos/<broker_name>.png` and let `--auto` 
 it (below). Until either happens the card falls back to the type-only design and the
 build is silent.
 
+Music can stay blank — a silent build is a valid deliverable. The logo can't, once
+this brand is going to ship: a brand-new brokerage from a scrape has no logo on file
+by definition, so before building anything under it, run
+
+```bash
+python3 scraper/find_gaps.py
+```
+
+and resolve any gap it names via a live Claude Code + Chrome session — see
+["Finding missing brand logos and agent emails"](#finding-missing-brand-logos-and-agent-emails)
+below. Do this once per new brand, right after the scrape, rather than waiting for
+an `--auto` halt to find out the hard way. `--auto` still hard-halts on a missing
+logo regardless; a hand-run `tour.py` build does not — it silently falls back to the
+type-only card — so this step is the only thing standing between a new brand and a
+listing that ships with no brand mark on it.
+
 To see where every listing stands:
 
 ```bash
@@ -204,7 +220,86 @@ its behalf. The fastest way to clear it: ask a Claude Code session with the
 Chrome tool to open the brokerage's own site, save its mark to
 `global_assets/logos/<brand>.png` (the exact slug the halt names), and rerun
 `--auto`. It picks the file up the same way it would if you had saved it by
-hand — see the brand-slug lookup above.
+hand — see the brand-slug lookup above. `find_gaps.py`, below, is how you find
+every listing waiting on a logo or an `agent_email` before you get here one halt
+at a time — run it right after the scrape, not after the halt.
+
+### Finding missing brand logos and agent emails
+
+```bash
+python3 scraper/find_gaps.py             # human-readable table
+python3 scraper/find_gaps.py --json      # same data, for a live session to consume
+python3 scraper/find_gaps.py --open      # opens up to 5 search tabs; --open-all lifts the cap
+```
+
+Read-only — nothing in the script itself writes a `brand.json`, a `config.json`, or
+a logo file; see
+[`find-gaps-detects-and-reports-it-never-writes`](_rules/find-gaps-detects-and-reports-it-never-writes.md).
+Nothing *fires* it automatically either — `scraper/run.py` doesn't call it — but
+running it is no longer optional busywork: do it once per new brand right after a
+scrape (§0a, above), not just when you happen to hit an `--auto` halt or feel like
+checking.
+
+Every brokerage in `leads.csv` with an `agents/<brand>/` folder gets sorted
+into one of four logo buckets:
+
+- **`ok`** — `brand.json`'s own `logo` already resolves. Not printed.
+- **`available`** — nothing set, but `global_assets/logos/<brand>.png`
+  already exists, unclaimed. Point `brand.json` at it (or run `--auto`
+  once) — no fetch needed.
+- **`near_miss`** — nothing exact, but a plausible existing file (a
+  substring or acronym match, e.g. `donahue.png` for
+  `donahue_real_estate_co`, or `tcc.png` for
+  `the_collaborative_companies`). Worth an eyeball before you decide it's
+  the same mark; never auto-adopted.
+- **`gap`** — nothing exact or plausible. A real fetch target.
+
+Every listing whose `config.json` exists and still has a blank `agent_email`
+is listed alongside it, with `agent_name`, `broker_name` and `agent_phone`
+for context (disambiguating a common name) and the exact `config.json` path
+to edit.
+
+### Fetching a logo or an agent email with a live Claude Code + Chrome session
+
+The repeatable version of the manual workflow this was built from. Run
+`python3 scraper/find_gaps.py --json` first and work the list it returns.
+
+**A logo gap (`near_miss` or `gap`).** Search or open the brokerage's own
+site, confirm the mark, then ask to save it to
+`global_assets/logos/<brand>.png` — the exact slug `find_gaps.py` named.
+Every download needs the session's explicit permission, every file, every
+time; nothing here waives or batches that, and a `near_miss` file already on
+disk is a candidate to confirm, not a reason to skip asking before saving a
+new one over or beside it.
+
+**An `agent_email` gap.** Check `https://www.zillow.com/profile/<agent_name>`
+first — the profile page, not the listing itself, which is what Zillow never
+exposes an email on. Then the brokerage's own site or that agent's team page;
+fall back to a general web search per agent only once both turn up nothing.
+Once found, write it straight into the named `config.json`'s `agent_email` —
+no per-agent confirmation needed, that gate was deliberately left off.
+`agent_email` is never read by `make_tour.py`, so a wrong guess here cannot
+reach a build; the worst case is a stale or bounced address, corrected the
+same way.
+
+The profile page carries two contact surfaces that are easy to conflate.
+The "Contact `<name>`" forms (there are two — one inline, one in a sidebar)
+are Name / Phone / Email / Message boxes where Email is the *visitor's*,
+never the agent's; they're always empty and not worth reading. The agent's
+own email, when Zillow has one on file, sits in a separate license/contact
+block further down the page — a direct `mailto:` link next to the agent's
+`tel:` number, near the "See license information" control. It's easy to
+miss with a quick pass: a `read_page` scoped to `filter: "interactive"` or
+one that stops at the contact-form regions can walk right past it. Read the
+full page (`filter: "all"`, a generous `max_chars`) and look for a `mailto:`
+link near the phone number, not just inside a form. If it's not there,
+check for an "agent website" link near the bio — a secondary lead worth
+following before falling back to the brokerage site.
+
+Close the run with a one-line tally — found via the Zillow profile page vs.
+the brokerage's own site vs. a general search — so a lower-confidence guess
+stays visible in the summary even though nothing blocked it from being
+written.
 
 It never builds a draft and never publishes. Checking the mp4 in `out/`, then
 running `publish.py` from the listing folder (above), stays the last manual

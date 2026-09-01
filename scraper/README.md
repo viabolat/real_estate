@@ -175,6 +175,39 @@ python3 photos.py paste.txt --out-dir some/other/folder
 - Re-running on the same listing is safe/idempotent — files that already
   exist on disk aren't re-downloaded.
 
+## `find_gaps.py`
+
+Read-only report of two gaps the rest of the pipeline can't fill on its own —
+a brokerage with no logo `brand.json` can resolve, and a listing whose
+`config.json` still has a blank `agent_email`. Writes nothing: no
+`brand.json`, no `config.json`, no logo file, ever. See
+[`../_rules/find-gaps-detects-and-reports-it-never-writes.md`](../_rules/find-gaps-detects-and-reports-it-never-writes.md).
+
+```
+python3 find_gaps.py             # human-readable table
+python3 find_gaps.py --json      # same data, for a live session to consume
+python3 find_gaps.py --open      # opens up to 5 search tabs; --open-all lifts the cap
+```
+
+- Reuses `photos.py`'s `slugify()`/`UNASSIGNED_AGENT` — the same
+  `(broker_name, address, agent_name)` triple `target_for()` derives from a
+  raw dump, reproduced here from a `leads.csv` row since `target_for()` needs
+  dump text to run.
+- Every brokerage in `leads.csv` with an `agents/<brand>/` folder sorts into
+  one of four logo statuses: `ok` (resolves already, not printed),
+  `available` (an exact `global_assets/logos/<brand>.png` sits there
+  unclaimed), `near_miss` (a plausible existing file — a substring or
+  acronym match — worth an eyeball, never auto-adopted), or `gap` (nothing
+  exact or plausible).
+- Every listing with a `config.json` and a blank `agent_email` is listed with
+  `agent_name`/`broker_name`/`agent_phone` for context and the exact
+  `config.json` path to edit.
+- `--open`/`--open-all` only call `webbrowser.open()` on a real gap's search
+  results — they open tabs, they fetch and download nothing.
+- The actual logo file landing on disk, and the actual `config.json.agent_email`
+  write, both happen in a live Claude Code + Chrome session — see the two
+  workflows in `../STEPS.md`, right after the missing-logo `--auto` halt.
+
 ## Files & folders
 
 | Path | What it is |
@@ -183,6 +216,7 @@ python3 photos.py paste.txt --out-dir some/other/folder
 | `run.py` | Wrapper — runs `lead.py` then `photos.py` in one command. |
 | `lead.py` | Extracts property + agent info from `paste.txt`. |
 | `photos.py` | Downloads all listing photos from `paste.txt`. |
+| `find_gaps.py` | Read-only — reports missing brand logos and blank `agent_email`s. Prints to stdout only; writes nothing. |
 | `leads.csv` | Output — one row per listing ever processed by `lead.py`. Canonical data store. |
 | `leads.html` | Output — `leads.csv` rendered as a browser-viewable table. Regenerated every run; open it directly in a browser. |
 | `../agents/<broker>/<address>/photos/` | Output — numbered full-resolution `.jpg`s in gallery order, written into the build tree rather than under `scraper/`. |
