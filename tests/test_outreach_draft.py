@@ -94,7 +94,8 @@ class TestContactedRecord(unittest.TestCase):
     def test_record_then_lookup_round_trips(self):
         with tempfile.TemporaryDirectory() as d:
             contacted = os.path.join(d, "outreach", "contacted.csv")
-            with mock.patch.object(publish, "CONTACTED", contacted):
+            with mock.patch.object(publish, "CONTACTED", contacted), \
+                 mock.patch.object(publish, "LEADS_CSV", os.path.join(d, "leads.csv")):
                 self.assertFalse(publish.contacted("corcoran", "46_beacon_5",
                                                     "sean_obrien"))
                 publish.record_contacted("corcoran", "46_beacon_5", "sean_obrien")
@@ -111,7 +112,8 @@ class TestContactedRecord(unittest.TestCase):
     def test_appending_twice_keeps_one_header_and_two_rows(self):
         with tempfile.TemporaryDirectory() as d:
             contacted = os.path.join(d, "outreach", "contacted.csv")
-            with mock.patch.object(publish, "CONTACTED", contacted):
+            with mock.patch.object(publish, "CONTACTED", contacted), \
+                 mock.patch.object(publish, "LEADS_CSV", os.path.join(d, "leads.csv")):
                 publish.record_contacted("corcoran", "46_beacon_5", "sean_obrien")
                 publish.record_contacted("corcoran", "9_oak_st", "jane_doe")
             with open(contacted, newline="", encoding="utf-8") as f:
@@ -128,9 +130,36 @@ class TestContactedRecord(unittest.TestCase):
             links = os.path.join(d, "links.csv")
             contacted = os.path.join(d, "contacted.csv")
             with mock.patch.object(publish, "LINKS", links), \
-                 mock.patch.object(publish, "CONTACTED", contacted):
+                 mock.patch.object(publish, "CONTACTED", contacted), \
+                 mock.patch.object(publish, "LEADS_CSV", os.path.join(d, "leads.csv")):
                 publish.record_contacted("corcoran", "46_beacon_5", "sean_obrien")
             self.assertFalse(os.path.isfile(links))
+
+    def test_never_touches_the_real_leads_html(self):
+        """reason: _refresh_leads_html() reads module-level LEADS_CSV/LEADS_HTML
+        directly, not whatever CONTACTED was patched to -- a test that isolates
+        CONTACTED alone still lets record_contacted() write the real
+        scraper/leads.html, joined against this test's own throwaway contacted
+        row, clobbering every real lead's CONTACTED/FOLLOW UP columns to blank.
+        Every test in this class that calls record_contacted() must also patch
+        LEADS_CSV (or LEADS_HTML) so _refresh_leads_html()'s own
+        os.path.isfile(LEADS_CSV) guard no-ops it."""
+        def _read(path):
+            if not os.path.isfile(path):
+                return None
+            with open(path, encoding="utf-8") as f:
+                return f.read()
+
+        with tempfile.TemporaryDirectory() as d:
+            contacted = os.path.join(d, "outreach", "contacted.csv")
+            real_leads_html = publish.LEADS_HTML
+            before = _read(real_leads_html)
+            with mock.patch.object(publish, "CONTACTED", contacted), \
+                 mock.patch.object(publish, "LEADS_CSV", os.path.join(d, "leads.csv")):
+                publish.record_contacted("corcoran", "46_beacon_5", "sean_obrien")
+            after = _read(real_leads_html)
+        self.assertEqual(before, after, "record_contacted() touched the real "
+                          "scraper/leads.html")
 
     def test_marking_contacted_refreshes_leads_html(self):
         """reason: leads.html's CONTACTED column used to go stale the moment a
