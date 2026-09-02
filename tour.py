@@ -224,6 +224,13 @@ DRAFT_OUT = "draft.mp4"
 # reason: these two reshape the stitched intermediate itself, so changing either
 # invalidates it and rules out the fast --finish-only path.
 PACING_KEYS = ("clip_seconds", "xfade_seconds")
+
+# reason: the outro card burns these four into work_branded.mp4, and
+# --finish-only reuses that stitch whole. Correcting a wrong agent_phone
+# therefore redrew the lower third -- render_lower_third() runs on every pass --
+# but left the old number on the card. One cut, two phone numbers, and nothing in
+# the log saying so. These invalidate the stitch exactly like `card` does.
+CARD_TEXT_KEYS = ("address", "agent_name", "agent_phone", "brokerage")
 PRESETS = {"1080p": (1920, 1080), "720p": (1280, 720)}
 
 DEFAULTS = {
@@ -785,6 +792,9 @@ def rebuild_reason(listing_dir, cfg, preset, rung, silent_name):
     # length invalidates that intermediate exactly like the pacing keys do.
     if any(last.get("cfg", {}).get(k) != cfg[k] for k in ("card", "card_seconds")):
         return "the card changed"
+    if cfg["card"] != "none" and any(
+            last.get("cfg", {}).get(k) != cfg[k] for k in CARD_TEXT_KEYS):
+        return "the card's text changed"
     if last.get("photos") != photo_state(listing_dir):
         return "photos changed"
     return None

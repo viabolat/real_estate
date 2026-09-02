@@ -53,7 +53,7 @@ reading *prose only* is a rule nothing enforces. That is the list worth shrinkin
 
 <!-- RULE-TABLE:start -->
 
-43 rules.
+44 rules.
 
 | Area | Rule | Guarded by |
 |---|---|---|
@@ -84,6 +84,7 @@ reading *prose only* is a rule nothing enforces. That is the list worth shrinkin
 | card | [`--auto` adopts a brand's own logo by slug, and halts rather than ship the type-only card silently](auto-picks-up-the-brand-logo-by-slug.md) | `tests/test_auto_flow.py` |
 | card | [Branding is held off wherever the card is on screen, and the watermark is not](branding-is-held-off-under-the-card.md) | `tests/test_finish_window.py` |
 | card | [The card never rides in `work_silent.mp4`](the-card-never-rides-in-work-silent.md) | `tests/test_card_isolation.py` |
+| card | [The card's text invalidates the branded stitch](the-cards-text-invalidates-the-stitch.md) | `tests/test_auto_flow.py` |
 | card | [The lower third does not say what the card already says](the-lower-third-does-not-repeat-the-card.md) | *prose only* |
 | delivery | [A subset build must be structurally incapable of crossing families](a-subset-build-cannot-cross-families.md) | `tests/test_build_stage.py`<br>`tests/test_card_isolation.py` |
 | delivery | [Never send a `sample_` file as a deliverable, and never send a `tour_` file before sign-off](never-cross-the-sample-tour-boundary.md) | `tests/test_naming.py`<br>`tests/test_publish_gate.py` |
@@ -101,6 +102,6 @@ reading *prose only* is a rule nothing enforces. That is the list worth shrinkin
 | pii | [The PII gate runs itself, and an unwired gate is reported, never assumed](the-pii-gate-runs-itself.md) | `tests/test_hook_wired.py` |
 | docs | [Docs do not go stale](docs-do-not-go-stale.md) | `tests/test_photo_order.py` |
 
-Unguarded rules: 6 of 43.
+Unguarded rules: 6 of 44.
 
 <!-- RULE-TABLE:end -->

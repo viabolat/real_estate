@@ -501,6 +501,41 @@ This sends the build picker straight to `agents/` instead, reaching every
 listing — snoozed or delivered included. See
 [`needs-attention-is-a-view-not-a-move`](_rules/needs-attention-is-a-view-not-a-move.md).
 
+### Rerun one listing after a wrong phone number, name or address
+
+The agent's phone number appears twice in every cut: the **lower third** and the
+**outro card**. Both come from that listing's `config.json`. Fix the value there, in
+`agents/<brand>/<listing>/<agent>/config.json`, and also in the `agent_phone` column of
+that listing's `scraper/leads.csv` row — `leads.csv` is the ledger and stays the
+authority, but `config.json` is what actually renders.
+
+Then clear the built cuts so `stage()` falls back to `sample` and the listing becomes
+a target again, and rebuild just that one:
+
+```bash
+L=agents/<brand>/<listing>/<agent>
+rm -f $L/out/*_sample_*.mp4
+python3 tour.py --auto $L
+```
+
+Roughly a minute. `rebuild_reason()` sees `agent_phone` differ from `.last_build.json`,
+returns `"the card's text changed"` and drops `--finish-only` for `--keep-work`, so the
+outro card is redrawn rather than reused — the whole point of
+[`the-cards-text-invalidates-the-stitch`](_rules/the-cards-text-invalidates-the-stitch.md).
+Watch the log for `lower third: drawn from config.json (...)` and confirm the new
+number is in it.
+
+**If that listing was already published,** the wrong number is on the CDN and in the
+review link the agent has. Fixing the local file changes nothing they can see. Republish
+after the rebuild — `python3 tour.py --publish-pending`, or rung 4 for that one listing
+— which overwrites the same object at the same URL, so the link already sent keeps
+working. If they were also marked contacted, the outreach draft went out with that link;
+whether to say anything is a judgement call, not a command.
+
+**If the photos were also wrong**, this is not enough — `--finish-only` and the kept
+stitch both assume the photo set is unchanged. Delete `work_silent.mp4` too, or see
+[Add, remove, or replace a photo](#add-remove-or-replace-a-photo).
+
 ### A listing folder in the old layout — `migrate_layout.py`
 
 `status.py` reports `legacy layout -- migrate to <agent>/` for a listing folder
@@ -777,12 +812,25 @@ lengths.
 ```bash
 # in the listing folder, config.json:
 #   {"address": "46 Beacon St, Unit 5", "agent_name": "...", "agent_phone": "..."}
+rm -f work_branded.mp4                       # only if card is not "none"
 python3 ../../../../make_tour.py --finish-only
 ```
 No Canva export, no PNG. The lower third is drawn from those three fields, and any
 of them may be blank — blanks are dropped and the rest close up. A
 `lower_third.png` that exists still wins, so a hand-authored plate stays available
 for a listing that earns it.
+
+**The `rm` is not optional when there is an outro card.** The card carries the same
+address, agent name and phone, and it is *baked into* `work_branded.mp4`, which
+`--finish-only` reuses whole. The lower third is redrawn on every pass. Skip the `rm`
+and you ship one cut with the new text below and the old text on the card. With
+`work_branded.mp4` gone and `clips/` intact, `--finish-only` restitches the branded
+cut from the kept clips and redraws the card — still no per-photo re-encode. See
+[`the-cards-text-invalidates-the-stitch`](_rules/the-cards-text-invalidates-the-stitch.md).
+
+Going through `tour.py` instead handles this for you: `rebuild_reason()` compares
+`address`, `agent_name`, `agent_phone` and `brokerage` against `.last_build.json` and
+drops the fast path when any of them moved.
 
 ### Build from scratch
 ```bash

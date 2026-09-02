@@ -421,6 +421,40 @@ in `tests/test_naming.py`, `tests/test_auto_flow.py` and `tests/test_home_screen
 
 ---
 
+### 2026-09-02 — The card's text joins the `--finish-only` invalidation set
+
+**What:** `tour.py` gains `CARD_TEXT_KEYS = ("address", "agent_name", "agent_phone",
+"brokerage")`, and `rebuild_reason()` returns `"the card's text changed"` when any of
+them differs from `.last_build.json` and `card != "none"`. Guarded by
+`TestTheCardsTextInvalidatesTheStitch` in `tests/test_auto_flow.py`, one of whose
+tests reads `render_card()`'s own source so the two lists cannot drift.
+
+**Why:** the question was "how do I rerun a single listing, I had the wrong number for
+contact". Tracing it turned up a silent bug. The phone number is on screen twice, and
+the two surfaces are redrawn on different schedules: `render_lower_third()` runs
+unconditionally on every pass, while the outro card is baked into `work_branded.mp4`,
+which `--finish-only` reuses whole. `rebuild_reason()` compared `card` and
+`card_seconds` — the card's *mode* — but not the values printed on it. So the obvious
+fix (edit `config.json`, rerun) produced a cut with the corrected number in the lower
+third and the wrong number on the card, with nothing in the log to say so. Digits are
+the deliverable.
+
+**Alternatives rejected:** *always rebuild when config changes at all* — too blunt; a
+`logo` or `watermark` change is already handled elsewhere and a full re-encode of 40
+photos is the cost `--finish-only` exists to avoid. *Delete `work_branded.mp4` in the
+docs and leave the code alone* — that is a runbook step standing in for a check, and
+`docs-do-not-go-stale` notwithstanding, a step you can forget is not a guard. The
+`STEPS.md` note stays as well, for anyone driving `make_tour.py` directly.
+
+**Accepted risks:** the check is gated on `card != "none"`, so a listing with no card
+keeps the fast path — correct, since nothing is burned in and the lower third is
+redrawn anyway. All 16 existing `.last_build.json` records were verified to already
+carry the four keys, so this triggers no spurious rebuild on anything already built.
+`brokerage` only shows on the type-only card layout, which makes it a slightly
+over-broad trigger; not worth the branch to narrow.
+
+---
+
 ### [YYYY-MM-DD] — [Decision Title]
 <!-- Template. Copy this stanza above for the next entry; leave this one empty. -->
 **What:**

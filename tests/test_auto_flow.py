@@ -559,5 +559,66 @@ class AutoFlowRequiresAScopeForTheOverride(unittest.TestCase):
             tour.auto_flow(["--ignore-missing-logo-check"])
 
 
+class TestTheCardsTextInvalidatesTheStitch(unittest.TestCase):
+    """A correction to the card's text must not take the --finish-only path.
+
+    The outro card carries address / agent_name / agent_phone / brokerage, and it
+    is baked into work_branded.mp4. --finish-only reuses that stitch whole, while
+    render_lower_third() redraws the lower third on every pass -- so fixing a
+    wrong phone number in config.json used to produce one cut showing the new
+    number in the lower third and the old one on the card. Phone digits are the
+    deliverable here; a stale one on screen is the failure this guards.
+
+    Ids are short and non-phone-shaped on purpose -- check_pii.py matches by
+    shape, not just against leads.csv (tests/README.md).
+    """
+
+    def setUp(self):
+        self.tour = helpers.tour_module()
+        self.d = tempfile.mkdtemp(prefix="rebuild_reason_")
+        self.addCleanup(shutil.rmtree, self.d, True)
+        open(os.path.join(self.d, "work_silent.mp4"), "wb").close()
+        self.cfg = dict(self.tour.DEFAULTS)
+        self.cfg.update({"address": "1 Test St", "agent_name": "A Team",
+                         "agent_phone": "1001", "brokerage": "A Brokerage"})
+        self.tour.save_state(self.d, "delivery", dict(self.cfg), "1080p")
+
+    def reason(self, **changes):
+        cfg = dict(self.cfg, **changes)
+        return self.tour.rebuild_reason(self.d, cfg, "1080p", "delivery",
+                                        "work_silent.mp4")
+
+    def test_an_unchanged_config_still_takes_the_fast_path(self):
+        self.assertIsNone(self.reason())
+
+    def test_a_corrected_phone_forces_a_rebuild(self):
+        self.assertEqual(self.reason(agent_phone="2002"),
+                         "the card's text changed")
+
+    def test_every_card_text_key_forces_a_rebuild(self):
+        for key, value in (("address", "2 Test St"), ("agent_name", "B Team"),
+                           ("agent_phone", "2002"),
+                           ("brokerage", "B Brokerage")):
+            with self.subTest(key=key):
+                self.assertIsNotNone(self.reason(**{key: value}))
+
+    def test_the_card_keys_are_exactly_what_render_card_draws(self):
+        # reason: the two lists drifting is the whole failure mode -- a fifth
+        # line added to the card with no matching key here silently returns the
+        # stale-text bug. make_tour.py names them as module globals.
+        with open(os.path.join(os.path.dirname(os.path.dirname(
+                os.path.abspath(__file__))), "make_tour.py")) as f:
+            src = f.read()
+        card = src[src.index("def render_card("):src.index("def card_clip(")]
+        drawn = {g for g in ("ADDRESS", "AGENT_NAME", "AGENT_PHONE", "BROKERAGE")
+                 if g in card}
+        self.assertEqual({k.upper() for k in self.tour.CARD_TEXT_KEYS}, drawn)
+
+    def test_no_card_means_the_text_is_not_a_reason(self):
+        self.cfg["card"] = "none"
+        self.tour.save_state(self.d, "delivery", dict(self.cfg), "1080p")
+        self.assertIsNone(self.reason(agent_phone="2002"))
+
+
 if __name__ == "__main__":
     unittest.main()
