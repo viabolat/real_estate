@@ -65,6 +65,49 @@ for whatever is in flight, which expire on ship) and `.claude/settings.local.jso
 
 ## 2. BUILT
 
+### 2026-09-03 — `dashboard.py`: the leads and listings in a browser, read-only
+
+`python3 dashboard.py`, or **6. Open the dashboard** from `tour.py`'s home
+screen. Stdlib `http.server`, no new dependency. It binds `127.0.0.1:8765`
+(falling back to a free port), renders in memory on every request, and writes
+nothing anywhere.
+
+One page: every listing on one of seven rungs — unimported, ready to build,
+sample built, published, contacted, follow-up due, delivered — then the full
+lead table, `status.py`'s naming audit, and the open logo/email gaps. Sample
+cuts play inline with working seek (RFC 7233 `Range`: 206, 416 past the end,
+200 for a missing or malformed header).
+
+Every rung comes from a helper that already existed. Nothing new is derived and
+nothing is stored: `status.survey()`/`audit()`, `tour.stage()`/`sample_cuts()`/
+`unimported_dumps()`, `status.published()`/`contacted()`/`followup_due()`,
+`find_gaps.brand_gaps()`/`email_gaps()`. If the dashboard and
+`python3 status.py --long` disagree about a listing, the dashboard is wrong.
+
+The ladder is ordered highest-first, which is what keeps it a partition:
+`followup_due()` already implies contacted, so a due listing is rung 6 and never
+also rung 5. Rendering the nested sets as two independent filters is how two
+agents got the same email twice on 2026-09-02.
+
+Three refusals, each with a test: it holds no writer (its only `open()` is
+`"rb"`); `tour_` cuts are 403 at the socket, before the filesystem is touched,
+so the refusal is identical whether or not the deliverable exists; and paths are
+confined to `agents/` by `realpath`, which catches an encoded `..` and a symlink
+out of the tree that `normpath` would not.
+
+`scraper/lead.py`'s stylesheet came out into a `lead.CSS` constant so the
+dashboard shares it rather than forking it; `leads.html` output is byte-identical.
+
+**On the two ignore gates.** `.vercelignore` gains `dashboard.py`.
+`.gitignore` gains **nothing, deliberately** — the module is committed source
+that produces no cache, pid, log or rendered file, so there is no artifact to
+ignore, and a pattern for a file that is never written would be a lie in the
+ignore file. `check_pii.py` now scans `dashboard.py` and `tests/test_dashboard.py`
+on every run, which is the point.
+
+New rule: [`the-dashboard-reads-it-never-writes`](_rules/the-dashboard-reads-it-never-writes.md)
+(45 → 46). 465 tests, still no ffmpeg.
+
 ### 2026-09-02 — `--fetch` wrote the Netflix wordmark as a brokerage's logo
 
 Found by running it. `fill_gaps.py --fetch` closed the two real logo gaps
@@ -1214,7 +1257,7 @@ coldwell_banker/2_comm_ave                  -> coldwell_banker_realty_boston/2_c
 gibson_sothebys/260_262_commonwealth_ave_1b -> gibson_sothebys_international_realty/260_262_commonwealth_ave_1b
 ```
 
-`boston_advanced_realty/335_w_2nd_st_unit_8` was already correct. `brewester/9_w_cedar`
+One further brand/listing pair was already correct. `brewester/9_w_cedar`
 and `corcoran/46_beacon_5` have no lead row and were left untouched — they predate the
 scraper and there is nothing to derive their names from.
 
@@ -1259,7 +1302,7 @@ of what produced a shipped video.
 **Resolution verdict at scrape time.** `report_resolution()` gives `make_tour.py`'s
 gate verdict while the files are already on disk. The variant in a photo URL is a
 ceiling, not a promise: `uncropped_scaled_within_1536_1152` returns the original
-untouched when the original is smaller, and `335_w_2nd_st_unit_8` came back at **346px**
+untouched when the original is smaller, and one listing came back at **346px**
 from a URL advertising 1536. Finding that out 20 minutes into a build is the expensive
 way.
 
@@ -1325,13 +1368,15 @@ What stays here is what `status.py` cannot derive -- the decisions:
   answer, not a failure. See
   [`the-scrape-names-the-folders`](_rules/the-scrape-names-the-folders.md) and
   [`a-folder-with-no-lead-row-still-starts`](_rules/a-folder-with-no-lead-row-still-starts.md).
-- **`boston_advanced_realty/335_w_2nd_st_unit_8` was deleted from disk** some time
-  before 2026-08-26 -- the "photos too small, do not build" listing. Its lead row is
-  still in `leads.csv` and its brand folder still exists, so `status.py` reports
-  `boston_advanced_realty/- ... no listings yet`. Re-running `run.py` on its dump
-  would scaffold it again, and the photos would still be too small. The deletion was
-  never recorded at the time; it is recorded here now. Still gone as of 2026-09-02:
-  no dump for it survived the laptop transfer, so it cannot be re-scaffolded here.
+- **One brokerage and its single listing were removed entirely on 2026-09-03**, at
+  the operator's request -- the "photos too small, do not build" listing, re-scraped
+  2026-09-02 and then withdrawn. Everything went in one pass: the listing folder, the
+  `leads.csv` row, the dump, the `prospects/` and `needs_attention/` links, the brand
+  folder, its `brand.json` and its logo. It was never published, so no `links.csv` or
+  `contacted.csv` row existed and nothing reached the CDN, and none of it was ever
+  tracked by git on any branch. The names are deliberately not recorded here: a
+  withdrawal that leaves the identifiers in the decision log is not a withdrawal.
+  Without a dump it cannot be re-scaffolded.
 - **`scraper/dumps/` holds two real dumps** -- `5_joy_res_pne.txt` and
   `75_clarendon_st_apt_602.txt`, both already imported. The four 0-byte `paste*.txt`
   stubs that used to sit beside them were deleted 2026-09-02; both scraper scripts

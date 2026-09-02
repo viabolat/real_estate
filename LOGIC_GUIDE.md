@@ -7,9 +7,65 @@ Do not defer updates to end-of-session.
 
 ## Entries
 
+### 2026-09-03 — The dashboard is a socket, not a file, and it reads only
+
+**What:** `dashboard.py` — every lead and listing on one page in a browser, on a
+sixth home-screen entry and as a standalone command. It joins what `status.py`'s
+roll-up, `scraper/leads.html`, `needs_attention/` and the three `outreach/` CSVs
+already know, and plays the sample cut.
+
+**Why a socket and not a written HTML file.** The obvious implementation is the
+one already in the repo: `lead.write_html_table()` renders `scraper/leads.html`
+to disk. That file *is* the lead list, and it survived unignored for a while
+because a `#` comment sat on the same line as its `.gitignore` pattern. A second
+PII artifact on disk is a second thing that has to be remembered in two ignore
+files forever. Rendering into a response body means there is nothing to
+remember: `check_pii.py` cannot fail to scan a file that does not exist. The
+cost is a running process; the bind is `127.0.0.1` and the source contains no
+wildcard host.
+
+**Why read-only.** A "mark contacted" button would give `outreach/contacted.csv`
+a second writer, and [`the-draft-is-automatic-the-send-is-not`](_rules/the-draft-is-automatic-the-send-is-not.md)
+already records what that costs — a send nobody decided. A "publish" button
+would be a second owner of a prompt [`a-publish-prompt-has-one-owner`](_rules/a-publish-prompt-has-one-owner.md)
+holds to one. The dashboard's job ends at showing that something is due.
+
+**Why the ladder is ordered 7 → 2 rather than seven independent filters.**
+`publish.followup_due()` is derived from `contacted_at()`, so rung 6 is a strict
+subset of rung 5 — the sets are nested, not disjoint. Two filters would list
+every due listing twice: once under a heading meaning "leave it alone" and once
+under one meaning "act". That is the duplicate-send shape from 2026-09-02, where
+two agents received a byte-identical second email. A single first-match ladder
+makes the rungs a partition, which is the same reason `needs_attention/` orders
+`archived > snoozed > active`. There is no eighth rung: "signed off" has no
+derivable signal, and inventing a marker for it is what
+[`needs-attention-is-a-view-not-a-move`](_rules/needs-attention-is-a-view-not-a-move.md)
+forbids.
+
+**Why the family gate sits at the socket, not the renderer.** Hiding `tour_`
+cuts at render time would leave the URL working for anyone who guessed it, and a
+loopback URL becomes a publishing boundary the moment it is pasted into a chat.
+`resolve_media()` asks `publish.family()` *before touching the filesystem*, so a
+`tour_` request is 403 whether or not that cut exists — the 403-vs-404
+difference would otherwise say which listings are delivered. `family()` stays
+the single owner; `dashboard.py` never tests the prefix, which is now enforced
+by an assertion on its own source.
+
+**What was refactored to avoid a fork:** `scraper/lead.py`'s stylesheet came out
+into a `lead.CSS` constant, with `HTML_TEMPLATE` rebuilt from it through a
+`_brace_escape()` helper — `HTML_TEMPLATE` is consumed by `.format()` and needs
+doubled braces, `dashboard.py` concatenates and wants single ones. `leads.html`
+output is byte-identical. One stylesheet, one dark-mode rule, one place.
+
+**The ignore-gate asymmetry, stated so it reads as a decision:** `.vercelignore`
+gains `dashboard.py`; `.gitignore` gains nothing. The module is committed source
+that produces no artifact — `check_pii.py` scans it and should — but Vercel is
+the one host in this project, and a file whose purpose is serving PII over a
+socket does not get uploaded to it.
+
 ### 2026-09-02 — The three lost listings came back from a headed browser, not a paste
-**What:** `16_holmfield_ave`, `41_worcester_sq_penthouse` and `335_w_2nd_st_unit_8`
-were re-scraped without the operator copying a page by hand. A scratchpad CDP client
+**What:** `16_holmfield_ave`, `41_worcester_sq_penthouse` and a third listing since
+removed at the operator's request (2026-09-03) were re-scraped without the operator copying a page by hand. A scratchpad CDP client
 drove a real headed Chrome (`DISPLAY=:0`, WSLg), read `document.documentElement
 .outerHTML` once `__NEXT_DATA__` was present, and composed `scraper/dumps/<name>.txt`
 in the shape the parsers already expect — one compact JSON header line, then one

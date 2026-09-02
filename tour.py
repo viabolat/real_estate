@@ -32,9 +32,9 @@ actually are, only one is a decision:
   make_tour.py  is the engine                                  -> escape hatch
   unittest      is developer-only                              -> out of the loop
 
-So this opens on status.py's roll-up and five choices: build, import the dumps
+So this opens on status.py's roll-up and six choices: build, import the dumps
 that have no folder yet, publish a review link, edit a brand, mark leads as
-contacted. Nothing behind that screen changed — every rung, prompt, default and
+contacted, open the read-only dashboard. Nothing behind that screen changed — every rung, prompt, default and
 refusal is what it was, and every script named above still runs standalone
 exactly as documented.
 
@@ -1145,7 +1145,7 @@ def check_photos(listing_dir):
 # pre-push hook. vercel is one-time setup, so it left the recurring runbook.
 # publish was already a rung. status is "where am I", so it is the screen this
 # opens on. run.py is a real action, but a DETECTABLE one. What is left is
-# one command, a roll-up and five choices. Nothing behind this screen changed:
+# one command, a roll-up and six choices. Nothing behind this screen changed:
 # every rung, prompt, default and refusal in the build flow is what it was, and
 # every script still runs standalone from the CLI.
 
@@ -1767,8 +1767,29 @@ def reapply_brand(brand, pairs):
     say(f"  Updated {len(planned)} listing(s).")
 
 
+def dashboard_action():
+    """Menu route to dashboard.py: the same rows, in a browser.
+
+    Read-only, and blocking on purpose -- the operator is looking at it.
+    Ctrl-C closes the server and comes back here. The import is inside the
+    function for the same reason load_status() guards status.py: a missing
+    or broken dashboard must not take the home screen down with it.
+    """
+    try:
+        import dashboard
+    except Exception as exc:
+        say(f"  The dashboard is unavailable ({exc}).")
+        return
+    say("\n  Read-only -- every change is still made from this menu.")
+    say("  Ctrl-C closes it and comes back here.")
+    try:
+        dashboard.serve()
+    except OSError as exc:
+        say(f"  Could not start the dashboard ({exc}).")
+
+
 def home(show_all=False):
-    """The one screen: where every listing is, then the five things to do."""
+    """The one screen: where every listing is, then the six things to do."""
     status, why = load_status()
     # reason: the roll-up opens every photo in every listing, the dump scan
     # re-reads scraper/dumps/, and the gate banner spawns check_pii.py over the
@@ -1803,6 +1824,7 @@ def home(show_all=False):
             ("3", "Publish a review link", publish_action),
             ("4", "Brand settings", brand_settings),
             ("5", "Mark leads as contacted", mark_contacted_action),
+            ("6", "Open the dashboard", dashboard_action),
         ]
         say("")
         for key, label, _ in menu:
@@ -1816,7 +1838,7 @@ def home(show_all=False):
             return
         action = next((f for k, _, f in menu if k == choice), None)
         if action is None:
-            say("  Pick 1-5, or q to quit.")
+            say("  Pick 1-6, or q to quit.")
             continue
         action()
         say("")

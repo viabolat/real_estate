@@ -30,7 +30,7 @@ python3 tour.py
 ```
 
 It opens on the roll-up — every listing, its photo count, its smallest photo and
-the one thing standing between it and a deliverable — then offers five things:
+the one thing standing between it and a deliverable — then offers six things:
 
 | | | |
 |---|---|---|
@@ -39,6 +39,7 @@ the one thing standing between it and a deliverable — then offers five things:
 | **3** | Publish a review link | the watermarked cuts, to the review bucket |
 | **4** | Brand settings | what a brokerage sets once, and re-applying it |
 | **5** | Mark leads as contacted | walks every published, not-yet-contacted listing |
+| **6** | Open the dashboard | the same rows in a browser, read-only, §the dashboard |
 
 Which dumps are pending is worked out by checking whether
 `agents/<brand>/<listing>/<agent>` exists. There is no marker file and nothing to
@@ -495,6 +496,48 @@ the result shows up as a `CONTACTED` column in `status.py`'s roll-up and in
 If a listing's `config.json` has an `agent_email`, `leads.html` shows that
 instead of whatever (possibly blank) email Zillow's scrape carried — see
 [`brand-json-carries-no-agent-identity`](_rules/brand-json-carries-no-agent-identity.md).
+
+### The dashboard — every lead and listing on one page
+
+```bash
+python3 dashboard.py                       # opens your browser at 127.0.0.1:8765
+python3 dashboard.py --port 9000           # if 8765 is taken (it also falls back
+                                           # to a free port on its own)
+python3 dashboard.py --no-browser          # print the URL, open nothing
+```
+
+Or **6. Open the dashboard** from `tour.py`'s home screen. Ctrl-C in that
+terminal closes it and returns to the menu.
+
+It shows every listing on one of seven rungs — *unimported, ready to build,
+sample built, published, contacted, follow-up due, delivered* — then the whole
+lead table, `status.py`'s naming audit, and the open logo/email gaps. Each rung
+is derived from the same helpers the terminal roll-up uses, on every request;
+nothing is cached and nothing is stored. If `python3 status.py --long` and the
+dashboard disagree about a listing, the dashboard is wrong.
+
+A listing appears on exactly one rung, tested highest-first. That matters most
+between 5 and 6: a follow-up-due listing is *also* a contacted one, so showing
+both would list it under a heading that means "leave it alone" and one that
+means "act" — which is how two agents got the same email twice on 2026-09-02.
+
+**Three things it deliberately will not do.**
+
+- **It writes nothing.** No file, no CSV row, no marker. Publishing, marking a
+  lead contacted and editing a brand all stay behind `tour.py`'s prompts. The
+  dashboard tells you something is due; you still decide it.
+- **It only plays `sample_` cuts.** A `tour_` URL gets a **403** at the socket,
+  before the file is even looked for — so the refusal is identical whether or
+  not the deliverable exists. Paths are confined to `agents/` by `realpath`, so
+  `..` and a symlink out of the tree are both refused.
+- **It binds to `127.0.0.1` and nothing else.** The page carries real agent
+  names, phone numbers and email addresses in full, which is why it is local
+  only — and why it is **not a screen-share**. Check with
+  `ss -ltn | grep 8765`: `127.0.0.1`, never `0.0.0.0`.
+
+Video seeking works — the media route implements RFC 7233 `Range`, answering
+**206** with a `Content-Range`, **416** for a range past the end of the file, and
+**200** with the whole cut when the header is missing or malformed.
 
 ### `needs_attention/` — why the build picker stops showing a listing
 

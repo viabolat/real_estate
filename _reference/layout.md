@@ -20,6 +20,9 @@ global_assets/lower_thirds/
 scraper/                            Zillow dump -> leads.csv + a scaffolded listing
 publish.py                          sample_ cuts -> the public review bucket. NEVER tour_
 status.py                           read-only: every listing and its one next action.
+dashboard.py                        the same rows in a browser -- 127.0.0.1 only,
+                                    rendered in memory, adds no folder and writes
+                                    nothing. sample_ cuts stream; tour_ is 403
                                     Names the run each is on -- see the two-run rule
 floorplan.py                        flags a likely floor plan/site map photo -- never
                                     reorders or deletes. Called from tour.py --auto

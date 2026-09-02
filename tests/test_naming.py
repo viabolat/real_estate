@@ -118,8 +118,8 @@ class TestSlug(unittest.TestCase):
                  "Coldwell Banker Realty - Boston",
                  "Coldwell Banker Realty - Waltham",
                  "260-262 Commonwealth Ave #1B",
-                 "335 W 2nd St UNIT 8",
-                 "Sean O'Brien", "Boston Advanced Realty", "Compass"]
+                 "120 E 3rd St UNIT 4",
+                 "Sean O'Brien", "Example Premier Realty", "Compass"]
         with helpers.listing(config={}) as (m, _):
             for text in cases:
                 self.assertEqual(m._slug(text), slugify(text),

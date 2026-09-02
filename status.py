@@ -445,7 +445,7 @@ def survey():
 
 
 def audit(rows, truth, known):
-    """(drift, unverifiable) -- folders whose names the scrape does not agree with.
+    """(drift, unverifiable, orphaned_marks) -- where the names disagree.
 
     reason: the drift check matches on agent_phone out of config.json, so a
     folder with no config.json -- which is the strongest signal it was never

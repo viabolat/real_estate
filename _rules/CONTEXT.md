@@ -21,7 +21,7 @@ drifted 135 lines out of the section, into the middle of the runbook.
 
 1. Before changing `make_tour.py`, `tour.py`, `publish.py`, `status.py` or
    `scraper/`, read the rules whose `area` matches what you are touching. Do not
-   read all 42 — that is the load this split exists to prevent.
+   read all 46 — that is the load this split exists to prevent.
 2. A rule is not advice. If a change contradicts one, say so and stop; the rule
    states why it exists, and most of them record a failure that already shipped.
 3. Adding a rule: one file, frontmatter as below, then `python3 _rules/reindex.py`.
@@ -53,11 +53,12 @@ reading *prose only* is a rule nothing enforces. That is the list worth shrinkin
 
 <!-- RULE-TABLE:start -->
 
-45 rules.
+46 rules.
 
 | Area | Rule | Guarded by |
 |---|---|---|
 | interface | [Anything with the same answer on every listing is inherited or derived, and never becomes a control](nothing-invariant-becomes-a-control.md) | *prose only* |
+| interface | [`dashboard.py` renders derived state and writes nothing — not to disk, not to a CSV, not to the network](the-dashboard-reads-it-never-writes.md) | `tests/test_dashboard.py` |
 | photos | [A soft cut is not MLS-ready, and its name will not tell you](a-soft-cut-is-not-mls-ready.md) | `tests/test_status_naming.py` |
 | photos | [Below-par photos build, and the shortfall is reported, never encoded in a filename](below-par-photos-build-and-are-reported.md) | `tests/test_naming.py` |
 | photos | [A photo set too large for `max_total_seconds` is trimmed by quality, not halted](excess-photos-are-trimmed-by-quality-never-halted.md) | `tests/test_photo_quality.py` |
@@ -103,6 +104,6 @@ reading *prose only* is a rule nothing enforces. That is the list worth shrinkin
 | pii | [The PII gate runs itself, and an unwired gate is reported, never assumed](the-pii-gate-runs-itself.md) | `tests/test_hook_wired.py` |
 | docs | [Docs do not go stale](docs-do-not-go-stale.md) | `tests/test_photo_order.py` |
 
-Unguarded rules: 6 of 45.
+Unguarded rules: 6 of 46.
 
 <!-- RULE-TABLE:end -->

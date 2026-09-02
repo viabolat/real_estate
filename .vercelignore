@@ -22,6 +22,12 @@ property_email.txt
 # Noise.
 __pycache__/
 tests/
+# dashboard.py holds no PII -- it renders it, never stores it -- so git
+# keeps it and check_pii.py scans it. It has no role in a deployment that
+# is a rewrite rule and nothing else, and its whole purpose is to serve
+# agent names, phones and emails over a socket. The one host in this
+# project where those two facts could meet does not get the file.
+dashboard.py
 
 # Syncthing. .stfolder is its per-folder marker and .stversions its trash;
 # neither belongs in the repo, and a *.sync-conflict-* copy is a stale duplicate

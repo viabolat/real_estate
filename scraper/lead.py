@@ -138,32 +138,48 @@ def extract_contact_button_agent(text: str) -> dict:
     return {"role": role, "business": business.strip(), "name": name.strip()}
 
 
-HTML_TEMPLATE = """<!doctype html>
+# The house style for every page this project generates -- scraper/leads.html
+# below and dashboard.py's one page. One definition, so a token added to one
+# cannot be missing from the other.
+CSS = """  :root {
+    --bg: #ffffff; --fg: #1a1a1a; --border: #d8dce1;
+    --head-bg: #f1f3f5; --row-alt: #f8f9fa; --row-hover: #eef4ff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14171a; --fg: #e6e6e6; --border: #33383e;
+      --head-bg: #1f2428; --row-alt: #191c1f; --row-hover: #24303d;
+    }
+  }
+  body { background: var(--bg); color: var(--fg); font-family: -apple-system, Helvetica, Arial, sans-serif;
+          margin: 24px; }
+  h1 { font-size: 18px; margin: 0 0 12px; }
+  .wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 8px; }
+  table { border-collapse: collapse; width: 100%; white-space: nowrap; font-size: 13px; }
+  th, td { padding: 8px 12px; border-bottom: 1px solid var(--border); text-align: left; }
+  th { background: var(--head-bg); position: sticky; top: 0; font-weight: 600; }
+  tbody tr:nth-child(even) { background: var(--row-alt); }
+  tbody tr:hover { background: var(--row-hover); }
+"""
+
+
+def _brace_escape(css):
+    """CSS ready to drop into a str.format() template.
+
+    reason: HTML_TEMPLATE is consumed by .format(), so every literal brace in it
+    has to be doubled -- while dashboard.py concatenates its page and wants them
+    single. Doubling here keeps CSS itself valid, readable and singular.
+    """
+    return css.replace("{", "{{").replace("}", "}}")
+
+
+HTML_TEMPLATE = ("""<!doctype html>
 <html>
 <head>
 <meta charset="utf-8">
 <title>Leads</title>
 <style>
-  :root {{
-    --bg: #ffffff; --fg: #1a1a1a; --border: #d8dce1;
-    --head-bg: #f1f3f5; --row-alt: #f8f9fa; --row-hover: #eef4ff;
-  }}
-  @media (prefers-color-scheme: dark) {{
-    :root {{
-      --bg: #14171a; --fg: #e6e6e6; --border: #33383e;
-      --head-bg: #1f2428; --row-alt: #191c1f; --row-hover: #24303d;
-    }}
-  }}
-  body {{ background: var(--bg); color: var(--fg); font-family: -apple-system, Helvetica, Arial, sans-serif;
-          margin: 24px; }}
-  h1 {{ font-size: 18px; margin: 0 0 12px; }}
-  .wrap {{ overflow-x: auto; border: 1px solid var(--border); border-radius: 8px; }}
-  table {{ border-collapse: collapse; width: 100%; white-space: nowrap; font-size: 13px; }}
-  th, td {{ padding: 8px 12px; border-bottom: 1px solid var(--border); text-align: left; }}
-  th {{ background: var(--head-bg); position: sticky; top: 0; font-weight: 600; }}
-  tbody tr:nth-child(even) {{ background: var(--row-alt); }}
-  tbody tr:hover {{ background: var(--row-hover); }}
-</style>
+""" + _brace_escape(CSS) + """</style>
 </head>
 <body>
 <h1>Leads ({count})</h1>
@@ -177,7 +193,7 @@ HTML_TEMPLATE = """<!doctype html>
 </div>
 </body>
 </html>
-"""
+""")
 
 
 def normalize_phone(phone):

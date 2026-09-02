@@ -109,6 +109,17 @@ def tour_module():
     return _repo_module("tour_under_test", "tour.py")
 
 
+def dashboard_module():
+    """Import dashboard.py once.
+
+    reason: it loads status.py, tour.py, publish.py and the scraper lazily,
+    inside Sources.__init__ -- nothing at module scope reads a file, binds a
+    socket or parses argv. So a plain import is free, and every function worth
+    testing takes a Sources bundle so a test never touches the real tree.
+    """
+    return _repo_module("dashboard_under_test", "dashboard.py")
+
+
 def source():
     """make_tour.py as text, for the wiring assertions."""
     return repo_source("make_tour.py")
