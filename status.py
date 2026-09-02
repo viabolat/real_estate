@@ -555,8 +555,17 @@ def print_rows(rows, long=False, out=print):
                 and contacted(brand, listing, agent) else "")
         out(f"{name}  {str(n).rjust(6)}  {px}  {mark.rjust(9)}  {action}")
         if long and cfg:
-            out(f"{' ' * w}          logo={cfg.get('logo') or '(blank)'} "
-                f"music={cfg.get('music') or '(blank)'} card={cfg.get('card')}")
+            # reason: load_config() layers brand.json and then the listing's own
+            # config.json, so a key absent from config.json is inherited, not
+            # blank. Reading cfg alone printed logo=(blank) for a listing whose
+            # build correctly picks up the brand mark -- and it under-reported on
+            # exactly the listings where inheritance is doing its job, because
+            # scaffold() deliberately omits a key rather than freezing a blank
+            # that would shadow a path claimed onto the brand afterwards.
+            eff = dict(bcfg)
+            eff.update(cfg)
+            out(f"{' ' * w}          logo={eff.get('logo') or '(blank)'} "
+                f"music={eff.get('music') or '(blank)'} card={eff.get('card')}")
 
     brands_missing = sorted({r[0] for r in rows if "brand.json" in r[6]})
     if brands_missing:

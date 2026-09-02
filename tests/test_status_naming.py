@@ -453,5 +453,55 @@ class TestScrapedNamesReadsTheAuthority(unittest.TestCase):
         self.assertIsInstance(STATUS.scraped_names(), dict)
 
 
+class TestLongShowsTheInheritedSettings(unittest.TestCase):
+    """--long says "inherited settings", so it has to show the inherited value.
+
+    reason: print_rows() read cfg.get("logo") -- the listing's own config.json,
+    unlayered -- and printed logo=(blank) for a listing whose build picks up the
+    brand mark perfectly well through load_config()'s brand.json -> config.json
+    layering. It under-reported on precisely the listings where inheritance is
+    working, because scaffold() omits a key rather than freezing a blank that
+    would shadow a path claimed onto the brand later. Every other listing had the
+    key frozen into its own config, so the line looked right by accident.
+    """
+
+    def render(self, bcfg, cfg):
+        rows = [("a_brand", "1_example_st", "a_lister", 6, 2560, 2560,
+                 "next action", bcfg, cfg)]
+        lines = []
+        STATUS.print_rows(rows, long=True, out=lines.append)
+        return "\n".join(lines)
+
+    def test_an_absent_key_shows_the_brand_value(self):
+        out = self.render({"logo": "global_assets/logos/a_brand.png",
+                           "music": "global_assets/music/bed.mp3",
+                           "card": "outro"},
+                          {"agent_phone": "1001"})
+        self.assertIn("logo=global_assets/logos/a_brand.png", out)
+        self.assertIn("music=global_assets/music/bed.mp3", out)
+        self.assertIn("card=outro", out)
+        self.assertNotIn("(blank)", out)
+
+    def test_the_listings_own_value_still_wins(self):
+        """config.json is layered last, so it overrides -- including with a blank.
+
+        An empty string in config.json shadows a brand path; that is the whole
+        reason scaffold() refuses to write one, and the line must show what the
+        build would actually use, not what the brand wishes it used.
+        """
+        out = self.render({"logo": "global_assets/logos/a_brand.png"},
+                          {"logo": "global_assets/logos/override.png"})
+        self.assertIn("logo=global_assets/logos/override.png", out)
+
+        out = self.render({"logo": "global_assets/logos/a_brand.png"},
+                          {"logo": ""})
+        self.assertIn("logo=(blank)", out)
+
+    def test_no_brand_and_no_listing_value_is_still_blank(self):
+        out = self.render({}, {"agent_phone": "1001"})
+        self.assertIn("logo=(blank)", out)
+        self.assertIn("music=(blank)", out)
+
+
 if __name__ == "__main__":
     unittest.main()
