@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    {
+      "source": "/preview/:path*",
+      "destination": "https://hmfdjqebkdtkackdshta.supabase.co/storage/v1/object/public/listing-media/:path*.mp4"
+    }
+  ]
+}

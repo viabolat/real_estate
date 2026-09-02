@@ -1,0 +1,24 @@
+# Video. Vercel hosts none of it -- the deployment is a rewrite rule and
+# nothing else. The bytes come from the Supabase bucket.
+clips/
+out/
+agents/
+prospects/
+needs_attention/
+*.mp4
+
+# Secrets and leads. A .vercelignore takes precedence over .gitignore, so
+# these are NOT covered by the gitignore rules that cover them for git --
+# and check_pii.py only sees what git would publish, never what the Vercel
+# CLI would upload. Deploying is a second publishing boundary with its own
+# ignore file, and it has to be spelled out here or it is not enforced.
+.env
+.env.*
+scraper/
+outreach/
+agents.txt
+property_email.txt
+
+# Noise.
+__pycache__/
+tests/
