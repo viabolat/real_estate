@@ -256,6 +256,61 @@ class TestDriftClassification(unittest.TestCase):
             {"agent_phone": "1001"}), "drift")
 
 
+class TestTheLegacyLayoutIsNamedNotMislabelled(unittest.TestCase):
+    """A listing one level off is a migration, not a missing scrape.
+
+    reason: _dirs() cannot tell agents/<brand>/<listing>/<agent> from the
+    photos/, clips/ and out/ a build writes inside one. survey() therefore read
+    "photos" as the agent slug, looked for a config.json inside photos/, found
+    none, and filed the listing under unverifiable -- while the config sat one
+    level up, carrying the very agent_phone the drift audit keys on. Eight rows
+    read that way. See _rules/an-agent-folder-is-one-that-holds-a-config.md.
+    """
+
+    TRUTH = {"1001": ("brokerage_one", "11_first_st", "agent_a")}
+
+    def listing(self, subs=(), config=None):
+        d = tempfile.mkdtemp(prefix="status_test_")
+        self.addCleanup(shutil.rmtree, d, True)
+        for sub in subs:
+            os.makedirs(os.path.join(d, sub), exist_ok=True)
+        if config is not None:
+            import json
+            with open(os.path.join(d, "config.json"), "w", encoding="utf-8") as f:
+                json.dump(config, f)
+        return d
+
+    def test_build_intermediates_are_not_read_as_agents(self):
+        d = self.listing(("photos", "clips", "out", "clips_draft", "work_text"),
+                         config={"agent_phone": "1001"})
+        self.assertEqual(STATUS._agent_dirs(d), [])
+
+    def test_an_agent_folder_is_one_that_holds_a_config_or_photos(self):
+        d = self.listing(("agent_a/photos", "agent_b", "out"))
+        with open(os.path.join(d, "agent_b", "config.json"), "w") as f:
+            f.write("{}")
+        self.assertEqual(STATUS._agent_dirs(d), ["agent_a", "agent_b"])
+
+    def test_the_destination_slug_comes_out_of_leads_csv(self):
+        """Nothing here names a folder; it reports the name the scrape implies."""
+        d = self.listing(("photos",), config={"agent_phone": "10-01"})
+        self.assertEqual(STATUS.legacy_target(d, self.TRUTH), "agent_a")
+
+    def test_a_legacy_folder_with_no_lead_row_is_not_hand_named(self):
+        d = self.listing(("photos",), config={"agent_phone": "9009"})
+        self.assertIsNone(STATUS.legacy_target(d, self.TRUTH))
+
+    def test_a_config_with_no_photos_beside_it_is_not_the_legacy_shape(self):
+        d = self.listing(config={"agent_phone": "1001"})
+        self.assertIsNone(STATUS.legacy_target(d, self.TRUTH))
+
+    def test_photos_with_no_config_beside_it_is_not_the_legacy_shape(self):
+        """That is a folder the scrape never finished, and the existing
+        "rerun photos.py" advice is the right one."""
+        d = self.listing(("photos",))
+        self.assertIsNone(STATUS.legacy_target(d, self.TRUTH))
+
+
 class TestScrapedNamesReadsTheAuthority(unittest.TestCase):
 
     def test_it_keys_on_digits_only(self):

@@ -29,6 +29,7 @@ second.
 | `test_floorplan.py` | `floorplan.py` flags a likely floor plan or site map only when a photo clears BOTH a high near-white fraction AND a high low-chroma fraction — either alone must not flag a genuinely bright room. `detect()` never touches the folder it scores, and the module's source text never contains a delete/rename/move call. |
 | `test_auto_flow.py` | `ask`/`confirm`/`pick`/`number` never call `input()` under `auto=True`, and are unchanged under the default. `questions(auto=True)` leaves the logo and music unset rather than guessing. `auto_targets()` is re-derived from `out/` on every call — the resume mechanism after a manual floor-plan photo deletion. `auto_flow()`/`_auto_build_one()` never call `publish_rung` and never pass `--draft`; `--ignore-floorplan-check` and `--ignore-missing-phone-check` always need a scope and never reach `save_config()`/`save_state()`. A blank `agent_phone` halts before the contact sheet, the same way a flagged photo halts before delivery. |
 | `test_publish_pending.py` | `--publish-pending` walks candidates from `sample_cuts()`, not `stage()`, so a delivered-only or already-published-and-swept listing is never offered. It opens the `_branded` cut and calls `publish_rung()` per candidate — same as rung 4 — and its source contains no `--yes`/`--force` and never calls `confirm()` itself, so a batch loop can never answer its own publish prompt. |
+| `test_migrate_layout.py` | `migrate_layout.py` derives its destination slug from `leads.csv` through `status.legacy_target()` and refuses a listing with no lead row rather than hand-naming it. Planning writes nothing; a move relocates every byte including `out/` and the work stitch; the only deletion is a legacy copy proven byte-identical to an already-migrated one, and a differing copy is a conflict, not a merge. Config normalisation drops only an empty value or a path with no file behind it. |
 | `test_active_view.py` | `needs_attention/` links only what is neither archived (a `tour_` cut exists) nor snoozed (contacted and inside the 5-day follow-up window) — archived wins when both are true, and a listing that changes tier drops its stale link on the next rebuild. `follow_up_date()` matches `scraper/lead.py`'s own copy of the window, not a second constant. `choose_listing(show_all=False)` only reaches what's linked; `show_all=True` still reaches an archived one. |
 
 ## How they test
@@ -49,7 +50,7 @@ Three techniques, picked per rule:
   an agent's phone number on the MLS — no error, no crash, nothing to assert on
   at runtime short of decoding frames.
 
-## Three things worth knowing before you edit these
+## Four things worth knowing before you edit these
 
 **`test_the_known_config_surface_has_not_silently_grown` will fail when you add a
 config key.** That is deliberate — it is the "docs do not go stale" rule made
@@ -66,6 +67,16 @@ falls back to `listing`, `_slug` returns `""` so a blank `agent_name` leaves the
 bare `tour_`/`sample_` names. `test_the_two_sluggers_agree_on_every_non_empty_case`
 is the drift guard; the empty difference is pinned separately so nobody
 "fixes" it.
+
+**A fixture agent folder needs a `config.json`.** `tour.is_agent_dir()` and
+`status._agent_dirs()` admit a subdirectory of a listing folder as an agent only if
+it holds a `config.json` or a `photos/` — see
+[`an-agent-folder-is-one-that-holds-a-config`](../_rules/an-agent-folder-is-one-that-holds-a-config.md).
+A fixture that builds `<agent>/out/` and nothing else is not modelling anything the
+walkers can see, and it went invisible to `auto_targets()`, `sample_cuts()` and
+`clear_published_cuts()` the moment that check was tightened. A real folder always
+has the config — `scaffold()` writes it and nothing ever deletes it — so write
+`{}` into one and the fixture matches reality.
 
 **Fixtures must not be phone-shaped or email-shaped.** `check_pii.py` scans every
 publishable file for anything matching `\d{3}sep\d{3}sep\d{4}`, by shape and not

@@ -65,6 +65,12 @@ class ActiveViewIsARegeneratedView(unittest.TestCase):
     def make_listing(self, brand, listing, agent, tour_cut=False):
         d = os.path.join(self.agents_dir, brand, listing, agent)
         os.makedirs(d, exist_ok=True)
+        # reason: a real agent folder always holds a config.json --
+        # scaffold() writes one and nothing ever deletes it. That is what
+        # is_agent_dir() keys on, so a fixture without one is not a
+        # listing the walkers would ever see. See
+        # _rules/an-agent-folder-is-one-that-holds-a-config.md.
+        open(os.path.join(d, "config.json"), "w").write("{}")
         if tour_cut:
             out = os.path.join(d, "out")
             os.makedirs(out, exist_ok=True)
@@ -214,6 +220,12 @@ class ChooseListingPickerScope(unittest.TestCase):
                                       "archived_listing", "mary_smith")
         out = os.path.join(self.archived, "out")
         os.makedirs(out, exist_ok=True)
+        # reason: a real agent folder always holds a config.json --
+        # scaffold() writes one and nothing ever deletes it. That is what
+        # is_agent_dir() keys on, so a fixture without one is not a
+        # listing the walkers would ever see. See
+        # _rules/an-agent-folder-is-one-that-holds-a-config.md.
+        open(os.path.join(self.archived, "config.json"), "w").write("{}")
         with open(os.path.join(out, "tour_branded.mp4"), "wb") as f:
             f.write(b"x")
 

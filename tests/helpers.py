@@ -91,6 +91,12 @@ def photo_quality_module():
     return _repo_module("photo_quality_under_test", "photo_quality.py")
 
 
+def migrate_layout_module():
+    """Import migrate_layout.py once. Every function takes agents_dir/root as
+    arguments so a test never touches the real agents/ tree."""
+    return _repo_module("migrate_layout_under_test", "migrate_layout.py")
+
+
 def tour_module():
     """Import tour.py once, for the pure helpers and the wiring assertions.
 

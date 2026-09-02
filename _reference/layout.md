@@ -88,6 +88,23 @@ agents/<brand>/<listing>/<agent>/
    draft.mp4                         only from --draft. Deliberately NOT in out/
 ```
 
+### How the walkers recognise the agent level
+
+The `<agent>/` level is not identified by position alone. `_dirs()` at the listing
+level cannot tell `<agent>/` from the `photos/`, `clips/`, `clips_draft/`, `out/`
+and `work_text/` a build writes *inside* one, so `tour.is_agent_dir()` and
+`status._agent_dirs()` admit a subdirectory only if it **holds a `config.json` or a
+`photos/`** — the two things `scaffold()` always writes and no intermediate has.
+
+The first version of the code put `config.json` and `photos/` directly under
+`agents/<brand>/<listing>/`. A folder left in that shape reads as a listing whose
+agent is named `photos`, and `--auto`, `status.py`, `needs_attention/` and
+`find_gaps.py` each invented something different in its place. `status.py` now names
+it — `legacy layout -- migrate to <agent>/` — and `python3 migrate_layout.py` moves
+it with `os.rename`, deriving the destination from `leads.csv` like every other
+folder name. See
+[`an-agent-folder-is-one-that-holds-a-config`](../_rules/an-agent-folder-is-one-that-holds-a-config.md).
+
 ## `prospects/` — the same listings, viewed by agent
 
 `agents/<brand>/<listing>/<agent>` is grouped by brokerage first, which cannot

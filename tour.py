@@ -364,8 +364,29 @@ def listings(brand, root=None):
     return _dirs(os.path.join(LISTINGS_ROOT if root is None else root, brand))
 
 
+def is_agent_dir(path):
+    """Does this subdirectory of a listing folder name an AGENT?
+
+    reason: _dirs() cannot tell agents/<brand>/<listing>/<agent> from the
+    photos/, clips/ and out/ a build writes INSIDE an agent folder. A listing
+    still in the pre-agent-level layout therefore reported "photos" as its
+    agent -- and --auto built agents/<brand>/<listing>/photos/, status.py
+    filed it as unverifiable for having no config.json, and needs_attention/
+    symlinked a raw photos/ directory. All one bug. photos.py's scaffold()
+    always writes both a config.json and a photos/, and no intermediate
+    directory has either, so ask that rather than blocklisting names -- a
+    blocklist drifts the moment a new intermediate is added.
+    See _rules/an-agent-folder-is-one-that-holds-a-config.md.
+    """
+    return (os.path.isfile(os.path.join(path, "config.json"))
+            or os.path.isdir(os.path.join(path, "photos")))
+
+
 def agent_dirs(brand, listing, root=None):
-    return _dirs(os.path.join(LISTINGS_ROOT if root is None else root, brand, listing))
+    listing_dir = os.path.join(LISTINGS_ROOT if root is None else root,
+                               brand, listing)
+    return [d for d in _dirs(listing_dir)
+            if is_agent_dir(os.path.join(listing_dir, d))]
 
 
 def assets(kind):

@@ -486,6 +486,43 @@ This sends the build picker straight to `agents/` instead, reaching every
 listing — snoozed or delivered included. See
 [`needs-attention-is-a-view-not-a-move`](_rules/needs-attention-is-a-view-not-a-move.md).
 
+### A listing folder in the old layout — `migrate_layout.py`
+
+`status.py` reports `legacy layout -- migrate to <agent>/` for a listing folder
+holding a `config.json` beside a `photos/`. That is the shape the first version of
+the code wrote, before the `<agent>/` level existed. The current walkers cannot read
+it — `--auto` targets `.../photos/` and errors, and the roll-up files it under
+*unverifiable* — so it is migrated rather than left alone:
+
+```bash
+python3 migrate_layout.py          # plan only, writes nothing
+python3 migrate_layout.py --yes    # do it
+```
+
+The plan names one of four outcomes per folder:
+
+- **move** — `os.rename` every part of it (`photos/`, `clips/`, `out/`,
+  `config.json`, the kept work stitch, `draft.mp4`, `contact_sheet.png`) into
+  `<agent>/`. Bytes are relocated, never rewritten: a listing that was already built
+  keeps its cuts and needs no re-encode.
+- **duplicate** — an `<agent>/` already exists holding byte-identical photos, so the
+  legacy copy is a half-finished migration and is deleted. The only delete the
+  script performs.
+- **conflict** — an `<agent>/` exists but its photos differ. Left alone; that is a
+  question for a person.
+- **refuse** — no `leads.csv` row behind the folder, so the scrape cannot name it and
+  neither will the script. See
+  [`the-scrape-names-the-folders`](_rules/the-scrape-names-the-folders.md).
+
+The destination slug is never typed. It comes out of `leads.csv` on `agent_phone`,
+the same key `status.py`'s drift audit uses. The same run normalises the moved
+`config.json` — an empty `"music": ""` and a `logo` whose file no longer exists are
+dropped so the brand default is inherited instead of shadowed by a dead value — and
+rewrites any bare filename in a `brand.json` as a repo-relative path, which is what
+made `find_gaps.py` report an acronym `near_miss` against a logo the brand already
+named. See
+[`an-agent-folder-is-one-that-holds-a-config`](_rules/an-agent-folder-is-one-that-holds-a-config.md).
+
 ---
 
 ## 0c. One-time setup

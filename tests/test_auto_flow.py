@@ -173,6 +173,12 @@ class AutoTargets(unittest.TestCase):
     def make(self, brand, listing, agent, *out_names):
         d = os.path.join(self.agents, brand, listing, agent)
         os.makedirs(os.path.join(d, "out"), exist_ok=True)
+        # reason: a real agent folder always holds a config.json --
+        # scaffold() writes one and nothing ever deletes it. That is what
+        # is_agent_dir() keys on, so a fixture without one is not a
+        # listing the walkers would ever see. See
+        # _rules/an-agent-folder-is-one-that-holds-a-config.md.
+        open(os.path.join(d, "config.json"), "w").write("{}")
         for n in out_names:
             open(os.path.join(d, "out", n), "wb").close()
         return d
@@ -203,6 +209,31 @@ class AutoTargets(unittest.TestCase):
     def test_scoped_to_a_nonexistent_listing_raises(self):
         with self.assertRaises(SystemExit):
             self.tour.auto_targets(scope="acme/does_not_exist")
+
+    def test_a_legacy_listing_yields_no_agent_named_photos(self):
+        """reason: _dirs() cannot tell an agent folder from the photos/, clips/
+        and out/ a build writes inside one, so a listing still in the
+        pre-agent-level shape reported "photos" as its agent -- and --auto
+        built agents/<brand>/<listing>/photos/, found no photos/photos/, and
+        reported an error. See
+        _rules/an-agent-folder-is-one-that-holds-a-config.md.
+        """
+        d = os.path.join(self.agents, "acme", "1_main_st")
+        for sub in ("photos", "clips", "out", "clips_draft", "work_text"):
+            os.makedirs(os.path.join(d, sub))
+        open(os.path.join(d, "config.json"), "w").write("{}")
+        self.assertEqual(self.tour.agent_dirs("acme", "1_main_st"), [])
+        self.assertEqual(self.tour.auto_targets(), [])
+
+    def test_a_half_scaffolded_agent_folder_still_counts(self):
+        """photos.py's scaffold() writes both; either alone is enough to name
+        an agent, because a folder mid-scaffold is a listing, not a leftover."""
+        base = os.path.join(self.agents, "acme", "1_main_st")
+        os.makedirs(os.path.join(base, "only_photos", "photos"))
+        os.makedirs(os.path.join(base, "only_config"))
+        open(os.path.join(base, "only_config", "config.json"), "w").write("{}")
+        self.assertEqual(self.tour.agent_dirs("acme", "1_main_st"),
+                         ["only_config", "only_photos"])
 
     def test_a_target_with_nothing_built_yet_is_unaffected_by_a_prior_call(self):
         """The whole resume mechanism: nothing about a halt is ever recorded,

@@ -44,6 +44,64 @@ for whatever is in flight, which expire on ship) and `.claude/settings.local.jso
 
 ## 2. BUILT
 
+### 2026-09-02 — The listing level is not the agent level: one bug wearing four masks
+
+The project moved to a laptop and back. The code returned current; the data did
+not. Some listing folders were deleted in transit, some dumps were lost, and six
+folders came back in the pre-agent-level shape the first version of the code wrote
+— `config.json` and `photos/` sitting directly under `agents/<brand>/<listing>/`.
+
+They were not skipped. `tour.py`'s `agent_dirs()` returned *every* subdirectory of a
+listing folder as if it were an agent slug, so a folder in the old shape read as a
+listing whose agent is named `photos`, and each walker invented something different
+in its place:
+
+- `--auto` targeted `agents/<brand>/<listing>/photos/`, found no `photos/photos/`,
+  and reported an `error`. Those were the four failures in the last hands-off run.
+- `status.py`'s `survey()` looked for a `config.json` inside `photos/`, found none,
+  and filed the listing under **unverifiable** — while the config sat one level up
+  carrying the very `agent_phone` the drift audit keys on. Eight rows.
+- `needs_attention/` symlinked raw `photos/`, `clips/` and `out/` directories.
+- `find_gaps.py`'s `email_gaps()` reads the four-level path, so those listings
+  reported **zero** email gaps. Invisible, not clean.
+
+Four symptoms, one cause, one fix. `tour.is_agent_dir()` and `status._agent_dirs()`
+admit a subdirectory only if it holds a `config.json` or a `photos/` — the two things
+`scaffold()` always writes and no build intermediate has. A positive test, not a
+reserved-name blocklist: a blocklist drifts the moment a new intermediate directory
+is added, and fails silently in the direction that costs a listing.
+
+Once the check was right, `survey()`'s empty-agents branch started firing for these
+folders and its existing advice — "rerun photos.py" — was wrong: the scrape had
+already run, its output was one level off. `status.legacy_target()` now reports
+`legacy layout -- migrate to <agent>/`, deriving the slug from `leads.csv` on
+`agent_phone` rather than naming anything. A folder with no lead row keeps the old
+message and is never hand-named.
+
+`migrate_layout.py` (new, repo root) performs the move: `--dry-run` by default,
+`--yes` to act, four outcomes per folder — **move** (`os.rename` everything into
+`<agent>/`, so a listing already built keeps its cuts and its work stitch and needs
+no re-encode), **duplicate** (an `<agent>/` already holding byte-identical photos —
+a half-finished migration, deleted rather than merged, the only delete the script
+performs), **conflict** (an `<agent>/` whose photos differ — left for a person), and
+**refuse** (no lead row). The same run drops a vestigial `"music": ""` and a `logo`
+whose file no longer exists from a moved `config.json`, so the brand default is
+inherited instead of shadowed by a dead value, and rewrites a bare filename in a
+`brand.json` as a repo-relative path — the reason `the_collaborative_companies` was
+being reported as an acronym `near_miss` against the logo it already named. A phantom
+gap, not a missing mark.
+
+One thing the fix surfaced that is worth recording: four test fixtures built an agent
+folder from an `out/` alone and went invisible the moment the check tightened. They
+were not modelling anything the walkers can ever see — a real agent folder always
+holds a `config.json`, because `scaffold()` writes one and nothing in the pipeline
+deletes it. The fixtures were corrected to match reality rather than the check
+loosened to match the fixtures.
+
+Guarded by `tests/test_migrate_layout.py` (22 new tests) plus additions to
+`tests/test_auto_flow.py` and `tests/test_status_naming.py`; recorded as
+[`an-agent-folder-is-one-that-holds-a-config`](_rules/an-agent-folder-is-one-that-holds-a-config.md).
+
 ### 2026-09-02 — `fill_gaps.py`: closing the logo and `agent_email` gaps headlessly
 
 On branch **`automation`**, cut from `staging` at `1c03736`. The ask was to make

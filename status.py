@@ -147,6 +147,44 @@ def _dirs(path):
                   if os.path.isdir(os.path.join(path, d)) and not d.startswith("."))
 
 
+def _agent_dirs(path):
+    """The subdirectories of a listing folder that actually name an AGENT.
+
+    reason: _dirs() cannot tell agents/<brand>/<listing>/<agent> from the
+    photos/, clips/ and out/ a build writes inside one. A listing still in the
+    pre-agent-level layout reported "photos" as its agent, and audit() then
+    filed it under unverifiable for having no config.json -- the config was one
+    level up, where survey() never looked. scaffold() always writes both a
+    config.json and a photos/; no intermediate directory has either. Mirrors
+    tour.py's is_agent_dir(); see
+    _rules/an-agent-folder-is-one-that-holds-a-config.md.
+    """
+    return [d for d in _dirs(path)
+            if os.path.isfile(os.path.join(path, d, "config.json"))
+            or os.path.isdir(os.path.join(path, d, "photos"))]
+
+
+def legacy_target(listing_dir, truth):
+    """The <agent>/ this pre-agent-level listing folder should move into, or None.
+
+    reason: a config.json sitting BESIDE photos/ instead of inside an agent
+    folder is the old layout, not a missing scrape -- and it carries the
+    agent_phone that scraped_names() keys on, so the destination is re-derived
+    from leads.csv exactly like every other folder name. Nothing here names a
+    folder; it reports the name the scrape already implies. A folder with no
+    lead row returns None and keeps the "rerun photos.py" message -- the scrape
+    cannot name a listing it has no row for. See
+    _rules/the-scrape-names-the-folders.md.
+    """
+    cfg_path = os.path.join(listing_dir, "config.json")
+    if not (os.path.isfile(cfg_path)
+            and os.path.isdir(os.path.join(listing_dir, "photos"))):
+        return None
+    digits = re.sub(r"\D", "", _json(cfg_path).get("agent_phone") or "")
+    want = truth.get(digits)
+    return want[2] if want else None
+
+
 def _json(path):
     try:
         with open(path, encoding="utf-8") as f:
@@ -354,10 +392,13 @@ def survey():
             rows.append((brand, "-", "-", 0, None, None, "no listings yet", bcfg, {}))
         for listing in listed:
             listing_dir = os.path.join(brand_dir, listing)
-            agents = _dirs(listing_dir)
+            agents = _agent_dirs(listing_dir)
             if not agents:
-                rows.append((brand, listing, "-", 0, None, None,
-                             "no agent folder -- rerun photos.py", bcfg, {}))
+                slug = legacy_target(listing_dir, truth)
+                why = (f"legacy layout -- migrate to {slug}/  "
+                       "(python3 migrate_layout.py)" if slug
+                       else "no agent folder -- rerun photos.py")
+                rows.append((brand, listing, "-", 0, None, None, why, bcfg, {}))
                 continue
             for agent in agents:
                 ld = os.path.join(listing_dir, agent)

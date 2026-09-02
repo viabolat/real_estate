@@ -37,6 +37,12 @@ class TestPublishPending(unittest.TestCase):
         d = os.path.join(root, brand, listing, agent)
         out = os.path.join(d, "out")
         os.makedirs(out)
+        # reason: a real agent folder always holds a config.json --
+        # scaffold() writes one and nothing ever deletes it. That is what
+        # is_agent_dir() keys on, so a fixture without one is not a
+        # listing the walkers would ever see. See
+        # _rules/an-agent-folder-is-one-that-holds-a-config.md.
+        open(os.path.join(d, "config.json"), "w").write("{}")
         for name in files:
             open(os.path.join(out, name), "wb").close()
         return d
@@ -45,6 +51,7 @@ class TestPublishPending(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             d = os.path.join(root, "acme", "1_main_st", "jane")
             os.makedirs(d)  # no out/ at all
+            open(os.path.join(d, "config.json"), "w").write("{}")
             with mock.patch.object(self.tour, "LISTINGS_ROOT", root), \
                  mock.patch.object(publish, "LINKS", "/no/such/file.csv"):
                 buf = []
