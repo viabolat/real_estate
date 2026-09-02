@@ -57,6 +57,14 @@ draft; rung 5 offers it and records it only after the operator confirms the mail
 actually went out
 ([the-draft-is-automatic-the-send-is-not](the-draft-is-automatic-the-send-is-not.md)).
 
+**One key, two readers.** `contacted.csv` is keyed by folder name for
+`status.contacted()` and rung 5; `leads.html` looks the same row up by the key it
+derives from the leads.csv row. Those agree only while every folder matches the
+scrape, which is what `status.py`'s drift check enforces — so re-keying a row without
+renaming its folder, or renaming a folder without re-keying its row, breaks one reader
+or the other. Do both, in the same pass. `status.audit()`'s third report,
+`orphaned_marks()`, names any row no scraped name matches.
+
 ## Where it shows
 
 `status.py`'s NEXT column reads `follow up -- rung 5 drafts it` instead of

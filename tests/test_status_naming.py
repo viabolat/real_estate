@@ -194,6 +194,75 @@ class TestThePipelineStatesAreDistinguishable(unittest.TestCase):
         self.assertIn("ready to build", self.action("build.log"))
 
 
+class TestAContactedRowWithNoScrapedName(unittest.TestCase):
+    """orphaned_marks(): a contacted.csv row keyed on a name the scrape does not
+    produce records a real send that leads.html can never find.
+
+    That page derives its key from the leads.csv row, so the CONTACTED and
+    FOLLOW UP columns stay blank and the lead reads "new" forever -- while rung
+    5 offers to mail it again. Three rows sat that way for two weeks and one
+    agent got a duplicate. Ids are short and non-phone-shaped: check_pii.py
+    matches by shape (tests/README.md).
+    """
+
+    def setUp(self):
+        self.d = tempfile.mkdtemp(prefix="orphan_test_")
+        self.addCleanup(shutil.rmtree, self.d, True)
+        self.csv = os.path.join(self.d, "contacted.csv")
+        real = STATUS._publish
+        self.addCleanup(setattr, STATUS, "_publish", real)
+
+        class FakePublish:
+            CONTACTED = self.csv
+        STATUS._publish = FakePublish()
+
+    def write(self, *keys):
+        with open(self.csv, "w", newline="") as f:
+            f.write("marked_at,brand,listing,agent\n")
+            for k in keys:
+                f.write("2026-08-01T00:00:00," + ",".join(k) + "\n")
+
+    def test_a_row_matching_a_scraped_name_is_not_an_orphan(self):
+        key = ("compass", "41_worcester_sq", "mary_smith")
+        self.write(key)
+        self.assertEqual(STATUS.orphaned_marks({key}), [])
+
+    def test_a_row_the_scrape_does_not_name_is_reported(self):
+        self.write(("compass", "41_worcester_sq", "mary_smith_and_team"))
+        self.assertEqual(STATUS.orphaned_marks({("compass", "41_worcester_sq",
+                                                 "mary_smith")}),
+                         [("compass", "41_worcester_sq", "mary_smith_and_team")])
+
+    def test_a_placeholder_keyed_row_is_reported(self):
+        # reason: the two pre-scraper listings were marked contacted as
+        # unknown_brokerage/<listing>/unassigned_agent, then their leads.csv
+        # rows gained a real brokerage and agent. The key moved out from under
+        # the mark and both leads read "new" for two weeks. Synthetic names --
+        # check_pii.py scans fixtures against leads.csv (tests/README.md).
+        self.write(("unknown_brokerage", "1_example_st", "unassigned_agent"))
+        self.assertEqual(len(STATUS.orphaned_marks(
+            {("example_brokerage", "1_example_st", "a_lister")})), 1)
+
+    def test_a_repeated_key_is_reported_once(self):
+        # reason: contacted.csv now carries one row per send, so a followed-up
+        # orphan has several rows. The report names the folder, not the sends.
+        key = ("compass", "41_worcester_sq", "mary_smith_and_team")
+        self.write(key, key, key)
+        self.assertEqual(STATUS.orphaned_marks(set()), [key])
+
+    def test_a_missing_file_is_no_orphans_not_a_crash(self):
+        self.assertEqual(STATUS.orphaned_marks({("a", "b", "c")}), [])
+
+    def test_print_audit_names_the_row_and_says_re_keying_alone_is_not_enough(self):
+        lines = []
+        STATUS.print_audit([], [], [("compass", "41_worcester_sq", "m_smith")],
+                           out=lines.append)
+        text = "\n".join(lines)
+        self.assertIn("compass/41_worcester_sq/m_smith", text)
+        self.assertIn("leads.html", text)
+        self.assertIn("rung 5", text)
+
+
 class TestABlankMusicBedIsNotABlocker(unittest.TestCase):
     """sample_ cuts ship silent, so `music` is blank on every real listing.
 

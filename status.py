@@ -18,7 +18,10 @@ naming authority for agents/<broker_name>/<address>/<agent_name> -- and prints t
 mv for any folder that has drifted off it. A folder with no lead row behind it at
 all is reported separately as unverifiable rather than passing silently: the check
 keys on agent_phone out of config.json, so a folder that never had a config.json was
-exactly the hand-named case it could not see. A blank agent_name scrapes to the
+exactly the hand-named case it could not see. A third report names a contacted.csv
+row keyed on a name the scrape does not produce: the send is real, but leads.html
+derives its key from the leads.csv row and so shows the lead as "new" forever while
+rung 5 offers to mail it again. A blank agent_name scrapes to the
 UNASSIGNED_AGENT placeholder rather than a silent empty path segment; the same
 drift check is how a placeholder gets corrected once the real name is known.
 
@@ -450,6 +453,13 @@ def audit(rows, truth, known):
     produced no match and fell silently through the check built to catch it.
     brewester/9_w_cedar sat through the scrape-naming commit that way. Report
     unverifiable separately rather than letting absence read as agreement.
+
+    The third report, orphans, is the same failure one file over. contacted.csv
+    is keyed by folder name, but leads.html looks a row up by the key it derives
+    from the leads.csv row -- so a mark whose key matches no scraped name is
+    invisible on the page that exists to show it. Three sends sat unrecorded for
+    two weeks that way, and one of them was re-sent as a duplicate. See
+    a-follow-up-is-its-own-draft-and-its-own-row.md.
     """
     drift, unverifiable = [], []
     for brand, listing, agent, _n, _w, _b, _a, _bc, cfg in rows:
@@ -467,10 +477,36 @@ def audit(rows, truth, known):
             drift.append((brand, listing, agent, want))
         elif not want and (brand, listing, agent) not in known:
             unverifiable.append((brand, listing, agent, bool(cfg)))
-    return drift, unverifiable
+    return drift, unverifiable, orphaned_marks(known)
 
 
-def print_audit(drift, unverifiable, out=print):
+def orphaned_marks(known):
+    """[(brand, listing, agent)] in contacted.csv that no scraped name matches.
+
+    Such a row records a real send, but leads.html can never find it: that page
+    derives its key from the leads.csv row, so the CONTACTED and FOLLOW UP
+    columns stay blank and the lead reads "new" forever. Renaming a folder
+    without re-keying its mark produces exactly this, and so does a mark written
+    before its listing had a brokerage or agent on record.
+    """
+    if not _publish:
+        return []
+    try:
+        with open(_publish.CONTACTED, newline="", encoding="utf-8") as f:
+            rows = list(csv.DictReader(f))
+    except (OSError, AttributeError):
+        return []
+    seen, out = set(), []
+    for r in rows:
+        key = ((r.get("brand") or "").strip(), (r.get("listing") or "").strip(),
+               (r.get("agent") or "").strip())
+        if all(key) and key not in known and key not in seen:
+            seen.add(key)
+            out.append(key)
+    return out
+
+
+def print_audit(drift, unverifiable, orphans=(), out=print):
     """The two naming reports, printed identically wherever they are shown."""
     if drift:
         out(f"\n{len(drift)} folder name(s) do not match the scrape "
@@ -488,6 +524,15 @@ def print_audit(drift, unverifiable, out=print):
         out("  These predate the scrape or their lead row is gone. The scrape "
             "cannot name them; renaming by hand would invent a second "
             "authority. Leave them, or re-scrape the listing.")
+    if orphans:
+        out(f"\n{len(orphans)} contacted.csv row(s) match no scraped name "
+            f"(the send is recorded, but leads.html cannot see it):")
+        for brand, listing, agent in orphans:
+            out(f"  {brand}/{listing}/{agent}")
+        out("  Those leads read \"new\" on leads.html and rung 5 will offer to "
+            "mail them again. Re-key each row to the name leads.csv derives -- "
+            "renaming the folder alone is not enough, and re-keying the row "
+            "alone makes rung 5 lose track of the send.")
 
 
 def print_rows(rows, long=False, out=print):
