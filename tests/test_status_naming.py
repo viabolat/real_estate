@@ -194,6 +194,63 @@ class TestThePipelineStatesAreDistinguishable(unittest.TestCase):
         self.assertIn("ready to build", self.action("build.log"))
 
 
+class TestABlankMusicBedIsNotABlocker(unittest.TestCase):
+    """sample_ cuts ship silent, so `music` is blank on every real listing.
+
+    It used to sit in next_action()'s ladder one rung below the logo and return
+    "music blank/missing -- add it to brand.json". That matched EVERY listing in
+    the ledger -- all eleven already delivered and contacted ones included -- and
+    reported the nag in place of the real next action, so the NEXT column said
+    nothing useful for the whole table. The asymmetry with the logo is the point:
+    a missing logo halts --auto, a missing music bed only adds --no-music.
+    """
+
+    def setUp(self):
+        self.d = tempfile.mkdtemp(prefix="status_test_")
+        self.addCleanup(shutil.rmtree, self.d, True)
+        for name in ("logo.png", "viabolat.png"):
+            open(os.path.join(self.d, name), "wb").close()
+        self.cfg = {"logo": "logo.png", "watermark": "viabolat.png"}
+
+    def action(self, *cuts):
+        out = os.path.join(self.d, "out")
+        os.makedirs(out, exist_ok=True)
+        for c in cuts:
+            open(os.path.join(out, c), "wb").close()
+        real = STATUS.published
+        STATUS.published = lambda b, l: False
+        self.addCleanup(setattr, STATUS, "published", real)
+        return STATUS.next_action(self.d, self.cfg, 17, 2000, 2400)
+
+    def test_no_music_key_still_reads_ready_to_build(self):
+        self.assertEqual("ready to build", self.action())
+
+    def test_no_music_key_still_reaches_the_review_link(self):
+        self.assertIn("publish", self.action("sample_branded.mp4"))
+
+    def test_an_empty_music_value_is_not_a_blocker_either(self):
+        self.cfg["music"] = ""
+        self.assertIn("publish", self.action("sample_branded.mp4"))
+
+    def test_a_missing_logo_is_still_a_blocker(self):
+        """The whole reason music can go is that the logo check is the real gate."""
+        self.cfg.pop("logo")
+        self.assertIn("logo", self.action("sample_branded.mp4"))
+
+    def test_no_state_ever_reports_music_as_the_next_action(self):
+        """A future edit must not reintroduce the nag under a new wording.
+
+        Asserted on what next_action RETURNS, across every state a blank-music
+        listing can be in -- not on the source text, which carries a `# reason:`
+        comment naming music on purpose.
+        """
+        for cuts in ((), ("sample_branded.mp4",),
+                     ("sample_branded.mp4", "tour_branded.mp4")):
+            with self.subTest(cuts=cuts):
+                self.setUp()
+                self.assertNotIn("music", self.action(*cuts).lower())
+
+
 class TestDriftClassification(unittest.TestCase):
     """Three buckets: agrees, drifted, unverifiable. Nothing falls through."""
 

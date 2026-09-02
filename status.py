@@ -340,8 +340,13 @@ def next_action(listing_dir, cfg, n, worst, best, scraped=True, bcfg=None):
     merged.update(cfg or {})
     if not resolves(listing_dir, merged.get("logo")):
         return "logo blank/missing -- add it to brand.json" + origin
-    if not resolves(listing_dir, merged.get("music")):
-        return "music blank/missing -- add it to brand.json" + origin
+    # reason: music was a blocker here, one rung below the logo. It never was one:
+    # a missing logo halts --auto (auto-picks-up-the-brand-logo-by-slug), a missing
+    # music bed only adds --no-music and builds silent. Since sample_ cuts ship
+    # silent by standing instruction, music is never set, so this line matched on
+    # EVERY listing -- including all eleven already delivered and contacted -- and
+    # reported "add it to brand.json" in place of the real next action. The ladder
+    # now falls straight through to the build state.
     if not resolves(listing_dir, merged.get("watermark") or "viabolat.png"):
         return "watermark will not resolve -- the sample build will refuse" + origin
     counts, total = built_families(listing_dir)
@@ -486,7 +491,7 @@ def print_rows(rows, long=False, out=print):
 
     brands_missing = sorted({r[0] for r in rows if "brand.json" in r[6]})
     if brands_missing:
-        out(f"\n{len(brands_missing)} brokerage(s) need a logo or music set once: "
+        out(f"\n{len(brands_missing)} brokerage(s) need a logo set once: "
             f"{', '.join(brands_missing)}")
 
 

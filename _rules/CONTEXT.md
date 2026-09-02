@@ -53,7 +53,7 @@ reading *prose only* is a rule nothing enforces. That is the list worth shrinkin
 
 <!-- RULE-TABLE:start -->
 
-42 rules.
+43 rules.
 
 | Area | Rule | Guarded by |
 |---|---|---|
@@ -79,6 +79,7 @@ reading *prose only* is a rule nothing enforces. That is the list worth shrinkin
 | build | [A broken *or missing* watermark stops the build; broken branding does not](a-missing-watermark-stops-the-build.md) | `tests/test_guards.py`<br>`tests/test_home_screen.py` |
 | build | [`draft.mp4` is not a deliverable and does not go in `out/`](draft-mp4-is-not-a-deliverable.md) | `tests/test_naming.py` |
 | build | [`vertical()` takes two sources per family, and that is not redundancy](vertical-takes-two-sources-per-family.md) | `tests/test_card_isolation.py` |
+| card | [A `sample_` cut ships silent, and a blank music bed is never the next action](a-sample-ships-silent-and-music-never-blocks.md) | `tests/test_status_naming.py` |
 | card | [`--auto` halts a listing with no `agent_phone`, the same way it halts on a floor plan](auto-halts-on-a-blank-agent-phone.md) | `tests/test_auto_flow.py` |
 | card | [`--auto` adopts a brand's own logo by slug, and halts rather than ship the type-only card silently](auto-picks-up-the-brand-logo-by-slug.md) | `tests/test_auto_flow.py` |
 | card | [Branding is held off wherever the card is on screen, and the watermark is not](branding-is-held-off-under-the-card.md) | `tests/test_finish_window.py` |
@@ -100,6 +101,6 @@ reading *prose only* is a rule nothing enforces. That is the list worth shrinkin
 | pii | [The PII gate runs itself, and an unwired gate is reported, never assumed](the-pii-gate-runs-itself.md) | `tests/test_hook_wired.py` |
 | docs | [Docs do not go stale](docs-do-not-go-stale.md) | `tests/test_photo_order.py` |
 
-Unguarded rules: 6 of 42.
+Unguarded rules: 6 of 43.
 
 <!-- RULE-TABLE:end -->

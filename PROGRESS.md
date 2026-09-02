@@ -1556,6 +1556,16 @@ once volume justifies it, and is not a reason to delay.
   cuts, since checking the mp4 afterward is the ask. It still never builds a
   draft and never publishes, and the interactive flow is unaffected whenever
   `--auto` is not the argument typed.
+- **`sample_` cuts ship silent.** Stated 2026-09-02: no music on any sample, and
+  any unsent sample that already had some gets rebuilt without it. Only one ever
+  did — `gibson.../169_k_st_1` carried `united.mp3` in its *listing* `config.json`
+  (not the brand file), left over from before the scraper wrote these; it was
+  rebuilt silent the same day. `the_collaborative_companies/brand.json` still
+  points at `success.mp3` and is deliberately left alone: its sample was already
+  published and contacted, so changing the brand default would make a future paid
+  `tour_` cut differ from the sample the client signed off on. Note that every cut
+  still carries a silent AAC track, so "has an audio stream" is not the test —
+  measure it (`ffmpeg -af volumedetect`); true silence reads -91 dB.
 - **Explain why**, not just what, when automating something.
 - Logos and music are the operator's to supply; automate the rest.
   **Narrowed 2026-09-01, on the operator's own instruction:** the logo half

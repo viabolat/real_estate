@@ -88,7 +88,12 @@ logo, drop the file at `global_assets/logos/<broker_name>.png` and let `--auto` 
 it (below). Until either happens the card falls back to the type-only design and the
 build is silent.
 
-Music can stay blank — a silent build is a valid deliverable. The logo can't, once
+**Leave music blank.** Standing operator instruction, 2026-09-02: **`sample_` cuts
+ship silent.** A silent build is not a fallback here, it is the house style — the
+proofing copy is about the photos and the branding, and a music bed only invites a
+note about the music. The cuts still carry a silent AAC track, so nothing downstream
+has to special-case a video with no audio stream. The logo is different, and can't
+stay blank once
 this brand is going to ship: a brand-new brokerage from a scrape has no logo on file
 by definition, so before building anything under it, run
 

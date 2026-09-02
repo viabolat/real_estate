@@ -22,3 +22,10 @@ property_email.txt
 # Noise.
 __pycache__/
 tests/
+
+# Syncthing. .stfolder is its per-folder marker and .stversions its trash;
+# neither belongs in the repo, and a *.sync-conflict-* copy is a stale duplicate
+# of a file that is already committed -- see PROGRESS.md on the 2026-09-02 pass.
+.stfolder/
+.stversions/
+*.sync-conflict-*
