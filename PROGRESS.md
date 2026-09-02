@@ -35,6 +35,27 @@ protection travels with the clone.
 Branch: **`scraper`**, cut from `3c5e1a8`. The naming-integrity and test-suite work
 below is committed and pushed to `origin/scraper`; the branch is not merged to `main`.
 
+**How the two machines exchange work: git for the repo, Syncthing for `agents/`
+only.** Decided 2026-09-02, after the second duplicate incident. Syncthing had this
+folder in full, `.git/` included, and produced 53 `*.sync-conflict-*` copies in one
+afternoon -- among them conflict copies of `.git/index`, `.git/HEAD` and
+`.git/refs/`, which is how a repository gets corrupted rather than merely cluttered.
+Every conflict copy was the **stale** side: the laptop's pre-migration `tour.py` and
+`status.py`, from before `is_agent_dir()`/`_agent_dirs()` existed. Two file-sync
+daemons cannot both own a git working tree.
+
+The fix is a `.stignore` at this folder's root, which **is** tracked so it reaches
+the other machine through git rather than through the thing it is configuring. It
+excludes `.git`, `__pycache__`/`*.pyc` (37 of the 53 conflicts were bytecode),
+`.stversions`, any existing `*.sync-conflict-*`, and the macOS `._*` forks the USB
+transfer left behind -- 281 of those had accumulated inside `.git/objects/`, where
+`git fsck` reported each one as a `bad sha1 file`. They were deleted the same day and
+`fsck` is clean.
+
+So: **`git push` / `git pull` moves the code and the docs. Syncthing moves `agents/`
+and nothing else.** That division is the same one §1 opens with, enforced by a second
+tool rather than only remembered.
+
 **Two files are deliberately untracked and do not travel:** `spec.md` (working notes
 for whatever is in flight, which expire on ship) and `.claude/settings.local.json`
 (machine-local). `LOGIC_GUIDE.md` **does** travel — it is the decision record, and the

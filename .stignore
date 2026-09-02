@@ -1,0 +1,24 @@
+// Syncthing per-folder ignore list. Read by Syncthing at this folder's root.
+//
+// Why this file exists: on 2026-09-02 Syncthing was syncing .git/ itself and
+// strewed 53 *.sync-conflict-* copies through the working tree -- including
+// conflict copies of .git/index, .git/HEAD and .git/refs/, which is how a
+// repository gets corrupted. It also pushed the laptop's stale pre-migration
+// tour.py and status.py back over the current ones. git is the transport
+// between machines; Syncthing carries the data git deliberately does not.
+
+// Git internals. Use `git push` / `git pull` between machines, never file sync.
+.git
+
+// Compiled bytecode. 37 of those 53 conflicts were .pyc files -- pure noise,
+// regenerated on every run, and different on every machine by definition.
+__pycache__
+*.pyc
+
+// Syncthing's own trash can and any conflict copy it has already made.
+.stversions
+*.sync-conflict-*
+
+// macOS resource forks and folder metadata, from the USB transfer.
+._*
+.DS_Store
