@@ -44,6 +44,14 @@ of `links.csv`
 follow-up points at the cut the agent already has; re-publishing to obtain a URL that
 has not changed is a round trip for nothing.
 
+**The recorded link outlives a folder rename.** The cut filename carries whatever
+`agent_name` `config.json` held at *build* time, which is not necessarily today's
+folder name. `recorded_link()` prefers the agent-prefixed cut and falls back to any
+`_sample_branded` row for that `(brand, listing)`. Without that fallback, renaming a
+drifted folder to match the scrape
+([the-scrape-names-the-folders](the-scrape-names-the-folders.md)) would orphan its own
+link and silently skip the follow-up.
+
 **The send is still human.** Drafting the follow-up is automatic, the same as the first
 draft; rung 5 offers it and records it only after the operator confirms the mail
 actually went out

@@ -720,11 +720,21 @@ def recorded_link(brand, listing, agent):
             rows = list(csv.DictReader(f))
     except OSError:
         return ""
-    hits = [r for r in rows
+    here = [r for r in rows
             if (r.get("brand") or "").strip() == brand
             and (r.get("listing") or "").strip() == listing
-            and (r.get("cut") or "").strip().startswith(f"{agent}_sample_branded")
+            and "_sample_branded" in (r.get("cut") or "")
             and (r.get("url") or "").strip()]
+    # reason: the agent prefix disambiguates two agents under one listing, but
+    # the cut filename is a BUILD-TIME artifact -- it carries whatever
+    # agent_name config.json held when make_tour.py ran, which is not
+    # necessarily today's folder name. Renaming a drifted folder to match the
+    # scrape (the-scrape-names-the-folders.md) would otherwise orphan its own
+    # recorded link and silently skip the follow-up. links.csv rows are already
+    # scoped by (brand, listing), so falling back to that is not a guess.
+    exact = [r for r in here
+             if (r.get("cut") or "").strip().startswith(f"{agent}_sample_branded")]
+    hits = exact or here
     return hits[-1]["url"].strip() if hits else ""
 
 

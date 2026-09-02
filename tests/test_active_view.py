@@ -246,6 +246,29 @@ class AFollowUpIsItsOwnDraftAndItsOwnRow(unittest.TestCase):
         self.assertEqual(self.publish.recorded_link(*self.key),
                          "https://example.test/b.mp4")
 
+    def test_recorded_link_survives_a_folder_renamed_to_match_the_scrape(self):
+        # reason: the cut filename carries the agent_name config.json held at
+        # BUILD time. Renaming a drifted folder to the scrape's name must not
+        # orphan the link the agent already has.
+        self.publish.record_links([
+            {"uploaded_at": "2026-08-26T00:00:00", "brand": "compass",
+             "listing": "41_worcester_sq",
+             "cut": "mary_smith_and_team_sample_branded.mp4",
+             "url": "https://example.test/b.mp4"}])
+        self.assertEqual(self.publish.recorded_link(*self.key),
+                         "https://example.test/b.mp4")
+
+    def test_recorded_link_prefers_the_matching_agent_when_two_share_a_listing(self):
+        self.publish.record_links([
+            {"uploaded_at": "2026-08-26T00:00:00", "brand": "compass",
+             "listing": "41_worcester_sq", "cut": "bob_jones_sample_branded.mp4",
+             "url": "https://example.test/bob.mp4"},
+            {"uploaded_at": "2026-08-26T00:00:00", "brand": "compass",
+             "listing": "41_worcester_sq", "cut": "mary_smith_sample_branded.mp4",
+             "url": "https://example.test/mary.mp4"}])
+        self.assertEqual(self.publish.recorded_link(*self.key),
+                         "https://example.test/mary.mp4")
+
     def test_recorded_link_is_blank_when_nothing_was_published(self):
         self.assertEqual(self.publish.recorded_link(*self.key), "")
 
