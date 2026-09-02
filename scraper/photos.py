@@ -251,7 +251,15 @@ def scaffold(repo_root, brand_dir, listing_dir, broker, address, agent, phone,
     if os.path.exists(cfg_path):
         print("  config.json: already exists, left alone")
         return
-    cfg = {k: brand[k] for k in INHERITED if k in brand}
+    # reason: a brand.json created in this same run has logo and music blank, and
+    # freezing that "" into the listing's config.json makes it SHADOW the brand
+    # forever -- tour.load_config() layers DEFAULTS -> brand.json -> config.json,
+    # so the empty string wins over a path set on the brand later. 16_holmfield_ave
+    # was re-scraped while global_assets/logos/keller_williams_realty.png was
+    # already on disk; fill_gaps.py duly claimed it into brand.json, and the
+    # roll-up still read "logo blank/missing -- add it to brand.json". An unset
+    # value is left out, matching tour.save_config()'s own contract.
+    cfg = {k: brand[k] for k in INHERITED if k in brand and brand[k] != ""}
     cfg.update({
         "brokerage": broker or "",
         # reason: streetAddress alone is what names the folder (it has to match

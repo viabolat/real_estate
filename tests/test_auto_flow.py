@@ -620,5 +620,73 @@ class TestTheCardsTextInvalidatesTheStitch(unittest.TestCase):
         self.assertIsNone(self.reason(agent_phone="2002"))
 
 
+class AnUnsetBrandValueIsNotFrozenIntoTheListing(unittest.TestCase):
+    """scaffold() must not copy a blank brand value into config.json.
+
+    tour.load_config() layers DEFAULTS -> brand.json -> config.json, so a
+    `"logo": ""` written at creation SHADOWS the brokerage mark for good --
+    including one claimed into brand.json weeks later. 16_holmfield_ave hit
+    exactly that on its re-scrape and the roll-up asked for a logo that was
+    already set. See _rules/auto-picks-up-the-brand-logo-by-slug.md.
+    """
+
+    def setUp(self):
+        self.photos = helpers.scraper_module("photos")
+        self.tour = helpers.tour_module()
+
+    def _scaffold(self, brand_values):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp)
+        brand_dir = os.path.join(tmp, "agents", "a_brand")
+        listing_dir = os.path.join(brand_dir, "1_example_st", "a_lister")
+        os.makedirs(listing_dir)
+        if brand_values is not None:
+            os.makedirs(brand_dir, exist_ok=True)
+            with open(os.path.join(brand_dir, "brand.json"), "w",
+                      encoding="utf-8") as f:
+                json.dump(brand_values, f)
+        self.photos.scaffold(tmp, brand_dir, listing_dir, "A Brand",
+                             "1 Example St", "A Lister", "1001",
+                             "1 Example St, Boston, MA")
+        with open(os.path.join(listing_dir, "config.json"),
+                  encoding="utf-8") as f:
+            return json.load(f)
+
+    def test_a_blank_brand_logo_is_left_out_of_the_listing_config(self):
+        cfg = self._scaffold(dict(self.photos.BRAND_STUB, logo="", music=""))
+        self.assertNotIn("logo", cfg)
+        self.assertNotIn("music", cfg)
+
+    def test_a_brand_created_in_the_same_run_leaves_them_out_too(self):
+        cfg = self._scaffold(None)
+        self.assertNotIn("logo", cfg)
+        self.assertNotIn("music", cfg)
+
+    def test_a_real_brand_logo_is_still_inherited(self):
+        cfg = self._scaffold(dict(self.photos.BRAND_STUB,
+                                  logo="global_assets/logos/a_brand.png"))
+        self.assertEqual(cfg["logo"], "global_assets/logos/a_brand.png")
+
+    def test_a_falsy_value_that_is_not_blank_survives(self):
+        # brand_persistent=False is a decision, not an unset value.
+        cfg = self._scaffold(dict(self.photos.BRAND_STUB,
+                                  brand_persistent=False))
+        self.assertIs(cfg["brand_persistent"], False)
+
+    def test_the_scrapes_own_fields_are_written_regardless(self):
+        cfg = self._scaffold(None)
+        self.assertEqual(cfg["agent_phone"], "1001")
+        self.assertEqual(cfg["brokerage"], "A Brand")
+        self.assertEqual(cfg["watermark"], "global_assets/logos/viabolat.png")
+
+    def test_an_omitted_key_lets_the_brand_win_at_load_time(self):
+        # the actual failure: the brand gains a logo after the listing exists.
+        cfg = self._scaffold(None)
+        effective = dict(self.tour.DEFAULTS)
+        effective.update({"logo": "global_assets/logos/a_brand.png"})
+        effective.update(cfg)
+        self.assertEqual(effective["logo"], "global_assets/logos/a_brand.png")
+
+
 if __name__ == "__main__":
     unittest.main()

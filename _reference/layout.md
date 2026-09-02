@@ -59,8 +59,11 @@ values into the listing's `config.json`, which stays the single source of truth 
 a build. That keeps the script's contract intact — read the working directory, know
 nothing about the `agents/<brand>/<listing>` layout — and keeps `config.json` an
 accurate record of what produced a delivered video months later. A new listing
-inherits at creation; changing a brand default does **not** retroactively alter
-existing listings, which is what the explicit "Re-apply brand defaults" action
+inherits at creation — but only values the brand actually *has*: a key the brand
+leaves blank is left out of the listing config entirely, so a logo or music bed
+set on the brand later still reaches it. Changing a brand default does **not**
+otherwise retroactively alter existing listings, which is what the explicit
+"Re-apply brand defaults" action
 under **Brand settings** on `tour.py`'s home screen is for. It shows every key it
 would change, per listing, and asks before writing — it is the one action in the
 tool that edits files the operator is not looking at.
