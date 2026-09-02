@@ -8,6 +8,7 @@ refused rather than saved under a name that lies about its type.
 import inspect
 import json
 import os
+import struct
 import sys
 import tempfile
 import unittest
@@ -23,6 +24,12 @@ import helpers
 # Assembled at runtime: the string under test is identical, the file text is
 # not email-shaped.
 VALID_EMAIL = "a" + "@" + "b" + "." + "com"
+
+
+def png(w=400, h=140):
+    """A PNG header with a real IHDR, which is all png_size() reads."""
+    return (b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\rIHDR"
+            + struct.pack(">II", w, h) + b"\x08\x06\x00\x00\x00")
 
 
 class TestNeverAdoptsNearMiss(unittest.TestCase):
@@ -161,18 +168,54 @@ class TestFetchRefusesTheWrongThing(unittest.TestCase):
             self.assertEqual(os.listdir(d), [])
 
     def test_a_real_png_lands_under_the_exact_brand_slug(self):
-        png = b"\x89PNG\r\n\x1a\n" + b"0" * 32
+        mark = png()
         with tempfile.TemporaryDirectory() as d:
             def fake_get(url):
                 if url.endswith(".png"):
-                    return (url, png, {"Content-Type": "image/png"})
+                    return (url, mark, {"Content-Type": "image/png"})
                 return (url, b"<title>Arborview Realty</title>"
                              b"<img class='logo' src='/l.png'>", {})
             self.m._get = fake_get
             r = self.m.fetch_logo("arborview_realty", "Arborview Realty Inc", logos_dir=d)
             self.assertEqual(r["status"], "ok")
             self.assertEqual(os.listdir(d), ["arborview_realty.png"])
-            self.assertEqual(open(os.path.join(d, "arborview_realty.png"), "rb").read(), png)
+            self.assertEqual(
+                open(os.path.join(d, "arborview_realty.png"), "rb").read(), mark)
+
+    def test_a_favicon_is_too_small_to_be_a_mark(self):
+        """reason: rel="icon" led the candidate list, so serhant.com's
+        favicon-16x16.png was written as the brokerage's logo. Scaled into
+        make_tour.py's 360x200 box that is an upscale smear."""
+        with tempfile.TemporaryDirectory() as d:
+            def fake_get(url):
+                if url.endswith(".png"):
+                    return (url, png(16, 16), {"Content-Type": "image/png"})
+                return (url, b"<title>Arborview Realty</title>"
+                             b"<link rel='icon' href='/favicon-16x16.png'>", {})
+            self.m._get = fake_get
+            r = self.m.fetch_logo("arborview_realty", "Arborview Realty Inc",
+                                  logos_dir=d)
+            self.assertEqual(r["status"], "skipped")
+            self.assertIn("favicon", r["reason"])
+            self.assertEqual(os.listdir(d), [])
+
+    def test_it_falls_through_a_bad_candidate_to_a_good_one(self):
+        """One wrong answer used to end the attempt: the first candidate was
+        the only candidate."""
+        with tempfile.TemporaryDirectory() as d:
+            def fake_get(url):
+                if url.endswith("small.png"):
+                    return (url, png(16, 16), {"Content-Type": "image/png"})
+                if url.endswith("real.png"):
+                    return (url, png(), {"Content-Type": "image/png"})
+                return (url, b"<title>Arborview Realty</title>"
+                             b"<link rel='icon' href='/small.png'>"
+                             b"<img class='site-logo' src='/real.png'>", {})
+            self.m._get = fake_get
+            r = self.m.fetch_logo("arborview_realty", "Arborview Realty Inc",
+                                  logos_dir=d)
+            self.assertEqual(r["status"], "ok")
+            self.assertTrue(r["source"].endswith("real.png"))
 
     def test_a_page_that_does_not_verify_downloads_nothing(self):
         with tempfile.TemporaryDirectory() as d:
@@ -180,6 +223,90 @@ class TestFetchRefusesTheWrongThing(unittest.TestCase):
             r = self.m.fetch_logo("arborview_realty", "Arborview Realty Inc", logos_dir=d)
             self.assertEqual(r["status"], "skipped")
             self.assertEqual(os.listdir(d), [])
+
+
+class TestOnlyThisBrokeragesMarkIsACandidate(unittest.TestCase):
+    """A page is full of other people's logos, and they all download clean.
+
+    serhant.com carries the NETFLIX wordmark (for the show the brokerage
+    appears in), two MLS marks and an RLS mark. Each is a real PNG of a
+    plausible size. No byte or dimension check separates them from the
+    brokerage's own mark -- only asking who owns it does. See
+    _rules/a-fetched-logo-names-the-brokerage-or-it-is-not-fetched.md.
+    """
+
+    SERHANT = (b"<title>SERHANT</title>"
+               b"<meta property='og:image' content='/netflix-share.png'>"
+               b"<img src='/hero.jpg'>"
+               b"<img src='/own-mark.png' alt='Logo' class='heading-logo'>"
+               b"<img class='netflix-logo' src='/netflix.png' alt='Netflix Logo'>"
+               b"<img class='property-card__mls-logo' src='/mls.png' alt='MLS logo'>"
+               b"<img src='/rls_logo_vertical2020.png'>"
+               b"<link rel='icon' href='/favicon-16x16.png'>")
+
+    def setUp(self):
+        self.m = helpers.scraper_module("fill_gaps")
+
+    def urls(self, html=None, name="Serhant"):
+        return list(self.m.logo_urls(html or self.SERHANT, "https://x.test/", name))
+
+    def test_the_pages_own_generically_labelled_mark_wins(self):
+        self.assertEqual(self.urls()[0], "https://x.test/own-mark.png")
+
+    def test_attribute_order_carries_no_meaning(self):
+        """The bug: the pattern needed the logo-ish attribute BEFORE src=, so
+        <img src=... alt="Logo" class="heading-logo"> never matched and
+        <img class="netflix-logo" src=...> did."""
+        self.assertIn("https://x.test/own-mark.png", self.urls())
+
+    def test_another_companys_mark_is_never_a_candidate(self):
+        for foreign in ("netflix.png", "mls.png", "rls_logo_vertical2020.png"):
+            self.assertNotIn("https://x.test/" + foreign, self.urls(), foreign)
+
+    def test_the_share_card_is_never_a_candidate(self):
+        """og:image is chosen to sell the page, not to identify the company --
+        and on serhant.com it IS the Netflix wordmark."""
+        self.assertNotIn("https://x.test/netflix-share.png", self.urls())
+        body = inspect.getsource(self.m.logo_urls).split('"""')[2]
+        self.assertNotIn("og:image", body)
+
+    def test_a_src_url_naming_the_brokerage_is_vouched(self):
+        html = b"<img src='/assets/ArborviewRealty_Logo.png'>"
+        self.assertEqual(self.urls(html, "Arborview Realty Inc"),
+                         ["https://x.test/assets/ArborviewRealty_Logo.png"])
+
+    def test_the_brokerages_own_mark_outranks_a_generic_one(self):
+        html = (b"<img class='site-logo' src='/generic.png'>"
+                b"<img class='serhant-logo' src='/named.png'>")
+        self.assertEqual(self.urls(html)[0], "https://x.test/named.png")
+
+    def test_a_templating_placeholder_is_not_a_url(self):
+        """serhant.com ships an unrendered <img src="{{mlsLogo}}">."""
+        self.assertEqual(self.urls(b"<img class='logo' src='{{mlsLogo}}'>"), [])
+
+    def test_the_favicon_stays_last_rather_than_first(self):
+        self.assertEqual(self.urls()[-1], "https://x.test/favicon-16x16.png")
+
+
+class TestPngSize(unittest.TestCase):
+    """No Pillow, no ffprobe -- the IHDR is read directly."""
+
+    def setUp(self):
+        self.m = helpers.scraper_module("fill_gaps")
+
+    def test_it_reads_the_ihdr(self):
+        self.assertEqual(self.m.png_size(png(758, 263)), (758, 263))
+
+    def test_a_non_png_has_no_size(self):
+        self.assertIsNone(self.m.png_size(b"<svg xmlns='...'></svg>"))
+
+    def test_a_truncated_png_has_no_size(self):
+        self.assertIsNone(self.m.png_size(b"\x89PNG\r\n\x1a\n"))
+
+    def test_the_floor_is_high_enough_to_reject_every_common_favicon(self):
+        """16, 32, 48, 64 and 96 are the sizes a rel="icon" actually serves."""
+        for n in (16, 32, 48, 64, 96):
+            self.assertLess(n, self.m.MIN_LOGO_PX, n)
 
 
 if __name__ == "__main__":

@@ -280,9 +280,19 @@ and it imports `find_gaps.py` rather than re-deriving any of it. See
   already on disk. No network.
 - **A `gap` logo** is the only lane that reaches the network, and only with
   `--fetch`. The candidate domain must verify as that brokerage before anything
-  downloads, and the file must be a real PNG; a non-PNG mark (an SVG, typically)
-  is reported for the session workflow below rather than saved under a name that
-  lies about its type.
+  downloads. Then the *element* has to earn it too: a page is full of other
+  people's marks — `serhant.com` carries the Netflix wordmark, two MLS marks and
+  an RLS mark, all real PNGs of plausible size — so a candidate is taken only when
+  an attribute names the brokerage, or when the page labels it generically
+  (`alt="Logo"`, `class="heading-logo"`), which is how a site refers to its own
+  identity and never to someone else's. `og:image` is not a candidate at all: a
+  share card sells the page, it does not identify the company. The file must also
+  be a real PNG and at least `MIN_LOGO_PX` (120) on its long side — a `rel="icon"`
+  favicon is 16px and scales into `make_tour.py`'s 360×200 box as a smear. Every
+  candidate on the page is tried before the attempt gives up; whatever is left
+  over is reported for the session workflow below rather than saved under a name
+  that lies about it. See
+  [`a-fetched-logo-names-the-brokerage-or-it-is-not-fetched`](_rules/a-fetched-logo-names-the-brokerage-or-it-is-not-fetched.md).
 - **A `near_miss` is never adopted here.** It is reported and left alone —
   eyeball it yourself, for the reason the bucket exists.
 

@@ -35,7 +35,7 @@ Everything else is a gate, a one-time setup step, or an escape hatch.
 ## Before you change code
 
 1. Read the rules whose `area` matches what you are touching — the table in
-   [`_rules/CONTEXT.md`](_rules/CONTEXT.md). Not all 41.
+   [`_rules/CONTEXT.md`](_rules/CONTEXT.md). Not all 42.
 2. A rule is not advice. Most record a failure that already shipped. If a change
    contradicts one, say so and stop.
 3. `python3 -m unittest discover -s tests -t .` — ~0.6s, no ffmpeg.

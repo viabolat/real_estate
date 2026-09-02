@@ -44,6 +44,52 @@ for whatever is in flight, which expire on ship) and `.claude/settings.local.jso
 
 ## 2. BUILT
 
+### 2026-09-02 — `--fetch` wrote the Netflix wordmark as a brokerage's logo
+
+Found by running it. `fill_gaps.py --fetch` closed the two real logo gaps
+(`serhant`, `re_max_partners_relocation`) and reported success both times. The
+RE/MAX mark was fine. The Serhant one was a **16×16 favicon** — and after the size
+gate was added to catch that, the second attempt returned the **Netflix wordmark**,
+384×120, a real PNG, a plausible size, another company's registered trademark. One
+`--auto` run from a client's video.
+
+`serhant.com` carries the Netflix mark because the brokerage appears in a Netflix
+show. It also carries two MLS marks and an RLS mark. Every one of them downloads
+cleanly and passes every check that asks *is this a usable image*. Nothing was
+asking *is this their image*.
+
+Three separate defects, each one alone enough:
+
+- `rel="icon"` led the candidate list, so a favicon outranked the real mark.
+- `og:image` was a candidate. A share card is chosen to sell the page, not to
+  identify the company — on this page it *is* the Netflix logo.
+- The `<img>` pattern required the logo-ish attribute to appear **before** `src=`
+  in the tag. Serhant's own `<img src=… alt="Logo" class="heading-logo">` puts
+  `src` first, so it never matched, while `<img class="netflix-logo" src=…>` did.
+  Attribute order is not a signal about anything.
+
+The fix asks ownership directly. A candidate `<img>` earns its place two ways:
+**vouched** — an attribute or the URL contains a distinctive word from
+`broker_name`; or **generic** — a logo-ish attribute reduces to nothing but
+positional words once the adjectives are stripped. A site does not qualify its own
+identity (`alt="Logo"`, `class="logo__img dark"`); it qualifies everyone else's
+(`netflix-logo`, `property-card__mls-logo`, `rls_logo_vertical2020`). If a word
+survives the strip, that word is the owner, and the owner is not this brokerage.
+`og:image` is gone entirely, `<img>` attributes are parsed into a dict rather than
+matched by sequence, `png_size()` reads the IHDR directly (no image dependency) to
+enforce a 120px floor, and `fetch_logo()` now falls through every candidate the
+page offers instead of stopping at the first.
+
+Re-run headlessly, both brands resolved to their real wordmarks — and the RE/MAX
+one improved from a yard-sign marketing graphic (366×244) to the brokerage's actual
+logo file (758×263), because the ownership test reaches the right element rather
+than the first plausible one.
+
+Recorded as
+[`a-fetched-logo-names-the-brokerage-or-it-is-not-fetched`](_rules/a-fetched-logo-names-the-brokerage-or-it-is-not-fetched.md);
+guarded by 14 new tests in `tests/test_fill_gaps.py`, which pin the Netflix case,
+the MLS case, the favicon case, the attribute-order case and the fall-through.
+
 ### 2026-09-02 — The listing level is not the agent level: one bug wearing four masks
 
 The project moved to a laptop and back. The code returned current; the data did

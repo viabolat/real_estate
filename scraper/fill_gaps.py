@@ -18,9 +18,13 @@ Three lanes, ordered by how much each can go wrong:
            unclaimed global_assets/logos/<brand>.png already sitting there.
            No network, no download, one JSON key.
   fetch    a logo_status() of "gap" -> derive the brokerage's own domain from
-           broker_name, verify the page really is that brokerage, download its
-           mark. The only lane that reaches the network, and it is off unless
-           --fetch is passed.
+           broker_name, verify the page really is that brokerage, then verify
+           the ELEMENT too: a candidate is taken only when an attribute names
+           the brokerage or the page labels it generically, because a page is
+           full of other people's marks and every one of them downloads clean.
+           The only lane that reaches the network, and it is off unless
+           --fetch is passed. See
+           _rules/a-fetched-logo-names-the-brokerage-or-it-is-not-fetched.md.
 
 A "near_miss" logo is never touched by any lane. That bucket exists because a
 plausible-but-wrong brokerage mark ships on a client's video, and find_gaps.py
@@ -41,6 +45,7 @@ import argparse
 import json
 import os
 import re
+import struct
 import sys
 import urllib.error
 import urllib.parse
@@ -174,22 +179,136 @@ def verify(html, broker_name):
     return bool(words) and any(w in hay for w in words)
 
 
-def logo_url(html, base):
-    """The page's best claim to its own mark, most explicit first. Returns an
-    absolute URL or None."""
-    text = html.decode("utf-8", "replace")
-    pats = [
-        r'rel=["\'](?:apple-touch-icon|icon)["\'][^>]*href=["\']([^"\']+\.png)',
-        r'href=["\']([^"\']+\.png)["\'][^>]*rel=["\'](?:apple-touch-icon|icon)',
-        r'property=["\']og:image["\'][^>]*content=["\']([^"\']+)',
-        r'<img[^>]+(?:class|id|alt|src)=["\'][^"\']*logo[^"\']*["\'][^>]*src=["\']([^"\']+)',
-        r'<img[^>]+src=["\']([^"\']*logo[^"\']*)["\']',
-    ]
-    for p in pats:
-        m = re.search(p, text, re.I)
-        if m:
-            return urllib.parse.urljoin(base, m.group(1))
+# reason: make_tour.py fits the mark into a 360x200 box for the persistent
+# overlay and 760x300 on the card. Anything under this on its long side cannot
+# fill even a third of that box without a visible upscale smear -- and a
+# rel="icon" href is very often a 16px favicon. serhant.com served exactly that
+# and it was accepted as the brokerage's logo, which is the near_miss failure
+# this module refuses to make in the other direction.
+MIN_LOGO_PX = 120
+
+
+def png_size(blob):
+    """(width, height) out of a PNG's IHDR, or None when it is not a PNG.
+
+    reason: no Pillow, no ffprobe -- fetch_logo() runs in the scraper and this
+    repo carries no image dependency. The IHDR is the first chunk of every PNG
+    and its two big-endian uint32s sit at a fixed offset, so the header alone
+    answers "is this a mark or a favicon".
+    """
+    if not blob.startswith(b"\x89PNG\r\n\x1a\n") or len(blob) < 24:
+        return None
+    return struct.unpack(">II", blob[16:24])
+
+
+# reason: a page is full of other people's marks. serhant.com carries the
+# NETFLIX wordmark (class="netflix-logo", for the show the brokerage appears
+# in), two MLS marks and an RLS mark, and every one of them downloads clean,
+# is a real PNG and clears the size gate. The page's OWN mark is the one it
+# labels generically -- alt="Logo", class="heading-logo" -- because a site does
+# not qualify its own identity. Strip the positional adjectives from a
+# logo-ish attribute; whatever is left is a foreign owner's name, and if
+# anything is left the candidate is not this brokerage's mark.
+POSITIONAL = {"logo", "logos", "img", "image", "icon", "site", "header",
+              "heading", "head", "nav", "navbar", "menu", "top", "main",
+              "primary", "brand", "branding", "company", "wordmark", "mark",
+              "link", "home", "wrapper", "container", "desktop", "mobile",
+              "light", "dark", "white", "black", "svg", "png", "a", "the"}
+
+
+def _img_tags(text):
+    """(tag_text, {attr: value}) for every <img> on the page, in document order.
+
+    reason: the old pattern required the logo-ish attribute to appear BEFORE
+    src= in the tag, so serhant.com's own <img src=... alt="Logo"
+    class="heading-logo"> never matched while <img class="netflix-logo"
+    src=...> did. Attribute order is not a signal about anything.
+    """
+    for m in re.finditer(r"<img\b[^>]*>", text, re.I):
+        tag = m.group(0)
+        attrs = {k.lower(): v for k, v in
+                 re.findall(r'([a-zA-Z_:-]+)\s*=\s*["\']([^"\']*)["\']', tag)}
+        yield tag, attrs
+
+
+def _words(name):
+    """Distinctive words in a brokerage name -- the same set verify() uses."""
+    return [w for w in re.split(r"[^a-z0-9]+", (name or "").lower())
+            if len(w) > 3 and w not in LEGAL_TAIL]
+
+
+def _tokens(value):
+    return [t for t in re.split(r"[^a-z0-9]+", (value or "").lower()) if t]
+
+
+def owns_the_mark(attrs, broker_name):
+    """Does this <img> plausibly carry THIS brokerage\'s mark?
+
+    Two ways to earn it, and nothing else counts:
+      vouched  -- an attribute names the brokerage (remax..., serhant...)
+      generic  -- a logo-ish attribute reduces to nothing but positional words,
+                  so the page is calling it *the* logo rather than someone\'s
+    """
+    values = [v for k, v in attrs.items()
+              if k in ("class", "id", "alt", "src", "title", "data-src")]
+    words = _words(broker_name)
+    for v in values:
+        toks = set(_tokens(v))
+        if words and any(w in toks or any(w in t for t in toks) for w in words):
+            return "vouched"
+    for k in ("class", "id", "alt", "title"):
+        v = attrs.get(k)
+        if not v:
+            continue
+        toks = set(_tokens(v))
+        if "logo" in toks and not (toks - POSITIONAL):
+            return "generic"
     return None
+
+
+def logo_urls(html, base, broker_name=""):
+    """The page\'s claims to its OWN mark, best first. Yields absolute URLs.
+
+    reason: this returned only the first match and led with rel="icon", so a
+    site declaring its favicon above its real mark handed back a 16x16 file and
+    nothing further down the page was ever reached. Yield every candidate so
+    fetch_logo() can fall past one that turns out too small or foreign, and
+    order by how likely an element is to BE this brokerage\'s mark rather than
+    by how explicit its markup is.
+
+    og:image is deliberately NOT among these. It is a social share card, and a
+    share card is chosen to sell the page, not to identify the company:
+    serhant.com serves the NETFLIX wordmark there. It downloaded clean, was a
+    real PNG and cleared the size gate at 384x120 -- a plausible-looking mark
+    belonging to another company entirely, one build from a client\'s video. No
+    byte or dimension check catches that; only not asking the question does.
+    See _rules/a-fetched-logo-names-the-brokerage-or-it-is-not-fetched.md.
+    """
+    text = html.decode("utf-8", "replace")
+    vouched, generic = [], []
+    for _tag, attrs in _img_tags(text):
+        src = attrs.get("src") or attrs.get("data-src")
+        if not src or "{{" in src:
+            continue
+        owner = owns_the_mark(attrs, broker_name)
+        if owner == "vouched":
+            vouched.append(src)
+        elif owner == "generic":
+            generic.append(src)
+
+    icons = []
+    for pat in (r'rel=["\']apple-touch-icon["\'][^>]*href=["\']([^"\']+\.png)',
+                r'href=["\']([^"\']+\.png)["\'][^>]*rel=["\']apple-touch-icon',
+                r'rel=["\']icon["\'][^>]*href=["\']([^"\']+\.png)',
+                r'href=["\']([^"\']+\.png)["\'][^>]*rel=["\']icon'):
+        icons += [m.group(1) for m in re.finditer(pat, text, re.I)]
+
+    seen = set()
+    for raw in vouched + generic + icons:
+        url = urllib.parse.urljoin(base, raw)
+        if url not in seen:
+            seen.add(url)
+            yield url
 
 
 def fetch_logo(brand_slug, broker_name, logos_dir=LOGOS_DIR, dry_run=False):
@@ -205,32 +324,38 @@ def fetch_logo(brand_slug, broker_name, logos_dir=LOGOS_DIR, dry_run=False):
             if not verify(html, broker_name):
                 return {"brand": brand_slug, "status": "skipped",
                         "reason": f"{domain} did not verify as {broker_name}"}
-            url = logo_url(html, base)
-            if not url:
-                return {"brand": brand_slug, "status": "skipped",
-                        "reason": f"no logo element found on {domain}"}
-            try:
-                _final, blob, hdrs = _get(url)
-            except (urllib.error.URLError, OSError, ValueError) as e:
-                return {"brand": brand_slug, "status": "skipped",
-                        "reason": f"logo download failed: {e}"}
-            # reason: make_tour.py's gate resolves global_assets/logos/<brand>.png
-            # and nothing in this repo can transcode without adding a
-            # dependency, so a non-PNG mark is reported for a session to
-            # handle rather than saved under a name that lies about its type.
-            if not blob.startswith(b"\x89PNG\r\n\x1a\n"):
-                kind = hdrs.get("Content-Type", "unknown")
-                return {"brand": brand_slug, "status": "skipped",
-                        "reason": f"not a PNG ({kind}) -- needs a session"}
-            dest = os.path.join(logos_dir, f"{brand_slug}.png")
-            if not dry_run:
-                os.makedirs(logos_dir, exist_ok=True)
-                tmp = dest + ".part"
-                with open(tmp, "wb") as f:
-                    f.write(blob)
-                os.replace(tmp, dest)
-            return {"brand": brand_slug, "status": "ok", "path": dest,
-                    "source": url, "tier": "brokerage_site"}
+            why = f"no logo element found on {domain}"
+            for url in logo_urls(html, base, broker_name):
+                try:
+                    _final, blob, hdrs = _get(url)
+                except (urllib.error.URLError, OSError, ValueError) as e:
+                    why = f"logo download failed: {e}"
+                    continue
+                # reason: make_tour.py's gate resolves
+                # global_assets/logos/<brand>.png and nothing in this repo can
+                # transcode without adding a dependency, so a non-PNG mark is
+                # reported for a session to handle rather than saved under a
+                # name that lies about its type.
+                size = png_size(blob)
+                if size is None:
+                    why = (f"not a PNG ({hdrs.get('Content-Type', 'unknown')})"
+                           " -- needs a session")
+                    continue
+                if max(size) < MIN_LOGO_PX:
+                    why = (f"{size[0]}x{size[1]} is a favicon, not a mark "
+                           f"(needs {MIN_LOGO_PX}px) -- needs a session")
+                    continue
+                dest = os.path.join(logos_dir, f"{brand_slug}.png")
+                if not dry_run:
+                    os.makedirs(logos_dir, exist_ok=True)
+                    tmp = dest + ".part"
+                    with open(tmp, "wb") as f:
+                        f.write(blob)
+                    os.replace(tmp, dest)
+                return {"brand": brand_slug, "status": "ok", "path": dest,
+                        "size": f"{size[0]}x{size[1]}", "source": url,
+                        "tier": "brokerage_site"}
+            return {"brand": brand_slug, "status": "skipped", "reason": why}
     return {"brand": brand_slug, "status": "skipped",
             "reason": "no candidate domain responded"}
 
