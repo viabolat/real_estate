@@ -1309,15 +1309,32 @@ What stays here is what `status.py` cannot derive -- the decisions:
   still in `leads.csv` and its brand folder still exists, so `status.py` reports
   `boston_advanced_realty/- ... no listings yet`. Re-running `run.py` on its dump
   would scaffold it again, and the photos would still be too small. The deletion was
-  never recorded at the time; it is recorded here now.
-- **`scraper/dumps/` holds four `*.txt` files and all four are 0 bytes.** Both
-  scraper scripts refuse a dump with no `zpid` and no address, so the home screen
-  correctly reports **0** pending imports rather than offering an import that can
-  only fail. Nothing on this machine exercises the dump parsers -- which is why the
-  `lead.field()` comma bug in section 6 stays unfixed, and why it must stay unfixed
-  until a real dump exists to regression-test the naming authority against.
+  never recorded at the time; it is recorded here now. Still gone as of 2026-09-02:
+  no dump for it survived the laptop transfer, so it cannot be re-scaffolded here.
+- **`scraper/dumps/` holds two real dumps** -- `5_joy_res_pne.txt` and
+  `75_clarendon_st_apt_602.txt`, both already imported. The four 0-byte `paste*.txt`
+  stubs that used to sit beside them were deleted 2026-09-02; both scraper scripts
+  refused them anyway, so the home screen was already reporting **0** pending imports.
+  A dump is a JSON header line of listing/agent fields followed by one
+  `photos.zillowstatic.com` URL per line -- it is produced from a browser session on
+  the listing page, not by fetching the URL: **Zillow returns HTTP 403 to any
+  non-browser client**, verified 2026-09-02.
 - **Stale intermediates in the two pre-scraper listings** are an open item, not a
   state reading. See section 6.
+- **Four listings are built and awaiting a human rung (2026-09-02).**
+  `gibson.../169_k_st_1`, `re_max.../407_w_1st_st_unit_101`, `serhant/267_old_colony_606`
+  and `serhant/99_sumner_st_penthouse_621` each hold their 3 `sample_` cuts after the
+  layout migration. All four still need an `agent_email`, which is why none has an
+  outreach draft yet. `find_gaps.py --json` names them; the address itself has to be
+  looked up in a browser, because **WebFetch redacts email addresses out of its own
+  output** -- nine distinct agents on one roster page all returned the same
+  `[email protected]` placeholder, verified 2026-09-02. Paste each into the
+  `agent_email` column of its `leads.csv` row, then `python3 scraper/fill_gaps.py`.
+- **`keller_williams/16_holmfield_ave` and `compass/41_worcester_sq_penthouse`** are
+  published to the CDN and recorded in `outreach/links.csv`, but their folders were
+  lost in the laptop transfer and no dump survived. Nothing was contacted for either.
+  They need a re-scrape before `publish.write_draft()` can regenerate the owed draft
+  from the recorded link.
 - **`IDEA.md` section 6 "CURRENT STATE"** is a historical snapshot of one folder from
   2026-08-19, kept for the sourcing argument it supports. It is not a live reading
   either; `status.py` supersedes it.
