@@ -16,6 +16,12 @@ opened in write mode, no logo file downloaded. `--open`/`--open-all` hand a
 search URL to `webbrowser.open()` and stop there; a tab landing open in the
 browser is not a file landing on disk.
 
+Acting on what this module reports is
+[`fill_gaps.py`](fill-gaps-acts-only-on-what-find-gaps-named.md)'s job, and only
+its job — that split is what keeps this rule true as the pipeline gets more
+headless. Nothing below is relaxed by it: the per-file permission requirement
+here governs the live session's own fetches and is untouched.
+
 The two gaps resolve through two different gates, and nothing in this repo is
 allowed to merge them:
 

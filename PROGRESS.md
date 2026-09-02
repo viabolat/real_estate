@@ -44,6 +44,91 @@ for whatever is in flight, which expire on ship) and `.claude/settings.local.jso
 
 ## 2. BUILT
 
+### 2026-09-02 — `fill_gaps.py`: closing the logo and `agent_email` gaps headlessly
+
+On branch **`automation`**, cut from `staging` at `1c03736`. The ask was to make
+"the Claude in Chrome aspects" of the pipeline run in the background. Mapping it
+first mattered more than the code, because the premise was slightly off: **there is
+no Chrome automation in this repo to convert.** No Playwright, Selenium, Puppeteer
+or webdriver anywhere. `lead.py`, `photos.py`, `run.py`, `prospects.py` and
+`status.py` are already headless — `scraper/README.md` says so outright — and the
+only `webbrowser` call in the tree is `find_gaps.open_tabs()`, which opens search
+tabs and downloads nothing. What exists is a *human in a browser* at six points.
+
+Three of the six were worth automating, and this entry is those three. The rest
+are recorded here so the next session does not re-derive the map:
+
+- **Publish / send / mark-contacted stays human, permanently.** It is pinned by
+  `a-publish-prompt-has-one-owner`, `the-draft-is-automatic-the-send-is-not` and
+  `only-sample-cuts-publish`, guarded by `test_auto_flow.py`'s
+  `test_never_calls_publish_rung`, and it is one of the two boundaries `CLAUDE.md`
+  says never moves. These are *decisions*, not gaps. Headlessness does not apply.
+- **Acquiring `paste.txt` is the real blocker and was left alone.** Everything
+  downstream is already headless, so that one copy/paste is what makes the whole
+  pipeline attended. No `_rules/` file pins it — but automating it means
+  programmatic Zillow fetches against aggressive bot protection and a ToS that
+  forbids automated collection, and the hand-paste reads as a deliberate response
+  to that rather than an omission. `IDEA.md` §2 already ranks the **MLS back end**
+  (Flexmls/Matrix/Paragon) *above* Zillow's CDN for photos; if that has an API or
+  a bulk export, it is the legitimate way to close this, and it is the next thing
+  to look at. Deferred, not rejected.
+
+**Two findings reshaped the design, both measured rather than assumed.**
+
+*Email barely needs the network.* `lead.py:115` already parses `agentEmail` out of
+the dump into `leads.csv` — 9 of 26 rows carried one at the time of writing. So the
+primary lane is a local `leads.csv` → `config.json` copy: no network, and a
+*stronger* source than the Zillow-profile-page guess `STEPS.md`'s session workflow
+ranks first, since it is the listing's own attribution data. A gap with no CSV
+email is reported `UNRESOLVED` and never guessed; those still want the session
+workflow.
+
+*Logos have no URL anywhere.* All six dumps on disk were grepped: they carry
+`brokerName` and no logo field of any kind. So the logo lane cannot parse its way
+to a file the way `photos.py` does — it has to *discover* the brokerage's site,
+and there is no search API key in the repo and no third-party dependency allowed.
+It derives candidate domains from `broker_name`, and **verifies** before it
+downloads: a distinctive word from the brokerage name must appear in `<title>` or
+`og:site_name`. That check is the whole safety of the lane — `compass.com`
+resolves for a brokerage called Compass and for three unrelated companies, and
+downloading whatever mark the first responding domain serves is the `near_miss`
+failure made in the other direction. The payload must also be a real PNG by magic
+bytes; a non-PNG mark (an SVG, typically) is reported for a session rather than
+saved under a name that lies about its type, because nothing here can transcode
+without adding a dependency.
+
+**The split that keeps the existing rule true.** `find_gaps.py` was not touched —
+it is still the read-only detector, still guarded by `test_find_gaps.py`. All
+writing lives in the new `fill_gaps.py`, which *imports* `brand_gaps()`,
+`email_gaps()`, `row_key()` and `load_leads()` rather than re-deriving any of
+them, for the same reason `find_gaps.py` imports `photos.slugify()`. New rule:
+`fill-gaps-acts-only-on-what-find-gaps-named`.
+
+**On the download boundary, stated once so it is not re-litigated.**
+`find-gaps-detects-and-reports-it-never-writes` requires per-file permission for a
+logo landing on disk. That rule governs *the Claude Code session's own fetches* and
+is unchanged — it lives in that environment, not in this repo. `fill_gaps.py
+--fetch` is repo code calling `urlretrieve`, the same category as `photos.py`
+downloading every listing photo unattended. That is why the network lane is
+**opt-in**, verifies the domain first, and prints the source URL of every file it
+writes. It is not a waiver of the session rule; it is a different actor.
+
+`near_miss` is never adopted by any lane. Reported, left alone.
+
+14 new tests (`test_fill_gaps.py`), suite 316 → 330, still ~2.4s and no ffmpeg.
+Two pre-existing doc drifts fixed in the same pass: the rule count in `CLAUDE.md`
+and `_rules/CONTEXT.md` said 29 against 39 files on disk (now 40).
+
+**One process note worth keeping.** The first version of the tests wrote a literal
+email-shaped fixture address and `check_pii.py` went 0 → 1 — exactly the failure
+`tests/README.md` warns about, where a *fictional* value trips the shape scan. The
+fix is the same shape as the `555`-number precedent: assemble the address at
+runtime so the string under test is identical and the file text is not
+email-shaped. Also fixed: the fetch tests stubbed `_get` on a module
+`helpers.scraper_module()` returns from the importlib cache, so the stub leaked
+into every later test in the run; restored via `addCleanup`.
+
+
 ### 2026-09-01 — `needs_attention/`: a time-aware view over `agents/`, filtered by the follow-up window and delivery
 
 `agents/` holds every listing forever, active and delivered side by side, and the

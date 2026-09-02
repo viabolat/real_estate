@@ -259,6 +259,37 @@ is listed alongside it, with `agent_name`, `broker_name` and `agent_phone`
 for context (disambiguating a common name) and the exact `config.json` path
 to edit.
 
+### Closing those gaps headlessly
+
+```bash
+python3 scraper/fill_gaps.py             # emails + available-logo claims, then report
+python3 scraper/fill_gaps.py --dry-run   # plan only, writes nothing
+python3 scraper/fill_gaps.py --fetch     # also try the network for real logo gaps
+```
+
+`find_gaps.py` detects; this is the only module allowed to act on what it found,
+and it imports `find_gaps.py` rather than re-deriving any of it. See
+[`fill-gaps-acts-only-on-what-find-gaps-named`](_rules/fill-gaps-acts-only-on-what-find-gaps-named.md).
+
+- **`agent_email`** comes from `leads.csv` — `lead.py` already parsed it out of
+  the dump's `agentEmail` field, so this is a copy between two files already on
+  disk, no network, and a stronger source than the profile-page guess the
+  session workflow below ranks first. A gap with no `leads.csv` email prints as
+  `UNRESOLVED` and is **never guessed**; work those with the session workflow.
+- **An `available` logo** is claimed by pointing `brand.json` at the file
+  already on disk. No network.
+- **A `gap` logo** is the only lane that reaches the network, and only with
+  `--fetch`. The candidate domain must verify as that brokerage before anything
+  downloads, and the file must be a real PNG; a non-PNG mark (an SVG, typically)
+  is reported for the session workflow below rather than saved under a name that
+  lies about its type.
+- **A `near_miss` is never adopted here.** It is reported and left alone —
+  eyeball it yourself, for the reason the bucket exists.
+
+This does not touch publishing, sending or sign-off. Those are decisions, not
+gaps: `--auto` still never reaches `publish_rung()`, and mail still leaves the
+machine by hand.
+
 ### Fetching a logo or an agent email with a live Claude Code + Chrome session
 
 The repeatable version of the manual workflow this was built from. Run

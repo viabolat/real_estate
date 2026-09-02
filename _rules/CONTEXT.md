@@ -21,7 +21,7 @@ drifted 135 lines out of the section, into the middle of the runbook.
 
 1. Before changing `make_tour.py`, `tour.py`, `publish.py`, `status.py` or
    `scraper/`, read the rules whose `area` matches what you are touching. Do not
-   read all 29 — that is the load this split exists to prevent.
+   read all 40 — that is the load this split exists to prevent.
 2. A rule is not advice. If a change contradicts one, say so and stop; the rule
    states why it exists, and most of them record a failure that already shipped.
 3. Adding a rule: one file, frontmatter as below, then `python3 _rules/reindex.py`.
@@ -53,7 +53,7 @@ reading *prose only* is a rule nothing enforces. That is the list worth shrinkin
 
 <!-- RULE-TABLE:start -->
 
-39 rules.
+40 rules.
 
 | Area | Rule | Guarded by |
 |---|---|---|
@@ -64,6 +64,7 @@ reading *prose only* is a rule nothing enforces. That is the list worth shrinkin
 | photos | [Floor-plan detection flags a candidate; it never reorders, renames, or deletes](floor-plan-detection-is-flag-only.md) | `tests/test_floorplan.py`<br>`tests/test_auto_flow.py` |
 | photos | [No AI upscaling of listing photos](no-ai-upscaling-of-listing-photos.md) | *prose only* |
 | photos | [Photo order lives in the filename prefix and nowhere else](photo-order-lives-in-the-filename-prefix.md) | `tests/test_photo_order.py`<br>`tests/test_home_screen.py` |
+| scrape | [`fill_gaps.py` acts only on what `find_gaps.py` named](fill-gaps-acts-only-on-what-find-gaps-named.md) | `tests/test_fill_gaps.py` |
 | scrape | [`find_gaps.py` detects and reports; it never writes](find-gaps-detects-and-reports-it-never-writes.md) | `tests/test_find_gaps.py` |
 | scrape | [One dump per file, and a dump that is not a listing is refused](one-dump-per-file.md) | *prose only* |
 | naming | [A blank agent name gets `UNASSIGNED_AGENT`, never an empty path segment](a-blank-agent-name-gets-a-placeholder-slug.md) | `tests/test_naming.py`<br>`tests/test_status_naming.py`<br>`tests/test_home_screen.py` |
@@ -97,6 +98,6 @@ reading *prose only* is a rule nothing enforces. That is the list worth shrinkin
 | pii | [The PII gate runs itself, and an unwired gate is reported, never assumed](the-pii-gate-runs-itself.md) | `tests/test_hook_wired.py` |
 | docs | [Docs do not go stale](docs-do-not-go-stale.md) | `tests/test_photo_order.py` |
 
-Unguarded rules: 6 of 39.
+Unguarded rules: 6 of 40.
 
 <!-- RULE-TABLE:end -->

@@ -206,7 +206,42 @@ python3 find_gaps.py --open      # opens up to 5 search tabs; --open-all lifts t
   results — they open tabs, they fetch and download nothing.
 - The actual logo file landing on disk, and the actual `config.json.agent_email`
   write, both happen in a live Claude Code + Chrome session — see the two
-  workflows in `../STEPS.md`, right after the missing-logo `--auto` halt.
+  workflows in `../STEPS.md`, right after the missing-logo `--auto` halt — or
+  headlessly via `fill_gaps.py` below, which is the only module allowed to act
+  on what this one reports.
+
+## `fill_gaps.py`
+
+Closes what `find_gaps.py` reports, headlessly. `find_gaps.py` stays read-only
+and is imported, never reimplemented. See
+[`../_rules/fill-gaps-acts-only-on-what-find-gaps-named.md`](../_rules/fill-gaps-acts-only-on-what-find-gaps-named.md).
+
+```
+python3 fill_gaps.py             # emails + available-logo claims, then report
+python3 fill_gaps.py --dry-run   # plan only, writes nothing
+python3 fill_gaps.py --fetch     # also try the network for real logo gaps
+python3 fill_gaps.py --json      # machine-readable result
+```
+
+Three lanes, ordered by how much each can go wrong:
+
+- **`agent_email`** — copied from `leads.csv`, where `lead.py` already parsed
+  it out of the dump's `agentEmail` field, into the listing's `config.json`.
+  No network. A gap with no `leads.csv` email, or a value that does not parse
+  as an address, is reported as `UNRESOLVED` and **never guessed**.
+- **A logo in the `available` bucket** — points `brand.json` at the file
+  already sitting under the exact brand slug. No network, one JSON key.
+- **A logo in the `gap` bucket** — the only lane that reaches the network, and
+  it is off unless `--fetch` is passed. A candidate domain derived from
+  `broker_name` must *verify* (a distinctive word from the brokerage name in
+  `<title>` or `og:site_name`) before anything downloads, and the payload must
+  be a real PNG by magic bytes; a non-PNG mark is reported for a session to
+  handle rather than saved under a name that lies about its type.
+
+`near_miss` is never adopted, by any lane — a plausible-but-wrong brokerage
+mark ships on a client's video. Every write prints the source tier that
+produced it. Nothing here touches publishing, sending or sign-off.
+
 
 ## Files & folders
 
@@ -217,6 +252,7 @@ python3 find_gaps.py --open      # opens up to 5 search tabs; --open-all lifts t
 | `lead.py` | Extracts property + agent info from `paste.txt`. |
 | `photos.py` | Downloads all listing photos from `paste.txt`. |
 | `find_gaps.py` | Read-only — reports missing brand logos and blank `agent_email`s. Prints to stdout only; writes nothing. |
+| `fill_gaps.py` | Closes what `find_gaps.py` reports: `agent_email` from `leads.csv`, `available` logos claimed, `gap` logos fetched only with `--fetch`. Never adopts a `near_miss`. |
 | `leads.csv` | Output — one row per listing ever processed by `lead.py`. Canonical data store. |
 | `leads.html` | Output — `leads.csv` rendered as a browser-viewable table. Regenerated every run; open it directly in a browser. |
 | `../agents/<broker>/<address>/photos/` | Output — numbered full-resolution `.jpg`s in gallery order, written into the build tree rather than under `scraper/`. |
