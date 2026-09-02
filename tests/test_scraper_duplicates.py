@@ -171,7 +171,7 @@ class TestLeadHtmlContactedColumn(unittest.TestCase):
         self.assertTrue(row_line.lstrip().startswith("<tr><td>contacted</td>"),
                          row_line)
 
-    def test_a_lead_absent_from_contacted_csv_is_new(self):
+    def test_a_lead_absent_from_contacted_csv_is_open(self):
         with tempfile.TemporaryDirectory() as tmp:
             csv_path = os.path.join(tmp, "leads.csv")
             html_path = os.path.join(tmp, "leads.html")
@@ -182,7 +182,7 @@ class TestLeadHtmlContactedColumn(unittest.TestCase):
             with open(html_path, encoding="utf-8") as f:
                 page = f.read()
         row_line = next(l for l in page.splitlines() if "Corcoran" in l)
-        self.assertTrue(row_line.lstrip().startswith("<tr><td>new</td>"), row_line)
+        self.assertTrue(row_line.lstrip().startswith("<tr><td>open</td>"), row_line)
 
 
 class TestRunOneClassification(unittest.TestCase):

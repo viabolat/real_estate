@@ -199,7 +199,7 @@ class TestAContactedRowWithNoScrapedName(unittest.TestCase):
     produce records a real send that leads.html can never find.
 
     That page derives its key from the leads.csv row, so the CONTACTED and
-    FOLLOW UP columns stay blank and the lead reads "new" forever -- while rung
+    FOLLOW UP columns stay blank and the lead reads "open" forever -- while rung
     5 offers to mail it again. Three rows sat that way for two weeks and one
     agent got a duplicate. Ids are short and non-phone-shaped: check_pii.py
     matches by shape (tests/README.md).
@@ -237,7 +237,7 @@ class TestAContactedRowWithNoScrapedName(unittest.TestCase):
         # reason: the two pre-scraper listings were marked contacted as
         # unknown_brokerage/<listing>/unassigned_agent, then their leads.csv
         # rows gained a real brokerage and agent. The key moved out from under
-        # the mark and both leads read "new" for two weeks. Synthetic names --
+        # the mark and both leads read "open" for two weeks. Synthetic names --
         # check_pii.py scans fixtures against leads.csv (tests/README.md).
         self.write(("unknown_brokerage", "1_example_st", "unassigned_agent"))
         self.assertEqual(len(STATUS.orphaned_marks(

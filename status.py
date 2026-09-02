@@ -20,7 +20,7 @@ all is reported separately as unverifiable rather than passing silently: the che
 keys on agent_phone out of config.json, so a folder that never had a config.json was
 exactly the hand-named case it could not see. A third report names a contacted.csv
 row keyed on a name the scrape does not produce: the send is real, but leads.html
-derives its key from the leads.csv row and so shows the lead as "new" forever while
+derives its key from the leads.csv row and so shows the lead as "open" forever while
 rung 5 offers to mail it again. A blank agent_name scrapes to the
 UNASSIGNED_AGENT placeholder rather than a silent empty path segment; the same
 drift check is how a placeholder gets corrected once the real name is known.
@@ -485,7 +485,7 @@ def orphaned_marks(known):
 
     Such a row records a real send, but leads.html can never find it: that page
     derives its key from the leads.csv row, so the CONTACTED and FOLLOW UP
-    columns stay blank and the lead reads "new" forever. Renaming a folder
+    columns stay blank and the lead reads "open" forever. Renaming a folder
     without re-keying its mark produces exactly this, and so does a mark written
     before its listing had a brokerage or agent on record.
     """
