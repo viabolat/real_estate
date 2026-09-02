@@ -76,6 +76,14 @@ sent that draft. Nothing here writes it automatically -- tour.py's publish_rung(
 only offers to, once, right after a publish succeeds, defaulting to No exactly
 like every other prompt that leaves the machine's hand off the send button. See
 the-draft-is-automatic-the-send-is-not.md.
+
+It carries ONE ROW PER SEND -- the first contact and every follow-up after it --
+and contacted_at() returns the latest. followup_due() reads that against
+follow_up_date(), so a lead past its window is drafted a SECOND, differently
+worded email (outreach/followup.txt -> outreach_followup.txt, write_followup()),
+pointing at the link recorded_link() recovers from links.csv rather than a fresh
+upload. Sending outreach_draft.txt twice is a byte-identical duplicate, and two
+agents got one before this existed: a-follow-up-is-its-own-draft-and-its-own-row.md.
 """
 
 import argparse
@@ -136,6 +144,8 @@ TEMPLATE = os.path.join(ROOT, "outreach", "template.txt")
 # the out/ cuts that produced it. It now lands beside them, inside the
 # listing's own agent folder -- see write_draft().
 DRAFT_FILENAME = "outreach_draft.txt"
+FOLLOWUP_TEMPLATE = os.path.join(ROOT, "outreach", "followup.txt")
+FOLLOWUP_FILENAME = "outreach_followup.txt"
 
 BUCKET = "listing-media"
 # The live host, plus the rewrite in vercel.json. Absolute on purpose: this string
@@ -582,12 +592,19 @@ def contacted_at(brand, listing, agent):
             rows = list(csv.DictReader(f))
     except OSError:
         return None
-    for r in rows:
-        if (r.get("brand", "").strip() == brand
-                and r.get("listing", "").strip() == listing
-                and r.get("agent", "").strip() == agent):
-            return r.get("marked_at", "").strip()
-    return None
+    # reason: this returned the FIRST matching row. contacted.csv is append-only
+    # and now carries one row per send -- the first contact and every follow-up
+    # after it -- so the first row is the oldest. Reading it meant a recorded
+    # follow-up could never re-arm the 5-day window: follow_up_date() kept
+    # answering with a date already in the past, needs_attention/ kept
+    # resurfacing the listing, and the operator kept being handed the same
+    # first-contact draft. That is how two agents received a byte-identical
+    # duplicate of an email from two weeks earlier. Latest row wins.
+    marks = sorted(r.get("marked_at", "").strip() for r in rows
+                   if r.get("brand", "").strip() == brand
+                   and r.get("listing", "").strip() == listing
+                   and r.get("agent", "").strip() == agent)
+    return marks[-1] if marks else None
 
 
 def contacted(brand, listing, agent):
@@ -621,8 +638,10 @@ def follow_up_date(marked_at):
 
 # ---- the draft --------------------------------------------------------------
 
-def draft_text(listing_dir, url):
-    """(rendered email, [placeholders still unfilled]) from outreach/template.txt.
+def draft_text(listing_dir, url, template=None):
+    """(rendered email, [placeholders still unfilled]) from outreach/template.txt,
+    or from `template` -- outreach/followup.txt is the same render over a second
+    wording.
 
     reason: the wording lived in property_email.txt with three <angle bracket>
     blanks filled in by hand on every send, from a CSV whose link was the thing
@@ -630,7 +649,7 @@ def draft_text(listing_dir, url):
     sender's own name -- so a clone can draft; the values come from the listing's
     config.json, which is already the single record of what produced the build.
     """
-    with open(TEMPLATE, encoding="utf-8") as f:
+    with open(template or TEMPLATE, encoding="utf-8") as f:
         body = f.read()
     cfg = {}
     try:
@@ -665,6 +684,62 @@ def write_draft(listing_dir, url):
     with open(path, "w", encoding="utf-8") as f:
         f.write(text)
     return path, missing
+
+
+def write_followup(listing_dir, url):
+    """Write the follow-up draft and return (path, missing). Same shape as
+    write_draft(), a second wording, its own filename.
+
+    reason: needs_attention/ resurfaces a contacted listing once its follow-up
+    date passes -- that is what the 5-day window is FOR. But the only artifact
+    in the folder was outreach_draft.txt, the first-contact draft, so following
+    up meant sending that same email a second time. Two agents received a
+    byte-identical duplicate on 2026-09-02 before this existed. The follow-up
+    is drafted automatically, like the first contact; sending it stays human
+    (the-draft-is-automatic-the-send-is-not.md).
+    """
+    text, missing = draft_text(listing_dir, url, FOLLOWUP_TEMPLATE)
+    path = os.path.join(listing_dir, FOLLOWUP_FILENAME)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+    return path, missing
+
+
+def recorded_link(brand, listing, agent):
+    """The branded review URL already in links.csv for this agent, or "".
+
+    reason: the-recorded-link-is-the-last-field.md keeps that column precisely
+    so a link can be recovered without re-uploading. A follow-up points at the
+    cut the agent already has; re-publishing to regenerate a URL that has not
+    changed would be a round trip for nothing.
+    """
+    if not os.path.isfile(LINKS):
+        return ""
+    try:
+        with open(LINKS, newline="", encoding="utf-8") as f:
+            rows = list(csv.DictReader(f))
+    except OSError:
+        return ""
+    hits = [r for r in rows
+            if (r.get("brand") or "").strip() == brand
+            and (r.get("listing") or "").strip() == listing
+            and (r.get("cut") or "").strip().startswith(f"{agent}_sample_branded")
+            and (r.get("url") or "").strip()]
+    return hits[-1]["url"].strip() if hits else ""
+
+
+def followup_due(brand, listing, agent, today=None):
+    """True when this lead was contacted and its follow-up date has passed.
+
+    Derived from contacted_at() + follow_up_date() -- the same two values
+    leads.html's CONTACTED / FOLLOW UP columns and needs_attention/ already
+    compute. No fourth definition of the window (see
+    needs-attention-is-a-view-not-a-move.md).
+    """
+    due = follow_up_date(contacted_at(brand, listing, agent))
+    if not due:
+        return False
+    return (today or datetime.date.today().strftime("%Y-%m-%d")) >= due
 
 
 # ---- the run ----------------------------------------------------------------

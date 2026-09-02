@@ -83,7 +83,11 @@ records that a human already sent the email, never sends one. A confirmed row
 lands in outreach/contacted.csv (publish.record_contacted()/contacted()).
 mark_contacted_action(), the fifth home-screen item, walks every published,
 not-yet-contacted listing and asks the same question one at a time, for whatever
-was published in an earlier session or skipped at that first prompt.
+was published in an earlier session or skipped at that first prompt. It also walks
+the leads past their follow-up date, drafts outreach_followup.txt for each, and
+records a yes as a second contacted.csv row -- which re-arms the window instead of
+leaving the listing to resurface in needs_attention/ every render. See
+a-follow-up-is-its-own-draft-and-its-own-row.md.
 
 Both runs write the same .last_build.json rung, "delivery", because that key names
 the intermediate lineage and not the cut family. That is what makes run 2 cheap:
@@ -1406,6 +1410,13 @@ def mark_contacted_action():
     every listing for the same reason publish_rung()'s own prompt does: this
     only records a send that already happened by hand (see
     the-draft-is-automatic-the-send-is-not.md), never triggers one.
+
+    reason: it also walks leads whose follow-up date has passed. It used to skip
+    anything already contacted, so a resurfaced lead had no rung at all -- the
+    operator sent the original outreach_draft.txt again by hand and had nowhere
+    to record it. Those are drafted from outreach/followup.txt into
+    outreach_followup.txt and recorded as a second contacted.csv row, which
+    re-arms the window. See a-follow-up-is-its-own-draft-and-its-own-row.md.
     """
     status, why = load_status()
     if status is None:
@@ -1419,15 +1430,36 @@ def mark_contacted_action():
                 if not status.published(brand, name):
                     continue
                 if status.contacted(brand, name, agent):
+                    if publish.followup_due(brand, name, agent):
+                        candidates.append((brand, name, agent, True))
                     continue
-                candidates.append((brand, name, agent))
+                candidates.append((brand, name, agent, False))
     if not candidates:
-        say("\n  Nothing to mark -- every published lead is already recorded "
-            "as contacted.")
+        say("\n  Nothing to mark -- every published lead is recorded as "
+            "contacted, and none is due a follow-up.")
         return
-    say(f"\n  {len(candidates)} published listing(s) not yet marked contacted:")
-    for brand, name, agent in candidates:
-        if confirm(f"  Mark agents/{brand}/{name}/{agent} as contacted?", False):
+    first = sum(1 for c in candidates if not c[3])
+    due = len(candidates) - first
+    say(f"\n  {first} not yet marked contacted, {due} due a follow-up:")
+    for brand, name, agent, is_followup in candidates:
+        where = f"agents/{brand}/{name}/{agent}"
+        if is_followup:
+            listing_dir = os.path.join(LISTINGS_ROOT, brand, name, agent)
+            url = publish.recorded_link(brand, name, agent)
+            if not url:
+                say(f"  {where}: due a follow-up, but links.csv has no branded "
+                    "URL for it -- skipping rather than drafting a dead link.")
+                continue
+            path, missing = publish.write_followup(listing_dir, url)
+            say(f"\n  {where}: follow-up due "
+                f"{publish.follow_up_date(publish.contacted_at(brand, name, agent))}."
+                f"\n    Draft: {path}")
+            if missing:
+                say(f"    Still blank: {', '.join(missing)}")
+            prompt = f"  Mark {where} as followed up once you've sent that?"
+        else:
+            prompt = f"  Mark {where} as contacted?"
+        if confirm(prompt, False):
             publish.record_contacted(brand, name, agent)
             say("    Recorded.")
 

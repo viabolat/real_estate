@@ -309,6 +309,21 @@ def contacted(brand, listing, agent):
         return False
 
 
+def followup_due(brand, listing, agent):
+    """Is this lead contacted, with its follow-up date already passed?
+
+    Same tolerant, _publish-guarded shape as published()/contacted() -- and the
+    window itself is publish.follow_up_date(), which is scraper/lead.py's, so
+    the roll-up, leads.html and needs_attention/ all read one definition.
+    """
+    if not _publish:
+        return False
+    try:
+        return _publish.followup_due(brand, listing, agent)
+    except Exception:
+        return False
+
+
 def next_action(listing_dir, cfg, n, worst, best, scraped=True, bcfg=None):
     """The one thing standing between this listing and a deliverable.
 
@@ -356,6 +371,7 @@ def next_action(listing_dir, cfg, n, worst, best, scraped=True, bcfg=None):
     soft = " -- soft ({}px photos)".format(best) if best and best < GATE_720P else ""
     listing = os.path.basename(os.path.dirname(listing_dir))
     brand = os.path.basename(os.path.dirname(os.path.dirname(listing_dir)))
+    agent = os.path.basename(listing_dir)
     if not counts["sample"] and not counts["tour"]:
         # reason: a confirmed publish clears its own sample_ cuts from out/ (see
         # a-confirmed-sample-publish-clears-its-own-cuts.md), which would
@@ -364,12 +380,20 @@ def next_action(listing_dir, cfg, n, worst, best, scraped=True, bcfg=None):
         # before and after that cleanup runs, or auto_targets() would re-select
         # an already-published, awaiting-sign-off listing as fresh.
         if published(brand, listing):
+            # reason: "awaiting sign-off" was the terminal rung, so a lead that
+            # had gone quiet past its follow-up date read exactly like one
+            # emailed an hour ago. The ladder now names the follow-up, which is
+            # what needs_attention/ resurfaces the listing FOR.
+            if followup_due(brand, listing, agent):
+                return f"follow up -- rung 5 drafts it{soft}{origin}"
             return f"sample published -- awaiting sign-off{soft}{origin}"
         tag = f" (soft: photos {best}px)" if best and best < GATE_1080P else ""
         return f"ready to build{tag}{origin}"
     if counts["tour"]:
         return f"delivered, {total} cuts{soft}{origin}"
     if published(brand, listing):
+        if followup_due(brand, listing, agent):
+            return f"follow up -- rung 5 drafts it{soft}{origin}"
         return f"sample published -- awaiting sign-off{soft}{origin}"
     return f"sample built -- publish the review link{soft}{origin}"
 

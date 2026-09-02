@@ -1,0 +1,13 @@
+Subject: Re: Video walkthrough for {address}
+
+Hi {agent_first},
+
+Just checking — did the video links for {address} come through okay?
+
+The branded preview is still up here:
+{url}
+
+Happy to send the final unwatermarked files whenever you're ready.
+
+Best,
+Ahmet

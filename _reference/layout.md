@@ -11,7 +11,7 @@ shape, not the law.
 
 ```
 agents/<brand>/brand.json           per-brand defaults — tour.py ONLY, see below
-agents/<brand>/<listing>/<agent>/   photos/, config.json, out/, outreach_draft.txt  — cwd for a build
+agents/<brand>/<listing>/<agent>/   photos/, config.json, out/, outreach_draft.txt, outreach_followup.txt  — cwd for a build
 prospects/<agent>__<phone>/         agents/ viewed by agent instead of brand — symlinks, gitignored
 needs_attention/<brand>/<listing>/  agents/ filtered to what's not archived or snoozed — symlinks, gitignored
 global_assets/logos/                shared branding, referenced by config.json
@@ -83,6 +83,7 @@ agents/<brand>/<listing>/<agent>/
    config.json                       the per-listing schema -- the single record of a build
    out/                              the six cuts. Its contents ARE the build stage
    outreach_draft.txt                the cold-email draft, written by publish.py
+   outreach_followup.txt             the follow-up draft, written by rung 5 once due
    .last_build.json                  can the stitch be reused? Not which family
    .build.lock                       held by a running build, O_EXCL, released via atexit
    draft.mp4                         only from --draft. Deliberately NOT in out/

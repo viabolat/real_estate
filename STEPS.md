@@ -415,6 +415,11 @@ photos and `out/` cuts that produced it — with the wording from
 mail client. `--dry-run` prints the draft instead of writing it, so you can see
 exactly what it would say before anything uploads.
 
+The follow-up writes itself too, but later: rung 5 writes
+`outreach_followup.txt` from `outreach/followup.txt` once the listing is past its
+follow-up date, pointing at the same recorded link. Both templates are committed —
+they hold no lead data, only the sender's own name.
+
 Two things it will not do. It never quotes a `tour_` link — cold outreach sends
 the watermarked cut, and the difference is one word in a filename. And it never
 sends: there is no SMTP credential in this repo and no flag that adds one. If a
@@ -470,7 +475,18 @@ email is actually out and it appends a row to `outreach/contacted.csv`
 
 Skipped that prompt, or published the listing in an earlier session? Choose
 **5. Mark leads as contacted** from the home screen — it walks every published,
-not-yet-contacted listing and asks the same question one at a time. Either way
+not-yet-contacted listing and asks the same question one at a time.
+
+**It also walks the leads that have gone quiet.** Once a listing is past its
+follow-up date, rung 5 lists it as *due a follow-up*, writes
+`outreach_followup.txt` beside the original `outreach_draft.txt` — a different
+wording, pointing at the same review link, recovered from `links.csv` rather than
+re-published — and asks whether you sent it. Saying yes appends a **second** row to
+`contacted.csv`, which re-arms the 5-day window so it snoozes again instead of
+resurfacing every render. Send the follow-up, never the original: sending
+`outreach_draft.txt` twice is a byte-identical duplicate, which is what happened to
+two agents on 2026-09-02. See
+[`a-follow-up-is-its-own-draft-and-its-own-row`](_rules/a-follow-up-is-its-own-draft-and-its-own-row.md). Either way
 the result shows up as a `CONTACTED` column in `status.py`'s roll-up and in
 `leads.html`, which also gets a derived `FOLLOW UP` column — 5 days after
 `marked_at` — computed at render time, never stored. See

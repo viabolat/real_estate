@@ -8,6 +8,7 @@ docstring for the three-tier rule and why built_families is injected rather
 than imported.
 """
 import datetime
+import json
 import os
 import shutil
 import sys
@@ -185,6 +186,92 @@ class ContactedAtAndFollowUpDate(unittest.TestCase):
         marked_at = _days_ago(2)
         self.assertEqual(self.publish.follow_up_date(marked_at),
                           self.lead._follow_up_date(marked_at))
+
+
+class AFollowUpIsItsOwnDraftAndItsOwnRow(unittest.TestCase):
+    """contacted.csv carries one row per send, and the latest one wins.
+
+    The shipped failure: contacted_at() returned the FIRST matching row, so a
+    recorded follow-up could never move the window forward. needs_attention/
+    kept resurfacing the listing, the only draft in the folder was the
+    first-contact one, and two agents received a byte-identical duplicate of an
+    email from two weeks earlier.
+    """
+
+    def setUp(self):
+        self.publish = helpers.publish_module()
+        self.tmp = tempfile.mkdtemp(prefix="followup_test_")
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.publish.CONTACTED = os.path.join(self.tmp, "contacted.csv")
+        self.publish.LINKS = os.path.join(self.tmp, "links.csv")
+        self.publish._refresh_leads_html = lambda: None
+        self.key = ("compass", "41_worcester_sq", "mary_smith")
+
+    def mark(self, days):
+        self.publish.record_contacted(
+            *self.key, when=datetime.datetime.fromisoformat(_days_ago(days)))
+
+    def test_the_latest_row_wins_not_the_first(self):
+        self.mark(20)
+        self.mark(1)
+        self.assertEqual(self.publish.contacted_at(*self.key),
+                         datetime.datetime.fromisoformat(
+                             _days_ago(1)).isoformat(timespec="seconds"))
+
+    def test_a_stale_lead_is_due_a_follow_up(self):
+        self.mark(20)
+        self.assertTrue(self.publish.followup_due(*self.key))
+
+    def test_a_fresh_lead_is_not(self):
+        self.mark(1)
+        self.assertFalse(self.publish.followup_due(*self.key))
+
+    def test_an_uncontacted_lead_is_never_due(self):
+        self.assertFalse(self.publish.followup_due(*self.key))
+
+    def test_recording_the_follow_up_re_arms_the_window(self):
+        self.mark(20)
+        self.assertTrue(self.publish.followup_due(*self.key))
+        self.publish.record_contacted(*self.key)
+        self.assertFalse(self.publish.followup_due(*self.key))
+
+    def test_recorded_link_returns_the_branded_url(self):
+        self.publish.record_links([
+            {"uploaded_at": "2026-08-26T00:00:00", "brand": "compass",
+             "listing": "41_worcester_sq", "cut": "mary_smith_sample_branded.mp4",
+             "url": "https://example.test/b.mp4"},
+            {"uploaded_at": "2026-08-26T00:00:00", "brand": "compass",
+             "listing": "41_worcester_sq", "cut": "mary_smith_sample_vertical.mp4",
+             "url": "https://example.test/v.mp4"}])
+        self.assertEqual(self.publish.recorded_link(*self.key),
+                         "https://example.test/b.mp4")
+
+    def test_recorded_link_is_blank_when_nothing_was_published(self):
+        self.assertEqual(self.publish.recorded_link(*self.key), "")
+
+    def test_the_follow_up_draft_is_not_the_first_contact_draft(self):
+        # reason: this is the whole bug. Two files, two wordings, two names --
+        # if they ever render identically, sending the follow-up is sending the
+        # first email again.
+        d = os.path.join(self.tmp, "listing")
+        os.makedirs(d)
+        with open(os.path.join(d, "config.json"), "w") as f:
+            json.dump({"agent_name": "Mary Smith",
+                       "address": "41 Worcester Sq"}, f)
+        url = "https://example.test/b.mp4"
+        first, _ = self.publish.write_draft(d, url)
+        second, _ = self.publish.write_followup(d, url)
+        self.assertNotEqual(first, second)
+        with open(first) as f:
+            a = f.read()
+        with open(second) as f:
+            b = f.read()
+        self.assertNotEqual(a, b)
+        for text in (a, b):
+            self.assertIn("Mary", text)
+            self.assertIn("41 Worcester Sq", text)
+            self.assertIn(url, text)
+            self.assertNotIn("{", text)
 
 
 class FakeStatus:

@@ -53,7 +53,7 @@ reading *prose only* is a rule nothing enforces. That is the list worth shrinkin
 
 <!-- RULE-TABLE:start -->
 
-44 rules.
+45 rules.
 
 | Area | Rule | Guarded by |
 |---|---|---|
@@ -94,6 +94,7 @@ reading *prose only* is a rule nothing enforces. That is the list worth shrinkin
 | publishing | [A publish verifies against the storage API, never the public URL](a-publish-verifies-against-the-storage-api.md) | *prose only* |
 | publishing | [An upload over the bucket's cap gets a compressed copy, not a silent failure](an-oversized-upload-compresses-a-review-copy.md) | `tests/test_publish_gate.py` |
 | publishing | [Only `sample_` cuts publish, and `make_tour.py` never uploads](only-sample-cuts-publish.md) | `tests/test_publish_gate.py` |
+| outreach | [A follow-up is its own draft and its own row](a-follow-up-is-its-own-draft-and-its-own-row.md) | `tests/test_active_view.py` |
 | outreach | [The draft is written automatically; the send is not, and never becomes a flag](the-draft-is-automatic-the-send-is-not.md) | `tests/test_outreach_draft.py` |
 | outreach | [The recorded link is the last field on its line, and nothing is ever appended after it](the-recorded-link-is-the-last-field.md) | `tests/test_outreach_draft.py` |
 | pii | [A deploy is a second publishing boundary, and `.vercelignore` is its only gate](a-deploy-is-a-second-publishing-boundary.md) | *prose only* |
@@ -102,6 +103,6 @@ reading *prose only* is a rule nothing enforces. That is the list worth shrinkin
 | pii | [The PII gate runs itself, and an unwired gate is reported, never assumed](the-pii-gate-runs-itself.md) | `tests/test_hook_wired.py` |
 | docs | [Docs do not go stale](docs-do-not-go-stale.md) | `tests/test_photo_order.py` |
 
-Unguarded rules: 6 of 44.
+Unguarded rules: 6 of 45.
 
 <!-- RULE-TABLE:end -->

@@ -455,6 +455,43 @@ over-broad trigger; not worth the branch to narrow.
 
 ---
 
+### 2026-09-02 — A follow-up gets its own draft, and contacted.csv gets a row per send
+
+**What:** `outreach/followup.txt` + `publish.write_followup()` →
+`outreach_followup.txt`; `publish.recorded_link()` and `publish.followup_due()`;
+`contacted_at()` now returns the latest matching row rather than the first; rung 5
+walks past-due leads alongside uncontacted ones; `status.next_action()` reports
+`follow up -- rung 5 drafts it`. Rule 45, guarded by
+`AFollowUpIsItsOwnDraftAndItsOwnRow` in `tests/test_active_view.py`.
+
+**Why:** the operator showed three sent threads. `9 W Cedar St` (first contacted
+2026-08-19) and `55 Lagrange St Unit 1705` (2026-08-26) had each received a **second
+copy of their original email** on 2026-09-02 — same subject, same body. The only
+one that read like a real follow-up, `46 Beacon St. #5`, had been written by hand
+outside the tool. `needs_attention/` was doing its job resurfacing those listings
+after the 5-day window, but the folder held exactly one artifact and both send-side
+rungs filtered on `contacted(...)`, so a resurfaced lead had no rung to land on. The
+tool offered the first-contact draft or nothing. Underneath it, `contacted_at()` read
+the first row of an append-only file, so even recording a follow-up would not have
+moved the window — the listing would have resurfaced forever.
+
+**Alternatives rejected:** *a `followed_up_at` column on `contacted.csv`* — the file
+already had the right shape, append-only with a timestamp; only the read was wrong,
+and a second column would need a migration and give two places to look. *Re-publish to
+regenerate the link* — the cut has not changed and the URL is already in `links.csv`,
+which is what `the-recorded-link-is-the-last-field` keeps it for. *Send the follow-up
+automatically* — never; `the-draft-is-automatic-the-send-is-not` is exactly the
+boundary this failure sits next to, and crossing it would have made the duplicate
+sends automatic rather than merely easy.
+
+**Accepted risks:** `contacted.csv` now has rows whose meaning depends on order, so a
+hand-sorted or hand-deduplicated file would change behaviour — acceptable, since
+`record_contacted()` is the only writer and it only appends. The three duplicate sends
+already made are not retro-recorded: doing so would invent send times, and the
+follow-up window is a prompt, not an audit trail.
+
+---
+
 ### [YYYY-MM-DD] — [Decision Title]
 <!-- Template. Copy this stanza above for the next entry; leave this one empty. -->
 **What:**
