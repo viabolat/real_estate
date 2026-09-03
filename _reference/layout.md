@@ -11,7 +11,7 @@ shape, not the law.
 
 ```
 agents/<brand>/brand.json           per-brand defaults — tour.py ONLY, see below
-agents/<brand>/<listing>/<agent>/   photos/, config.json, out/, outreach_draft.txt  — cwd for a build
+agents/<brand>/<listing>/<agent>/   photos/, config.json, out/, outreach_draft.txt, outreach_followup.txt  — cwd for a build
 prospects/<agent>__<phone>/         agents/ viewed by agent instead of brand — symlinks, gitignored
 needs_attention/<brand>/<listing>/  agents/ filtered to what's not archived or snoozed — symlinks, gitignored
 global_assets/logos/                shared branding, referenced by config.json
@@ -20,6 +20,9 @@ global_assets/lower_thirds/
 scraper/                            Zillow dump -> leads.csv + a scaffolded listing
 publish.py                          sample_ cuts -> the public review bucket. NEVER tour_
 status.py                           read-only: every listing and its one next action.
+dashboard.py                        the same rows in a browser -- 127.0.0.1 only,
+                                    rendered in memory, adds no folder and writes
+                                    nothing. sample_ cuts stream; tour_ is 403
                                     Names the run each is on -- see the two-run rule
 floorplan.py                        flags a likely floor plan/site map photo -- never
                                     reorders or deletes. Called from tour.py --auto
@@ -59,8 +62,11 @@ values into the listing's `config.json`, which stays the single source of truth 
 a build. That keeps the script's contract intact — read the working directory, know
 nothing about the `agents/<brand>/<listing>` layout — and keeps `config.json` an
 accurate record of what produced a delivered video months later. A new listing
-inherits at creation; changing a brand default does **not** retroactively alter
-existing listings, which is what the explicit "Re-apply brand defaults" action
+inherits at creation — but only values the brand actually *has*: a key the brand
+leaves blank is left out of the listing config entirely, so a logo or music bed
+set on the brand later still reaches it. Changing a brand default does **not**
+otherwise retroactively alter existing listings, which is what the explicit
+"Re-apply brand defaults" action
 under **Brand settings** on `tour.py`'s home screen is for. It shows every key it
 would change, per listing, and asks before writing — it is the one action in the
 tool that edits files the operator is not looking at.
@@ -83,10 +89,28 @@ agents/<brand>/<listing>/<agent>/
    config.json                       the per-listing schema -- the single record of a build
    out/                              the six cuts. Its contents ARE the build stage
    outreach_draft.txt                the cold-email draft, written by publish.py
+   outreach_followup.txt             the follow-up draft, written by rung 5 once due
    .last_build.json                  can the stitch be reused? Not which family
    .build.lock                       held by a running build, O_EXCL, released via atexit
    draft.mp4                         only from --draft. Deliberately NOT in out/
 ```
+
+### How the walkers recognise the agent level
+
+The `<agent>/` level is not identified by position alone. `_dirs()` at the listing
+level cannot tell `<agent>/` from the `photos/`, `clips/`, `clips_draft/`, `out/`
+and `work_text/` a build writes *inside* one, so `tour.is_agent_dir()` and
+`status._agent_dirs()` admit a subdirectory only if it **holds a `config.json` or a
+`photos/`** — the two things `scaffold()` always writes and no intermediate has.
+
+The first version of the code put `config.json` and `photos/` directly under
+`agents/<brand>/<listing>/`. A folder left in that shape reads as a listing whose
+agent is named `photos`, and `--auto`, `status.py`, `needs_attention/` and
+`find_gaps.py` each invented something different in its place. `status.py` now names
+it — `legacy layout -- migrate to <agent>/` — and `python3 migrate_layout.py` moves
+it with `os.rename`, deriving the destination from `leads.csv` like every other
+folder name. See
+[`an-agent-folder-is-one-that-holds-a-config`](../_rules/an-agent-folder-is-one-that-holds-a-config.md).
 
 ## `prospects/` — the same listings, viewed by agent
 

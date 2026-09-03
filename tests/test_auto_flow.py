@@ -173,6 +173,12 @@ class AutoTargets(unittest.TestCase):
     def make(self, brand, listing, agent, *out_names):
         d = os.path.join(self.agents, brand, listing, agent)
         os.makedirs(os.path.join(d, "out"), exist_ok=True)
+        # reason: a real agent folder always holds a config.json --
+        # scaffold() writes one and nothing ever deletes it. That is what
+        # is_agent_dir() keys on, so a fixture without one is not a
+        # listing the walkers would ever see. See
+        # _rules/an-agent-folder-is-one-that-holds-a-config.md.
+        open(os.path.join(d, "config.json"), "w").write("{}")
         for n in out_names:
             open(os.path.join(d, "out", n), "wb").close()
         return d
@@ -203,6 +209,31 @@ class AutoTargets(unittest.TestCase):
     def test_scoped_to_a_nonexistent_listing_raises(self):
         with self.assertRaises(SystemExit):
             self.tour.auto_targets(scope="acme/does_not_exist")
+
+    def test_a_legacy_listing_yields_no_agent_named_photos(self):
+        """reason: _dirs() cannot tell an agent folder from the photos/, clips/
+        and out/ a build writes inside one, so a listing still in the
+        pre-agent-level shape reported "photos" as its agent -- and --auto
+        built agents/<brand>/<listing>/photos/, found no photos/photos/, and
+        reported an error. See
+        _rules/an-agent-folder-is-one-that-holds-a-config.md.
+        """
+        d = os.path.join(self.agents, "acme", "1_main_st")
+        for sub in ("photos", "clips", "out", "clips_draft", "work_text"):
+            os.makedirs(os.path.join(d, sub))
+        open(os.path.join(d, "config.json"), "w").write("{}")
+        self.assertEqual(self.tour.agent_dirs("acme", "1_main_st"), [])
+        self.assertEqual(self.tour.auto_targets(), [])
+
+    def test_a_half_scaffolded_agent_folder_still_counts(self):
+        """photos.py's scaffold() writes both; either alone is enough to name
+        an agent, because a folder mid-scaffold is a listing, not a leftover."""
+        base = os.path.join(self.agents, "acme", "1_main_st")
+        os.makedirs(os.path.join(base, "only_photos", "photos"))
+        os.makedirs(os.path.join(base, "only_config"))
+        open(os.path.join(base, "only_config", "config.json"), "w").write("{}")
+        self.assertEqual(self.tour.agent_dirs("acme", "1_main_st"),
+                         ["only_config", "only_photos"])
 
     def test_a_target_with_nothing_built_yet_is_unaffected_by_a_prior_call(self):
         """The whole resume mechanism: nothing about a halt is ever recorded,
@@ -526,6 +557,135 @@ class AutoFlowRequiresAScopeForTheOverride(unittest.TestCase):
         tour = helpers.tour_module()
         with self.assertRaises(SystemExit):
             tour.auto_flow(["--ignore-missing-logo-check"])
+
+
+class TestTheCardsTextInvalidatesTheStitch(unittest.TestCase):
+    """A correction to the card's text must not take the --finish-only path.
+
+    The outro card carries address / agent_name / agent_phone / brokerage, and it
+    is baked into work_branded.mp4. --finish-only reuses that stitch whole, while
+    render_lower_third() redraws the lower third on every pass -- so fixing a
+    wrong phone number in config.json used to produce one cut showing the new
+    number in the lower third and the old one on the card. Phone digits are the
+    deliverable here; a stale one on screen is the failure this guards.
+
+    Ids are short and non-phone-shaped on purpose -- check_pii.py matches by
+    shape, not just against leads.csv (tests/README.md).
+    """
+
+    def setUp(self):
+        self.tour = helpers.tour_module()
+        self.d = tempfile.mkdtemp(prefix="rebuild_reason_")
+        self.addCleanup(shutil.rmtree, self.d, True)
+        open(os.path.join(self.d, "work_silent.mp4"), "wb").close()
+        self.cfg = dict(self.tour.DEFAULTS)
+        self.cfg.update({"address": "1 Test St", "agent_name": "A Team",
+                         "agent_phone": "1001", "brokerage": "A Brokerage"})
+        self.tour.save_state(self.d, "delivery", dict(self.cfg), "1080p")
+
+    def reason(self, **changes):
+        cfg = dict(self.cfg, **changes)
+        return self.tour.rebuild_reason(self.d, cfg, "1080p", "delivery",
+                                        "work_silent.mp4")
+
+    def test_an_unchanged_config_still_takes_the_fast_path(self):
+        self.assertIsNone(self.reason())
+
+    def test_a_corrected_phone_forces_a_rebuild(self):
+        self.assertEqual(self.reason(agent_phone="2002"),
+                         "the card's text changed")
+
+    def test_every_card_text_key_forces_a_rebuild(self):
+        for key, value in (("address", "2 Test St"), ("agent_name", "B Team"),
+                           ("agent_phone", "2002"),
+                           ("brokerage", "B Brokerage")):
+            with self.subTest(key=key):
+                self.assertIsNotNone(self.reason(**{key: value}))
+
+    def test_the_card_keys_are_exactly_what_render_card_draws(self):
+        # reason: the two lists drifting is the whole failure mode -- a fifth
+        # line added to the card with no matching key here silently returns the
+        # stale-text bug. make_tour.py names them as module globals.
+        with open(os.path.join(os.path.dirname(os.path.dirname(
+                os.path.abspath(__file__))), "make_tour.py")) as f:
+            src = f.read()
+        card = src[src.index("def render_card("):src.index("def card_clip(")]
+        drawn = {g for g in ("ADDRESS", "AGENT_NAME", "AGENT_PHONE", "BROKERAGE")
+                 if g in card}
+        self.assertEqual({k.upper() for k in self.tour.CARD_TEXT_KEYS}, drawn)
+
+    def test_no_card_means_the_text_is_not_a_reason(self):
+        self.cfg["card"] = "none"
+        self.tour.save_state(self.d, "delivery", dict(self.cfg), "1080p")
+        self.assertIsNone(self.reason(agent_phone="2002"))
+
+
+class AnUnsetBrandValueIsNotFrozenIntoTheListing(unittest.TestCase):
+    """scaffold() must not copy a blank brand value into config.json.
+
+    tour.load_config() layers DEFAULTS -> brand.json -> config.json, so a
+    `"logo": ""` written at creation SHADOWS the brokerage mark for good --
+    including one claimed into brand.json weeks later. 16_holmfield_ave hit
+    exactly that on its re-scrape and the roll-up asked for a logo that was
+    already set. See _rules/auto-picks-up-the-brand-logo-by-slug.md.
+    """
+
+    def setUp(self):
+        self.photos = helpers.scraper_module("photos")
+        self.tour = helpers.tour_module()
+
+    def _scaffold(self, brand_values):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp)
+        brand_dir = os.path.join(tmp, "agents", "a_brand")
+        listing_dir = os.path.join(brand_dir, "1_example_st", "a_lister")
+        os.makedirs(listing_dir)
+        if brand_values is not None:
+            os.makedirs(brand_dir, exist_ok=True)
+            with open(os.path.join(brand_dir, "brand.json"), "w",
+                      encoding="utf-8") as f:
+                json.dump(brand_values, f)
+        self.photos.scaffold(tmp, brand_dir, listing_dir, "A Brand",
+                             "1 Example St", "A Lister", "1001",
+                             "1 Example St, Boston, MA")
+        with open(os.path.join(listing_dir, "config.json"),
+                  encoding="utf-8") as f:
+            return json.load(f)
+
+    def test_a_blank_brand_logo_is_left_out_of_the_listing_config(self):
+        cfg = self._scaffold(dict(self.photos.BRAND_STUB, logo="", music=""))
+        self.assertNotIn("logo", cfg)
+        self.assertNotIn("music", cfg)
+
+    def test_a_brand_created_in_the_same_run_leaves_them_out_too(self):
+        cfg = self._scaffold(None)
+        self.assertNotIn("logo", cfg)
+        self.assertNotIn("music", cfg)
+
+    def test_a_real_brand_logo_is_still_inherited(self):
+        cfg = self._scaffold(dict(self.photos.BRAND_STUB,
+                                  logo="global_assets/logos/a_brand.png"))
+        self.assertEqual(cfg["logo"], "global_assets/logos/a_brand.png")
+
+    def test_a_falsy_value_that_is_not_blank_survives(self):
+        # brand_persistent=False is a decision, not an unset value.
+        cfg = self._scaffold(dict(self.photos.BRAND_STUB,
+                                  brand_persistent=False))
+        self.assertIs(cfg["brand_persistent"], False)
+
+    def test_the_scrapes_own_fields_are_written_regardless(self):
+        cfg = self._scaffold(None)
+        self.assertEqual(cfg["agent_phone"], "1001")
+        self.assertEqual(cfg["brokerage"], "A Brand")
+        self.assertEqual(cfg["watermark"], "global_assets/logos/viabolat.png")
+
+    def test_an_omitted_key_lets_the_brand_win_at_load_time(self):
+        # the actual failure: the brand gains a logo after the listing exists.
+        cfg = self._scaffold(None)
+        effective = dict(self.tour.DEFAULTS)
+        effective.update({"logo": "global_assets/logos/a_brand.png"})
+        effective.update(cfg)
+        self.assertEqual(effective["logo"], "global_assets/logos/a_brand.png")
 
 
 if __name__ == "__main__":

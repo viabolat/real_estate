@@ -9,6 +9,14 @@ Things that are true and not going to change soon: platform limits, deliberate
 asymmetries, and bugs that were found, understood and fixed — kept because the
 reasoning stops them being reintroduced.
 
+- `dashboard.py` refuses to serve a `tour_` cut even though the file is right
+  there on the same disk, in the same folder as the `sample_` cut it happily
+  streams. The asymmetry is deliberate: a loopback URL becomes a publishing
+  boundary the moment it is pasted into a chat or the screen is shared, and
+  the deliverable does not go out before sign-off. The refusal is a 403 raised
+  before the filesystem is touched, so it reads the same whether or not the
+  `tour_` cut exists — the 403-vs-404 difference would otherwise say which
+  listings are delivered.
 - Zillow's CDN tops out at ~1440px (`uncropped_scaled_within_1536_1152`). That
   clears 720p and fails 1080p. 1080p requires the photographer's originals or the
   MLS back end.

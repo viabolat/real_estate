@@ -45,3 +45,29 @@ knowingly leave a brand with no mark. The halt exists only because `--auto`
 removes that moment, the same reasoning
 [`auto-halts-on-a-blank-agent-phone`](auto-halts-on-a-blank-agent-phone.md)
 already states for the phone number.
+
+## An unset brand value is never frozen into the listing
+
+The same listing hit this twice. `16_holmfield_ave` was re-scraped on
+2026-09-02 while `global_assets/logos/keller_williams_realty.png` had been on
+disk since August, and `fill_gaps.py` duly claimed it into `brand.json` --
+yet the roll-up still read `logo blank/missing -- add it to brand.json`.
+
+`scaffold()` copies the brand's `INHERITED` keys into a new listing's
+`config.json` at creation. The brand.json it copied from had been created
+seconds earlier in the same run, so `logo` and `music` were `""`. And
+`tour.load_config()` layers `DEFAULTS -> brand.json -> listing config.json`
+with a plain `dict.update()` -- an empty string in the last layer beats a real
+path in the middle one. The blank did not mean "no logo"; it meant "nobody has
+said yet", and freezing it turned a not-yet into a never.
+
+`scaffold()` now omits a value the brand leaves blank, so the key is simply
+absent and the brand layer supplies it -- then and later. That is already
+`tour.save_config()`'s contract one file away ("omit keys left unset"); this
+is the scraper honouring the same one. A falsy value that is not blank --
+`brand_persistent: false` -- is a decision and still carries.
+
+Nothing about the inheritance model in
+[`_reference/layout.md`](../_reference/layout.md) changes: a new listing still
+inherits at creation, and changing a brand default still does not rewrite
+existing listings. It just no longer inherits an answer nobody gave.

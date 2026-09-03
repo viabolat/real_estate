@@ -91,6 +91,12 @@ def photo_quality_module():
     return _repo_module("photo_quality_under_test", "photo_quality.py")
 
 
+def migrate_layout_module():
+    """Import migrate_layout.py once. Every function takes agents_dir/root as
+    arguments so a test never touches the real agents/ tree."""
+    return _repo_module("migrate_layout_under_test", "migrate_layout.py")
+
+
 def tour_module():
     """Import tour.py once, for the pure helpers and the wiring assertions.
 
@@ -101,6 +107,17 @@ def tour_module():
     make_tour_under_test_N modules listing() creates.
     """
     return _repo_module("tour_under_test", "tour.py")
+
+
+def dashboard_module():
+    """Import dashboard.py once.
+
+    reason: it loads status.py, tour.py, publish.py and the scraper lazily,
+    inside Sources.__init__ -- nothing at module scope reads a file, binds a
+    socket or parses argv. So a plain import is free, and every function worth
+    testing takes a Sources bundle so a test never touches the real tree.
+    """
+    return _repo_module("dashboard_under_test", "dashboard.py")
 
 
 def source():

@@ -30,7 +30,7 @@ python3 tour.py
 ```
 
 It opens on the roll-up — every listing, its photo count, its smallest photo and
-the one thing standing between it and a deliverable — then offers five things:
+the one thing standing between it and a deliverable — then offers six things:
 
 | | | |
 |---|---|---|
@@ -39,6 +39,7 @@ the one thing standing between it and a deliverable — then offers five things:
 | **3** | Publish a review link | the watermarked cuts, to the review bucket |
 | **4** | Brand settings | what a brokerage sets once, and re-applying it |
 | **5** | Mark leads as contacted | walks every published, not-yet-contacted listing |
+| **6** | Open the dashboard | the same rows in a browser, read-only, §the dashboard |
 
 Which dumps are pending is worked out by checking whether
 `agents/<brand>/<listing>/<agent>` exists. There is no marker file and nothing to
@@ -88,7 +89,12 @@ logo, drop the file at `global_assets/logos/<broker_name>.png` and let `--auto` 
 it (below). Until either happens the card falls back to the type-only design and the
 build is silent.
 
-Music can stay blank — a silent build is a valid deliverable. The logo can't, once
+**Leave music blank.** Standing operator instruction, 2026-09-02: **`sample_` cuts
+ship silent.** A silent build is not a fallback here, it is the house style — the
+proofing copy is about the photos and the branding, and a music bed only invites a
+note about the music. The cuts still carry a silent AAC track, so nothing downstream
+has to special-case a video with no audio stream. The logo is different, and can't
+stay blank once
 this brand is going to ship: a brand-new brokerage from a scrape has no logo on file
 by definition, so before building anything under it, run
 
@@ -259,10 +265,71 @@ is listed alongside it, with `agent_name`, `broker_name` and `agent_phone`
 for context (disambiguating a common name) and the exact `config.json` path
 to edit.
 
+### Closing those gaps headlessly
+
+```bash
+python3 scraper/fill_gaps.py             # emails + available-logo claims, then report
+python3 scraper/fill_gaps.py --dry-run   # plan only, writes nothing
+python3 scraper/fill_gaps.py --fetch     # also try the network for real logo gaps
+```
+
+`find_gaps.py` detects; this is the only module allowed to act on what it found,
+and it imports `find_gaps.py` rather than re-deriving any of it. See
+[`fill-gaps-acts-only-on-what-find-gaps-named`](_rules/fill-gaps-acts-only-on-what-find-gaps-named.md).
+
+- **`agent_email`** comes from `leads.csv` — `lead.py` already parsed it out of
+  the dump's `agentEmail` field, so this is a copy between two files already on
+  disk, no network, and a stronger source than the profile-page guess the
+  session workflow below ranks first. A gap with no `leads.csv` email prints as
+  `UNRESOLVED` and is **never guessed**; work those with the session workflow.
+- **An `available` logo** is claimed by pointing `brand.json` at the file
+  already on disk. No network.
+- **A `gap` logo** is the only lane that reaches the network, and only with
+  `--fetch`. The candidate domain must verify as that brokerage before anything
+  downloads. Then the *element* has to earn it too: a page is full of other
+  people's marks — `serhant.com` carries the Netflix wordmark, two MLS marks and
+  an RLS mark, all real PNGs of plausible size — so a candidate is taken only when
+  an attribute names the brokerage, or when the page labels it generically
+  (`alt="Logo"`, `class="heading-logo"`), which is how a site refers to its own
+  identity and never to someone else's. `og:image` is not a candidate at all: a
+  share card sells the page, it does not identify the company. The file must also
+  be a real PNG and at least `MIN_LOGO_PX` (120) on its long side — a `rel="icon"`
+  favicon is 16px and scales into `make_tour.py`'s 360×200 box as a smear. Every
+  candidate on the page is tried before the attempt gives up; whatever is left
+  over is reported for the session workflow below rather than saved under a name
+  that lies about it. See
+  [`a-fetched-logo-names-the-brokerage-or-it-is-not-fetched`](_rules/a-fetched-logo-names-the-brokerage-or-it-is-not-fetched.md).
+- **A `near_miss` is never adopted here.** It is reported and left alone —
+  eyeball it yourself, for the reason the bucket exists.
+
+This does not touch publishing, sending or sign-off. Those are decisions, not
+gaps: `--auto` still never reaches `publish_rung()`, and mail still leaves the
+machine by hand.
+
 ### Fetching a logo or an agent email with a live Claude Code + Chrome session
 
 The repeatable version of the manual workflow this was built from. Run
 `python3 scraper/find_gaps.py --json` first and work the list it returns.
+
+**Run the browser headless.** `--headless=new`, no `DISPLAY`, no visible
+window — that is the default for this workflow and every future session of
+it. Two things it needs to work, both learned the hard way:
+
+- **Send a real user-agent.** Headless Chrome advertises itself as
+  `HeadlessChrome/…` and a fair number of brokerage sites 403 on sight of it.
+  `thefirmreg.com` returns `403 Request forbidden by administrative rules`
+  headless and serves the page normally once `--user-agent=` carries an
+  ordinary desktop Chrome string. This is the operator's own session reading
+  a public roster page, not a disguise.
+- **Zillow is the one exception, and it is not fixable with a UA.** Zillow
+  sits behind PerimeterX, which denies `--headless=new` an 11 KB
+  `Access to this page has been denied` page *including* with a real UA,
+  `--disable-blink-features=AutomationControlled` and a 1920x1080 window.
+  The distinction is the browser, not the request — see the 2026-09-02 and
+  2026-09-03 entries in [`LOGIC_GUIDE.md`](LOGIC_GUIDE.md). Anything that has
+  to come off a Zillow page — a re-scrape, or the profile-page email lane
+  below — needs headed Chrome (`DISPLAY=:0`, WSLg). Everything else is
+  headless.
 
 **A logo gap (`near_miss` or `gap`).** Search or open the brokerage's own
 site, confirm the mark, then ask to save it to
@@ -272,17 +339,38 @@ time; nothing here waives or batches that, and a `near_miss` file already on
 disk is a candidate to confirm, not a reason to skip asking before saving a
 new one over or beside it.
 
-**An `agent_email` gap.** Check `https://www.zillow.com/profile/<agent_name>`
-first — the profile page, not the listing itself, which is what Zillow never
-exposes an email on. Then the brokerage's own site or that agent's team page;
-fall back to a general web search per agent only once both turn up nothing.
+**An `agent_email` gap.** Headless, the source order is: the brokerage's own
+site or that agent's team page first, then a general web search to *locate*
+that page when you do not know the domain, then the Zillow profile page last —
+and that last one costs a headed browser, so treat it as the fallback it now
+is rather than the opening move. Under the old headed default the profile page
+ranked first; it was never the better source, only the one URL you could always
+guess. A brokerage page beats it on both counts anyway: it is the agent's own
+publication of their address, and it carries a `tel:` you can check the gap's
+`agent_phone` against, which is what turns a plausible name match into a
+confirmed one. Match the phone before you write the email.
+
 Once found, write it straight into the named `config.json`'s `agent_email` —
 no per-agent confirmation needed, that gate was deliberately left off.
 `agent_email` is never read by `make_tour.py`, so a wrong guess here cannot
 reach a build; the worst case is a stale or bounced address, corrected the
-same way.
+same way. A gap none of the three lanes resolves is left **UNRESOLVED** and
+reported as such: never guessed from the brokerage's domain and the agent's
+name, which is exactly the shape that reads plausible and bounces. That is the
+same bar [`fill_gaps.py`](scraper/fill_gaps.py) holds itself to when
+`leads.csv` has no email.
 
-The profile page carries two contact surfaces that are easy to conflate.
+Two failure modes that look like a missing email and are not. A brokerage
+domain can be **dead or hijacked** — `successrealestate.com` and its `www`
+host both redirect to an unrelated gambling site, so the brokerage lane for
+an agent there yields nothing and nothing on that host is worth reading.
+And a **name collision** will hand you a complete, confident, wrong roster:
+`brokerName` is a short string, and there is more than one "The Firm" in
+Massachusetts. Confirm the brokerage by the gap's own `agent_phone` before
+you trust a roster page, not by the name on the door.
+
+When you do fall through to the Zillow profile page (headed), it carries two
+contact surfaces that are easy to conflate.
 The "Contact `<name>`" forms (there are two — one inline, one in a sidebar)
 are Name / Phone / Email / Message boxes where Email is the *visitor's*,
 never the agent's; they're always empty and not worth reading. The agent's
@@ -296,10 +384,16 @@ link near the phone number, not just inside a form. If it's not there,
 check for an "agent website" link near the bio — a secondary lead worth
 following before falling back to the brokerage site.
 
-Close the run with a one-line tally — found via the Zillow profile page vs.
-the brokerage's own site vs. a general search — so a lower-confidence guess
-stays visible in the summary even though nothing blocked it from being
-written.
+There is a fifth outcome above all four lanes: **the operator supplies it.**
+An address handed over directly is not a guess and needs no page to confirm it —
+write it as given. Report it as operator-supplied all the same, because the
+tally's whole job is to say where each value came from.
+
+Close the run with a one-line tally per agent — operator-supplied vs.
+brokerage/team site (headless) vs. general search vs. Zillow profile (headed)
+vs. UNRESOLVED, and whether the `agent_phone` matched — so a lower-confidence
+write stays visible in the summary even though nothing blocked it, and an
+unresolved gap is not quietly rounded up to a found one.
 
 It never builds a draft and never publishes. Checking the mp4 in `out/`, then
 running `publish.py` from the listing folder (above), stays the last manual
@@ -369,6 +463,11 @@ photos and `out/` cuts that produced it — with the wording from
 mail client. `--dry-run` prints the draft instead of writing it, so you can see
 exactly what it would say before anything uploads.
 
+The follow-up writes itself too, but later: rung 5 writes
+`outreach_followup.txt` from `outreach/followup.txt` once the listing is past its
+follow-up date, pointing at the same recorded link. Both templates are committed —
+they hold no lead data, only the sender's own name.
+
 Two things it will not do. It never quotes a `tour_` link — cold outreach sends
 the watermarked cut, and the difference is one word in a filename. And it never
 sends: there is no SMTP credential in this repo and no flag that adds one. If a
@@ -424,7 +523,18 @@ email is actually out and it appends a row to `outreach/contacted.csv`
 
 Skipped that prompt, or published the listing in an earlier session? Choose
 **5. Mark leads as contacted** from the home screen — it walks every published,
-not-yet-contacted listing and asks the same question one at a time. Either way
+not-yet-contacted listing and asks the same question one at a time.
+
+**It also walks the leads that have gone quiet.** Once a listing is past its
+follow-up date, rung 5 lists it as *due a follow-up*, writes
+`outreach_followup.txt` beside the original `outreach_draft.txt` — a different
+wording, pointing at the same review link, recovered from `links.csv` rather than
+re-published — and asks whether you sent it. Saying yes appends a **second** row to
+`contacted.csv`, which re-arms the 5-day window so it snoozes again instead of
+resurfacing every render. Send the follow-up, never the original: sending
+`outreach_draft.txt` twice is a byte-identical duplicate, which is what happened to
+two agents on 2026-09-02. See
+[`a-follow-up-is-its-own-draft-and-its-own-row`](_rules/a-follow-up-is-its-own-draft-and-its-own-row.md). Either way
 the result shows up as a `CONTACTED` column in `status.py`'s roll-up and in
 `leads.html`, which also gets a derived `FOLLOW UP` column — 5 days after
 `marked_at` — computed at render time, never stored. See
@@ -433,6 +543,48 @@ the result shows up as a `CONTACTED` column in `status.py`'s roll-up and in
 If a listing's `config.json` has an `agent_email`, `leads.html` shows that
 instead of whatever (possibly blank) email Zillow's scrape carried — see
 [`brand-json-carries-no-agent-identity`](_rules/brand-json-carries-no-agent-identity.md).
+
+### The dashboard — every lead and listing on one page
+
+```bash
+python3 dashboard.py                       # opens your browser at 127.0.0.1:8765
+python3 dashboard.py --port 9000           # if 8765 is taken (it also falls back
+                                           # to a free port on its own)
+python3 dashboard.py --no-browser          # print the URL, open nothing
+```
+
+Or **6. Open the dashboard** from `tour.py`'s home screen. Ctrl-C in that
+terminal closes it and returns to the menu.
+
+It shows every listing on one of seven rungs — *unimported, ready to build,
+sample built, published, contacted, follow-up due, delivered* — then the whole
+lead table, `status.py`'s naming audit, and the open logo/email gaps. Each rung
+is derived from the same helpers the terminal roll-up uses, on every request;
+nothing is cached and nothing is stored. If `python3 status.py --long` and the
+dashboard disagree about a listing, the dashboard is wrong.
+
+A listing appears on exactly one rung, tested highest-first. That matters most
+between 5 and 6: a follow-up-due listing is *also* a contacted one, so showing
+both would list it under a heading that means "leave it alone" and one that
+means "act" — which is how two agents got the same email twice on 2026-09-02.
+
+**Three things it deliberately will not do.**
+
+- **It writes nothing.** No file, no CSV row, no marker. Publishing, marking a
+  lead contacted and editing a brand all stay behind `tour.py`'s prompts. The
+  dashboard tells you something is due; you still decide it.
+- **It only plays `sample_` cuts.** A `tour_` URL gets a **403** at the socket,
+  before the file is even looked for — so the refusal is identical whether or
+  not the deliverable exists. Paths are confined to `agents/` by `realpath`, so
+  `..` and a symlink out of the tree are both refused.
+- **It binds to `127.0.0.1` and nothing else.** The page carries real agent
+  names, phone numbers and email addresses in full, which is why it is local
+  only — and why it is **not a screen-share**. Check with
+  `ss -ltn | grep 8765`: `127.0.0.1`, never `0.0.0.0`.
+
+Video seeking works — the media route implements RFC 7233 `Range`, answering
+**206** with a `Content-Range`, **416** for a range past the end of the file, and
+**200** with the whole cut when the header is missing or malformed.
 
 ### `needs_attention/` — why the build picker stops showing a listing
 
@@ -454,6 +606,78 @@ python3 tour.py --show-all
 This sends the build picker straight to `agents/` instead, reaching every
 listing — snoozed or delivered included. See
 [`needs-attention-is-a-view-not-a-move`](_rules/needs-attention-is-a-view-not-a-move.md).
+
+### Rerun one listing after a wrong phone number, name or address
+
+The agent's phone number appears twice in every cut: the **lower third** and the
+**outro card**. Both come from that listing's `config.json`. Fix the value there, in
+`agents/<brand>/<listing>/<agent>/config.json`, and also in the `agent_phone` column of
+that listing's `scraper/leads.csv` row — `leads.csv` is the ledger and stays the
+authority, but `config.json` is what actually renders.
+
+Then clear the built cuts so `stage()` falls back to `sample` and the listing becomes
+a target again, and rebuild just that one:
+
+```bash
+L=agents/<brand>/<listing>/<agent>
+rm -f $L/out/*_sample_*.mp4
+python3 tour.py --auto $L
+```
+
+Roughly a minute. `rebuild_reason()` sees `agent_phone` differ from `.last_build.json`,
+returns `"the card's text changed"` and drops `--finish-only` for `--keep-work`, so the
+outro card is redrawn rather than reused — the whole point of
+[`the-cards-text-invalidates-the-stitch`](_rules/the-cards-text-invalidates-the-stitch.md).
+Watch the log for `lower third: drawn from config.json (...)` and confirm the new
+number is in it.
+
+**If that listing was already published,** the wrong number is on the CDN and in the
+review link the agent has. Fixing the local file changes nothing they can see. Republish
+after the rebuild — `python3 tour.py --publish-pending`, or rung 4 for that one listing
+— which overwrites the same object at the same URL, so the link already sent keeps
+working. If they were also marked contacted, the outreach draft went out with that link;
+whether to say anything is a judgement call, not a command.
+
+**If the photos were also wrong**, this is not enough — `--finish-only` and the kept
+stitch both assume the photo set is unchanged. Delete `work_silent.mp4` too, or see
+[Add, remove, or replace a photo](#add-remove-or-replace-a-photo).
+
+### A listing folder in the old layout — `migrate_layout.py`
+
+`status.py` reports `legacy layout -- migrate to <agent>/` for a listing folder
+holding a `config.json` beside a `photos/`. That is the shape the first version of
+the code wrote, before the `<agent>/` level existed. The current walkers cannot read
+it — `--auto` targets `.../photos/` and errors, and the roll-up files it under
+*unverifiable* — so it is migrated rather than left alone:
+
+```bash
+python3 migrate_layout.py          # plan only, writes nothing
+python3 migrate_layout.py --yes    # do it
+```
+
+The plan names one of four outcomes per folder:
+
+- **move** — `os.rename` every part of it (`photos/`, `clips/`, `out/`,
+  `config.json`, the kept work stitch, `draft.mp4`, `contact_sheet.png`) into
+  `<agent>/`. Bytes are relocated, never rewritten: a listing that was already built
+  keeps its cuts and needs no re-encode.
+- **duplicate** — an `<agent>/` already exists holding byte-identical photos, so the
+  legacy copy is a half-finished migration and is deleted. The only delete the
+  script performs.
+- **conflict** — an `<agent>/` exists but its photos differ. Left alone; that is a
+  question for a person.
+- **refuse** — no `leads.csv` row behind the folder, so the scrape cannot name it and
+  neither will the script. See
+  [`the-scrape-names-the-folders`](_rules/the-scrape-names-the-folders.md).
+
+The destination slug is never typed. It comes out of `leads.csv` on `agent_phone`,
+the same key `status.py`'s drift audit uses. The same run normalises the moved
+`config.json` — an empty `"music": ""` and a `logo` whose file no longer exists are
+dropped so the brand default is inherited instead of shadowed by a dead value — and
+rewrites any bare filename in a `brand.json` as a repo-relative path, which is what
+made `find_gaps.py` report an acronym `near_miss` against a logo the brand already
+named. See
+[`an-agent-folder-is-one-that-holds-a-config`](_rules/an-agent-folder-is-one-that-holds-a-config.md).
 
 ---
 
@@ -694,12 +918,25 @@ lengths.
 ```bash
 # in the listing folder, config.json:
 #   {"address": "46 Beacon St, Unit 5", "agent_name": "...", "agent_phone": "..."}
+rm -f work_branded.mp4                       # only if card is not "none"
 python3 ../../../../make_tour.py --finish-only
 ```
 No Canva export, no PNG. The lower third is drawn from those three fields, and any
 of them may be blank — blanks are dropped and the rest close up. A
 `lower_third.png` that exists still wins, so a hand-authored plate stays available
 for a listing that earns it.
+
+**The `rm` is not optional when there is an outro card.** The card carries the same
+address, agent name and phone, and it is *baked into* `work_branded.mp4`, which
+`--finish-only` reuses whole. The lower third is redrawn on every pass. Skip the `rm`
+and you ship one cut with the new text below and the old text on the card. With
+`work_branded.mp4` gone and `clips/` intact, `--finish-only` restitches the branded
+cut from the kept clips and redraws the card — still no per-photo re-encode. See
+[`the-cards-text-invalidates-the-stitch`](_rules/the-cards-text-invalidates-the-stitch.md).
+
+Going through `tour.py` instead handles this for you: `rebuild_reason()` compares
+`address`, `agent_name`, `agent_phone` and `brokerage` against `.last_build.json` and
+drops the fast path when any of them moved.
 
 ### Build from scratch
 ```bash

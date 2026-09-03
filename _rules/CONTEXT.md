@@ -21,7 +21,7 @@ drifted 135 lines out of the section, into the middle of the runbook.
 
 1. Before changing `make_tour.py`, `tour.py`, `publish.py`, `status.py` or
    `scraper/`, read the rules whose `area` matches what you are touching. Do not
-   read all 29 — that is the load this split exists to prevent.
+   read all 46 — that is the load this split exists to prevent.
 2. A rule is not advice. If a change contradicts one, say so and stop; the rule
    states why it exists, and most of them record a failure that already shipped.
 3. Adding a rule: one file, frontmatter as below, then `python3 _rules/reindex.py`.
@@ -53,21 +53,25 @@ reading *prose only* is a rule nothing enforces. That is the list worth shrinkin
 
 <!-- RULE-TABLE:start -->
 
-39 rules.
+46 rules.
 
 | Area | Rule | Guarded by |
 |---|---|---|
 | interface | [Anything with the same answer on every listing is inherited or derived, and never becomes a control](nothing-invariant-becomes-a-control.md) | *prose only* |
+| interface | [`dashboard.py` renders derived state and writes nothing — not to disk, not to a CSV, not to the network](the-dashboard-reads-it-never-writes.md) | `tests/test_dashboard.py` |
 | photos | [A soft cut is not MLS-ready, and its name will not tell you](a-soft-cut-is-not-mls-ready.md) | `tests/test_status_naming.py` |
 | photos | [Below-par photos build, and the shortfall is reported, never encoded in a filename](below-par-photos-build-and-are-reported.md) | `tests/test_naming.py` |
 | photos | [A photo set too large for `max_total_seconds` is trimmed by quality, not halted](excess-photos-are-trimmed-by-quality-never-halted.md) | `tests/test_photo_quality.py` |
 | photos | [Floor-plan detection flags a candidate; it never reorders, renames, or deletes](floor-plan-detection-is-flag-only.md) | `tests/test_floorplan.py`<br>`tests/test_auto_flow.py` |
 | photos | [No AI upscaling of listing photos](no-ai-upscaling-of-listing-photos.md) | *prose only* |
 | photos | [Photo order lives in the filename prefix and nowhere else](photo-order-lives-in-the-filename-prefix.md) | `tests/test_photo_order.py`<br>`tests/test_home_screen.py` |
+| scrape | [A fetched logo names the brokerage, or it is not fetched](a-fetched-logo-names-the-brokerage-or-it-is-not-fetched.md) | `tests/test_fill_gaps.py` |
+| scrape | [`fill_gaps.py` acts only on what `find_gaps.py` named](fill-gaps-acts-only-on-what-find-gaps-named.md) | `tests/test_fill_gaps.py` |
 | scrape | [`find_gaps.py` detects and reports; it never writes](find-gaps-detects-and-reports-it-never-writes.md) | `tests/test_find_gaps.py` |
 | scrape | [One dump per file, and a dump that is not a listing is refused](one-dump-per-file.md) | *prose only* |
 | naming | [A blank agent name gets `UNASSIGNED_AGENT`, never an empty path segment](a-blank-agent-name-gets-a-placeholder-slug.md) | `tests/test_naming.py`<br>`tests/test_status_naming.py`<br>`tests/test_home_screen.py` |
 | naming | [A folder with no lead row still gets a start line](a-folder-with-no-lead-row-still-starts.md) | `tests/test_status_naming.py` |
+| naming | [An agent folder is one that holds a `config.json` or a `photos/`](an-agent-folder-is-one-that-holds-a-config.md) | `tests/test_auto_flow.py`<br>`tests/test_status_naming.py`<br>`tests/test_migrate_layout.py` |
 | naming | [`brand.json` never carries `agent_name`, `agent_phone` or `agent_email`](brand-json-carries-no-agent-identity.md) | `tests/test_brand_scope.py` |
 | naming | [`needs_attention/` is a view, not a move](needs-attention-is-a-view-not-a-move.md) | `tests/test_active_view.py` |
 | naming | [The scrape names the folders; nothing else does](the-scrape-names-the-folders.md) | `tests/test_status_naming.py`<br>`tests/test_naming.py` |
@@ -76,10 +80,12 @@ reading *prose only* is a rule nothing enforces. That is the list worth shrinkin
 | build | [A broken *or missing* watermark stops the build; broken branding does not](a-missing-watermark-stops-the-build.md) | `tests/test_guards.py`<br>`tests/test_home_screen.py` |
 | build | [`draft.mp4` is not a deliverable and does not go in `out/`](draft-mp4-is-not-a-deliverable.md) | `tests/test_naming.py` |
 | build | [`vertical()` takes two sources per family, and that is not redundancy](vertical-takes-two-sources-per-family.md) | `tests/test_card_isolation.py` |
+| card | [A `sample_` cut ships silent, and a blank music bed is never the next action](a-sample-ships-silent-and-music-never-blocks.md) | `tests/test_status_naming.py` |
 | card | [`--auto` halts a listing with no `agent_phone`, the same way it halts on a floor plan](auto-halts-on-a-blank-agent-phone.md) | `tests/test_auto_flow.py` |
 | card | [`--auto` adopts a brand's own logo by slug, and halts rather than ship the type-only card silently](auto-picks-up-the-brand-logo-by-slug.md) | `tests/test_auto_flow.py` |
 | card | [Branding is held off wherever the card is on screen, and the watermark is not](branding-is-held-off-under-the-card.md) | `tests/test_finish_window.py` |
 | card | [The card never rides in `work_silent.mp4`](the-card-never-rides-in-work-silent.md) | `tests/test_card_isolation.py` |
+| card | [The card's text invalidates the branded stitch](the-cards-text-invalidates-the-stitch.md) | `tests/test_auto_flow.py` |
 | card | [The lower third does not say what the card already says](the-lower-third-does-not-repeat-the-card.md) | *prose only* |
 | delivery | [A subset build must be structurally incapable of crossing families](a-subset-build-cannot-cross-families.md) | `tests/test_build_stage.py`<br>`tests/test_card_isolation.py` |
 | delivery | [Never send a `sample_` file as a deliverable, and never send a `tour_` file before sign-off](never-cross-the-sample-tour-boundary.md) | `tests/test_naming.py`<br>`tests/test_publish_gate.py` |
@@ -89,6 +95,7 @@ reading *prose only* is a rule nothing enforces. That is the list worth shrinkin
 | publishing | [A publish verifies against the storage API, never the public URL](a-publish-verifies-against-the-storage-api.md) | *prose only* |
 | publishing | [An upload over the bucket's cap gets a compressed copy, not a silent failure](an-oversized-upload-compresses-a-review-copy.md) | `tests/test_publish_gate.py` |
 | publishing | [Only `sample_` cuts publish, and `make_tour.py` never uploads](only-sample-cuts-publish.md) | `tests/test_publish_gate.py` |
+| outreach | [A follow-up is its own draft and its own row](a-follow-up-is-its-own-draft-and-its-own-row.md) | `tests/test_active_view.py` |
 | outreach | [The draft is written automatically; the send is not, and never becomes a flag](the-draft-is-automatic-the-send-is-not.md) | `tests/test_outreach_draft.py` |
 | outreach | [The recorded link is the last field on its line, and nothing is ever appended after it](the-recorded-link-is-the-last-field.md) | `tests/test_outreach_draft.py` |
 | pii | [A deploy is a second publishing boundary, and `.vercelignore` is its only gate](a-deploy-is-a-second-publishing-boundary.md) | *prose only* |
@@ -97,6 +104,6 @@ reading *prose only* is a rule nothing enforces. That is the list worth shrinkin
 | pii | [The PII gate runs itself, and an unwired gate is reported, never assumed](the-pii-gate-runs-itself.md) | `tests/test_hook_wired.py` |
 | docs | [Docs do not go stale](docs-do-not-go-stale.md) | `tests/test_photo_order.py` |
 
-Unguarded rules: 6 of 39.
+Unguarded rules: 6 of 46.
 
 <!-- RULE-TABLE:end -->

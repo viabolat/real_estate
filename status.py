@@ -18,7 +18,10 @@ naming authority for agents/<broker_name>/<address>/<agent_name> -- and prints t
 mv for any folder that has drifted off it. A folder with no lead row behind it at
 all is reported separately as unverifiable rather than passing silently: the check
 keys on agent_phone out of config.json, so a folder that never had a config.json was
-exactly the hand-named case it could not see. A blank agent_name scrapes to the
+exactly the hand-named case it could not see. A third report names a contacted.csv
+row keyed on a name the scrape does not produce: the send is real, but leads.html
+derives its key from the leads.csv row and so shows the lead as "open" forever while
+rung 5 offers to mail it again. A blank agent_name scrapes to the
 UNASSIGNED_AGENT placeholder rather than a silent empty path segment; the same
 drift check is how a placeholder gets corrected once the real name is known.
 
@@ -147,6 +150,44 @@ def _dirs(path):
                   if os.path.isdir(os.path.join(path, d)) and not d.startswith("."))
 
 
+def _agent_dirs(path):
+    """The subdirectories of a listing folder that actually name an AGENT.
+
+    reason: _dirs() cannot tell agents/<brand>/<listing>/<agent> from the
+    photos/, clips/ and out/ a build writes inside one. A listing still in the
+    pre-agent-level layout reported "photos" as its agent, and audit() then
+    filed it under unverifiable for having no config.json -- the config was one
+    level up, where survey() never looked. scaffold() always writes both a
+    config.json and a photos/; no intermediate directory has either. Mirrors
+    tour.py's is_agent_dir(); see
+    _rules/an-agent-folder-is-one-that-holds-a-config.md.
+    """
+    return [d for d in _dirs(path)
+            if os.path.isfile(os.path.join(path, d, "config.json"))
+            or os.path.isdir(os.path.join(path, d, "photos"))]
+
+
+def legacy_target(listing_dir, truth):
+    """The <agent>/ this pre-agent-level listing folder should move into, or None.
+
+    reason: a config.json sitting BESIDE photos/ instead of inside an agent
+    folder is the old layout, not a missing scrape -- and it carries the
+    agent_phone that scraped_names() keys on, so the destination is re-derived
+    from leads.csv exactly like every other folder name. Nothing here names a
+    folder; it reports the name the scrape already implies. A folder with no
+    lead row returns None and keeps the "rerun photos.py" message -- the scrape
+    cannot name a listing it has no row for. See
+    _rules/the-scrape-names-the-folders.md.
+    """
+    cfg_path = os.path.join(listing_dir, "config.json")
+    if not (os.path.isfile(cfg_path)
+            and os.path.isdir(os.path.join(listing_dir, "photos"))):
+        return None
+    digits = re.sub(r"\D", "", _json(cfg_path).get("agent_phone") or "")
+    want = truth.get(digits)
+    return want[2] if want else None
+
+
 def _json(path):
     try:
         with open(path, encoding="utf-8") as f:
@@ -271,6 +312,21 @@ def contacted(brand, listing, agent):
         return False
 
 
+def followup_due(brand, listing, agent):
+    """Is this lead contacted, with its follow-up date already passed?
+
+    Same tolerant, _publish-guarded shape as published()/contacted() -- and the
+    window itself is publish.follow_up_date(), which is scraper/lead.py's, so
+    the roll-up, leads.html and needs_attention/ all read one definition.
+    """
+    if not _publish:
+        return False
+    try:
+        return _publish.followup_due(brand, listing, agent)
+    except Exception:
+        return False
+
+
 def next_action(listing_dir, cfg, n, worst, best, scraped=True, bcfg=None):
     """The one thing standing between this listing and a deliverable.
 
@@ -302,8 +358,13 @@ def next_action(listing_dir, cfg, n, worst, best, scraped=True, bcfg=None):
     merged.update(cfg or {})
     if not resolves(listing_dir, merged.get("logo")):
         return "logo blank/missing -- add it to brand.json" + origin
-    if not resolves(listing_dir, merged.get("music")):
-        return "music blank/missing -- add it to brand.json" + origin
+    # reason: music was a blocker here, one rung below the logo. It never was one:
+    # a missing logo halts --auto (auto-picks-up-the-brand-logo-by-slug), a missing
+    # music bed only adds --no-music and builds silent. Since sample_ cuts ship
+    # silent by standing instruction, music is never set, so this line matched on
+    # EVERY listing -- including all eleven already delivered and contacted -- and
+    # reported "add it to brand.json" in place of the real next action. The ladder
+    # now falls straight through to the build state.
     if not resolves(listing_dir, merged.get("watermark") or "viabolat.png"):
         return "watermark will not resolve -- the sample build will refuse" + origin
     counts, total = built_families(listing_dir)
@@ -313,6 +374,7 @@ def next_action(listing_dir, cfg, n, worst, best, scraped=True, bcfg=None):
     soft = " -- soft ({}px photos)".format(best) if best and best < GATE_720P else ""
     listing = os.path.basename(os.path.dirname(listing_dir))
     brand = os.path.basename(os.path.dirname(os.path.dirname(listing_dir)))
+    agent = os.path.basename(listing_dir)
     if not counts["sample"] and not counts["tour"]:
         # reason: a confirmed publish clears its own sample_ cuts from out/ (see
         # a-confirmed-sample-publish-clears-its-own-cuts.md), which would
@@ -321,12 +383,20 @@ def next_action(listing_dir, cfg, n, worst, best, scraped=True, bcfg=None):
         # before and after that cleanup runs, or auto_targets() would re-select
         # an already-published, awaiting-sign-off listing as fresh.
         if published(brand, listing):
+            # reason: "awaiting sign-off" was the terminal rung, so a lead that
+            # had gone quiet past its follow-up date read exactly like one
+            # emailed an hour ago. The ladder now names the follow-up, which is
+            # what needs_attention/ resurfaces the listing FOR.
+            if followup_due(brand, listing, agent):
+                return f"follow up -- rung 5 drafts it{soft}{origin}"
             return f"sample published -- awaiting sign-off{soft}{origin}"
         tag = f" (soft: photos {best}px)" if best and best < GATE_1080P else ""
         return f"ready to build{tag}{origin}"
     if counts["tour"]:
         return f"delivered, {total} cuts{soft}{origin}"
     if published(brand, listing):
+        if followup_due(brand, listing, agent):
+            return f"follow up -- rung 5 drafts it{soft}{origin}"
         return f"sample published -- awaiting sign-off{soft}{origin}"
     return f"sample built -- publish the review link{soft}{origin}"
 
@@ -354,10 +424,13 @@ def survey():
             rows.append((brand, "-", "-", 0, None, None, "no listings yet", bcfg, {}))
         for listing in listed:
             listing_dir = os.path.join(brand_dir, listing)
-            agents = _dirs(listing_dir)
+            agents = _agent_dirs(listing_dir)
             if not agents:
-                rows.append((brand, listing, "-", 0, None, None,
-                             "no agent folder -- rerun photos.py", bcfg, {}))
+                slug = legacy_target(listing_dir, truth)
+                why = (f"legacy layout -- migrate to {slug}/  "
+                       "(python3 migrate_layout.py)" if slug
+                       else "no agent folder -- rerun photos.py")
+                rows.append((brand, listing, "-", 0, None, None, why, bcfg, {}))
                 continue
             for agent in agents:
                 ld = os.path.join(listing_dir, agent)
@@ -372,7 +445,7 @@ def survey():
 
 
 def audit(rows, truth, known):
-    """(drift, unverifiable) -- folders whose names the scrape does not agree with.
+    """(drift, unverifiable, orphaned_marks) -- where the names disagree.
 
     reason: the drift check matches on agent_phone out of config.json, so a
     folder with no config.json -- which is the strongest signal it was never
@@ -380,6 +453,13 @@ def audit(rows, truth, known):
     produced no match and fell silently through the check built to catch it.
     brewester/9_w_cedar sat through the scrape-naming commit that way. Report
     unverifiable separately rather than letting absence read as agreement.
+
+    The third report, orphans, is the same failure one file over. contacted.csv
+    is keyed by folder name, but leads.html looks a row up by the key it derives
+    from the leads.csv row -- so a mark whose key matches no scraped name is
+    invisible on the page that exists to show it. Three sends sat unrecorded for
+    two weeks that way, and one of them was re-sent as a duplicate. See
+    a-follow-up-is-its-own-draft-and-its-own-row.md.
     """
     drift, unverifiable = [], []
     for brand, listing, agent, _n, _w, _b, _a, _bc, cfg in rows:
@@ -397,10 +477,36 @@ def audit(rows, truth, known):
             drift.append((brand, listing, agent, want))
         elif not want and (brand, listing, agent) not in known:
             unverifiable.append((brand, listing, agent, bool(cfg)))
-    return drift, unverifiable
+    return drift, unverifiable, orphaned_marks(known)
 
 
-def print_audit(drift, unverifiable, out=print):
+def orphaned_marks(known):
+    """[(brand, listing, agent)] in contacted.csv that no scraped name matches.
+
+    Such a row records a real send, but leads.html can never find it: that page
+    derives its key from the leads.csv row, so the CONTACTED and FOLLOW UP
+    columns stay blank and the lead reads "open" forever. Renaming a folder
+    without re-keying its mark produces exactly this, and so does a mark written
+    before its listing had a brokerage or agent on record.
+    """
+    if not _publish:
+        return []
+    try:
+        with open(_publish.CONTACTED, newline="", encoding="utf-8") as f:
+            rows = list(csv.DictReader(f))
+    except (OSError, AttributeError):
+        return []
+    seen, out = set(), []
+    for r in rows:
+        key = ((r.get("brand") or "").strip(), (r.get("listing") or "").strip(),
+               (r.get("agent") or "").strip())
+        if all(key) and key not in known and key not in seen:
+            seen.add(key)
+            out.append(key)
+    return out
+
+
+def print_audit(drift, unverifiable, orphans=(), out=print):
     """The two naming reports, printed identically wherever they are shown."""
     if drift:
         out(f"\n{len(drift)} folder name(s) do not match the scrape "
@@ -418,6 +524,15 @@ def print_audit(drift, unverifiable, out=print):
         out("  These predate the scrape or their lead row is gone. The scrape "
             "cannot name them; renaming by hand would invent a second "
             "authority. Leave them, or re-scrape the listing.")
+    if orphans:
+        out(f"\n{len(orphans)} contacted.csv row(s) match no scraped name "
+            f"(the send is recorded, but leads.html cannot see it):")
+        for brand, listing, agent in orphans:
+            out(f"  {brand}/{listing}/{agent}")
+        out("  Those leads read \"new\" on leads.html and rung 5 will offer to "
+            "mail them again. Re-key each row to the name leads.csv derives -- "
+            "renaming the folder alone is not enough, and re-keying the row "
+            "alone makes rung 5 lose track of the send.")
 
 
 def print_rows(rows, long=False, out=print):
@@ -440,12 +555,21 @@ def print_rows(rows, long=False, out=print):
                 and contacted(brand, listing, agent) else "")
         out(f"{name}  {str(n).rjust(6)}  {px}  {mark.rjust(9)}  {action}")
         if long and cfg:
-            out(f"{' ' * w}          logo={cfg.get('logo') or '(blank)'} "
-                f"music={cfg.get('music') or '(blank)'} card={cfg.get('card')}")
+            # reason: load_config() layers brand.json and then the listing's own
+            # config.json, so a key absent from config.json is inherited, not
+            # blank. Reading cfg alone printed logo=(blank) for a listing whose
+            # build correctly picks up the brand mark -- and it under-reported on
+            # exactly the listings where inheritance is doing its job, because
+            # scaffold() deliberately omits a key rather than freezing a blank
+            # that would shadow a path claimed onto the brand afterwards.
+            eff = dict(bcfg)
+            eff.update(cfg)
+            out(f"{' ' * w}          logo={eff.get('logo') or '(blank)'} "
+                f"music={eff.get('music') or '(blank)'} card={eff.get('card')}")
 
     brands_missing = sorted({r[0] for r in rows if "brand.json" in r[6]})
     if brands_missing:
-        out(f"\n{len(brands_missing)} brokerage(s) need a logo or music set once: "
+        out(f"\n{len(brands_missing)} brokerage(s) need a logo set once: "
             f"{', '.join(brands_missing)}")
 
 

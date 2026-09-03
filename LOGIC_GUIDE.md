@@ -7,6 +7,151 @@ Do not defer updates to end-of-session.
 
 ## Entries
 
+### 2026-09-03 — The dashboard is a socket, not a file, and it reads only
+
+**What:** `dashboard.py` — every lead and listing on one page in a browser, on a
+sixth home-screen entry and as a standalone command. It joins what `status.py`'s
+roll-up, `scraper/leads.html`, `needs_attention/` and the three `outreach/` CSVs
+already know, and plays the sample cut.
+
+**Why a socket and not a written HTML file.** The obvious implementation is the
+one already in the repo: `lead.write_html_table()` renders `scraper/leads.html`
+to disk. That file *is* the lead list, and it survived unignored for a while
+because a `#` comment sat on the same line as its `.gitignore` pattern. A second
+PII artifact on disk is a second thing that has to be remembered in two ignore
+files forever. Rendering into a response body means there is nothing to
+remember: `check_pii.py` cannot fail to scan a file that does not exist. The
+cost is a running process; the bind is `127.0.0.1` and the source contains no
+wildcard host.
+
+**Why read-only.** A "mark contacted" button would give `outreach/contacted.csv`
+a second writer, and [`the-draft-is-automatic-the-send-is-not`](_rules/the-draft-is-automatic-the-send-is-not.md)
+already records what that costs — a send nobody decided. A "publish" button
+would be a second owner of a prompt [`a-publish-prompt-has-one-owner`](_rules/a-publish-prompt-has-one-owner.md)
+holds to one. The dashboard's job ends at showing that something is due.
+
+**Why the ladder is ordered 7 → 2 rather than seven independent filters.**
+`publish.followup_due()` is derived from `contacted_at()`, so rung 6 is a strict
+subset of rung 5 — the sets are nested, not disjoint. Two filters would list
+every due listing twice: once under a heading meaning "leave it alone" and once
+under one meaning "act". That is the duplicate-send shape from 2026-09-02, where
+two agents received a byte-identical second email. A single first-match ladder
+makes the rungs a partition, which is the same reason `needs_attention/` orders
+`archived > snoozed > active`. There is no eighth rung: "signed off" has no
+derivable signal, and inventing a marker for it is what
+[`needs-attention-is-a-view-not-a-move`](_rules/needs-attention-is-a-view-not-a-move.md)
+forbids.
+
+**Why the family gate sits at the socket, not the renderer.** Hiding `tour_`
+cuts at render time would leave the URL working for anyone who guessed it, and a
+loopback URL becomes a publishing boundary the moment it is pasted into a chat.
+`resolve_media()` asks `publish.family()` *before touching the filesystem*, so a
+`tour_` request is 403 whether or not that cut exists — the 403-vs-404
+difference would otherwise say which listings are delivered. `family()` stays
+the single owner; `dashboard.py` never tests the prefix, which is now enforced
+by an assertion on its own source.
+
+**What was refactored to avoid a fork:** `scraper/lead.py`'s stylesheet came out
+into a `lead.CSS` constant, with `HTML_TEMPLATE` rebuilt from it through a
+`_brace_escape()` helper — `HTML_TEMPLATE` is consumed by `.format()` and needs
+doubled braces, `dashboard.py` concatenates and wants single ones. `leads.html`
+output is byte-identical. One stylesheet, one dark-mode rule, one place.
+
+**The ignore-gate asymmetry, stated so it reads as a decision:** `.vercelignore`
+gains `dashboard.py`; `.gitignore` gains nothing. The module is committed source
+that produces no artifact — `check_pii.py` scans it and should — but Vercel is
+the one host in this project, and a file whose purpose is serving PII over a
+socket does not get uploaded to it.
+
+### 2026-09-03 — The gap-filling browser goes headless; Zillow stays the one exception
+**What:** the "Fetching a logo or an agent email" workflow in `STEPS.md` now runs
+`--headless=new` by default, this session and every future one, at the operator's
+instruction. Three of the four outstanding `agent_email` gaps closed that way with
+no window on screen.
+
+**Why this does not contradict the entry below it.** That entry is about *Zillow*,
+and it still holds exactly as written — PerimeterX denies headless Chrome with or
+without a spoofed UA, so a re-scrape, and the profile-page email lane, still need
+`DISPLAY=:0`. What changed is the default for everything that is *not* Zillow: a
+brokerage's own roster page is ordinary web, and driving a visible window to read
+one bought nothing.
+
+**The one thing headless does need: a real user-agent.** Headless Chrome
+advertises `HeadlessChrome/…` and `thefirmreg.com` answered `403 Request
+forbidden by administrative rules` on sight of it. With an ordinary desktop
+Chrome `--user-agent=` the same URL served normally. This is not the Zillow
+problem wearing a different hat — it is a plain server-side UA filter, and the
+403 turning into a clean 404 for a wrong path is what proves the difference.
+
+**Why the email source order inverted.** `STEPS.md` used to rank the Zillow
+profile page first. It is now last, because it is the only lane still costing a
+headed browser — and it was never the stronger source. A brokerage page is the
+agent's own publication of their address *and* it carries a `tel:` to check the
+gap's `agent_phone` against. All three emails written today matched their
+recorded phone exactly before they were written. That check is now the bar, not
+the name on the page.
+
+**Two failure modes this run turned up, both recorded in `STEPS.md`:**
+`successrealestate.com` and its `www` host both redirect to an unrelated
+gambling site, so a live-looking brokerage domain can yield nothing; and
+`brokerName` is a short string that collides — the `thefirmreg.com` roster is a
+different "The Firm" than the one on `30_belton_st`, complete and confident and
+wrong. An earlier pass this session took that roster at face value and produced
+an email for that listing's agent which the site does not actually support. It
+was not written, and `30_belton_st` was reported UNRESOLVED — which is the
+reason that lane is now stated in the workflow rather than implied. The
+operator then supplied the address directly, which is how it was finally
+filled: the fifth outcome, and the one that outranks all four lanes.
+
+### 2026-09-02 — The three lost listings came back from a headed browser, not a paste
+**What:** `16_holmfield_ave`, `41_worcester_sq_penthouse` and a third listing since
+removed at the operator's request (2026-09-03) were re-scraped without the operator copying a page by hand. A scratchpad CDP client
+drove a real headed Chrome (`DISPLAY=:0`, WSLg), read `document.documentElement
+.outerHTML` once `__NEXT_DATA__` was present, and composed `scraper/dumps/<name>.txt`
+in the shape the parsers already expect — one compact JSON header line, then one
+`photos.zillowstatic.com` URL per line.
+
+**Why headed:** Zillow is behind PerimeterX. `WebFetch` gets 403; `--headless=new`
+gets an 11 KB `Access to this page has been denied` page *including* with a real UA,
+`--disable-blink-features=AutomationControlled` and a 1920x1080 window. Headed Chrome
+passes. The distinction is the browser, not the request.
+
+**Why the compact header line, not the raw page:** `lead.field()` takes the FIRST
+regex match. `city` appears 59 times in the raw DOM. The existing dumps' shape is not
+cosmetic — it is what makes a first-match parser safe.
+
+**What stays manual:** nothing about this belongs in the repo. The repo is stdlib +
+ffmpeg/ffprobe with no browser dependency, and that has not changed — the client lives
+in the scratchpad and was never committed. It is the operator's browser session,
+automated, which is what [`find-gaps-detects-and-reports-it-never-writes`](_rules/find-gaps-detects-and-reports-it-never-writes.md)
+already contemplates for logos.
+
+**One thing the page no longer carries:** `41 Worcester Sq` has lost its
+`agentPhoneNumber` upstream — the key is present, the value empty, zero phone-shaped
+strings in 574 KB. `find_duplicate()` keys on zpid AND phone, so importing a blank one
+appends a SECOND `leads.csv` row for a property already in the ledger. The value was
+restored into the dump from that same ledger row before import, and `leads.csv` came
+through byte-identical.
+
+### 2026-09-02 — A brand value nobody set is not a brand value of ""
+**What:** `scraper/photos.py`'s `scaffold()` no longer copies an `INHERITED` key the
+brand leaves blank into a new listing's `config.json`.
+
+**Why:** `tour.load_config()` layers `DEFAULTS -> brand.json -> config.json` with a
+plain `dict.update()`. A `"logo": ""` written at creation therefore *shadows* the
+brokerage mark permanently — including one claimed onto `brand.json` weeks later.
+`16_holmfield_ave` was re-scraped while `global_assets/logos/keller_williams_realty.png`
+was already on disk; `fill_gaps.py` claimed it into `brand.json`, and the roll-up still
+said `logo blank/missing -- add it to brand.json`. The blank meant "nobody has said
+yet", and freezing it turned a not-yet into a never.
+
+`tour.save_config()` has omitted empty values for exactly this reason all along
+("omit keys left unset ... rather than being handed an explicit null it would treat as
+a path"). This is the scraper honouring the same contract at the other end. A falsy
+value that is not blank — `brand_persistent: false` — is a decision and still carries.
+Recorded in [`auto-picks-up-the-brand-logo-by-slug`](_rules/auto-picks-up-the-brand-logo-by-slug.md),
+which is the same listing's second appearance in that rule.
+
 ### 2026-08-26 — The scripts lost the vendor prefix; the facts kept it
 **What:** `scraper/zillow_lead.py`, `zillow_photos.py` and `zillow_run.py` are now
 `lead.py`, `photos.py` and `run.py`, with all 112 references updated across code,
@@ -418,6 +563,77 @@ depth if not caught by re-reading the affected functions directly: `tour.py`'s
 shallow, which would have silently reported "nothing to apply" for every listing.
 Both are fixed as part of this change, guarded by the existing suite plus new tests
 in `tests/test_naming.py`, `tests/test_auto_flow.py` and `tests/test_home_screen.py`.
+
+---
+
+### 2026-09-02 — The card's text joins the `--finish-only` invalidation set
+
+**What:** `tour.py` gains `CARD_TEXT_KEYS = ("address", "agent_name", "agent_phone",
+"brokerage")`, and `rebuild_reason()` returns `"the card's text changed"` when any of
+them differs from `.last_build.json` and `card != "none"`. Guarded by
+`TestTheCardsTextInvalidatesTheStitch` in `tests/test_auto_flow.py`, one of whose
+tests reads `render_card()`'s own source so the two lists cannot drift.
+
+**Why:** the question was "how do I rerun a single listing, I had the wrong number for
+contact". Tracing it turned up a silent bug. The phone number is on screen twice, and
+the two surfaces are redrawn on different schedules: `render_lower_third()` runs
+unconditionally on every pass, while the outro card is baked into `work_branded.mp4`,
+which `--finish-only` reuses whole. `rebuild_reason()` compared `card` and
+`card_seconds` — the card's *mode* — but not the values printed on it. So the obvious
+fix (edit `config.json`, rerun) produced a cut with the corrected number in the lower
+third and the wrong number on the card, with nothing in the log to say so. Digits are
+the deliverable.
+
+**Alternatives rejected:** *always rebuild when config changes at all* — too blunt; a
+`logo` or `watermark` change is already handled elsewhere and a full re-encode of 40
+photos is the cost `--finish-only` exists to avoid. *Delete `work_branded.mp4` in the
+docs and leave the code alone* — that is a runbook step standing in for a check, and
+`docs-do-not-go-stale` notwithstanding, a step you can forget is not a guard. The
+`STEPS.md` note stays as well, for anyone driving `make_tour.py` directly.
+
+**Accepted risks:** the check is gated on `card != "none"`, so a listing with no card
+keeps the fast path — correct, since nothing is burned in and the lower third is
+redrawn anyway. All 16 existing `.last_build.json` records were verified to already
+carry the four keys, so this triggers no spurious rebuild on anything already built.
+`brokerage` only shows on the type-only card layout, which makes it a slightly
+over-broad trigger; not worth the branch to narrow.
+
+---
+
+### 2026-09-02 — A follow-up gets its own draft, and contacted.csv gets a row per send
+
+**What:** `outreach/followup.txt` + `publish.write_followup()` →
+`outreach_followup.txt`; `publish.recorded_link()` and `publish.followup_due()`;
+`contacted_at()` now returns the latest matching row rather than the first; rung 5
+walks past-due leads alongside uncontacted ones; `status.next_action()` reports
+`follow up -- rung 5 drafts it`. Rule 45, guarded by
+`AFollowUpIsItsOwnDraftAndItsOwnRow` in `tests/test_active_view.py`.
+
+**Why:** the operator showed three sent threads. `9 W Cedar St` (first contacted
+2026-08-19) and `55 Lagrange St Unit 1705` (2026-08-26) had each received a **second
+copy of their original email** on 2026-09-02 — same subject, same body. The only
+one that read like a real follow-up, `46 Beacon St. #5`, had been written by hand
+outside the tool. `needs_attention/` was doing its job resurfacing those listings
+after the 5-day window, but the folder held exactly one artifact and both send-side
+rungs filtered on `contacted(...)`, so a resurfaced lead had no rung to land on. The
+tool offered the first-contact draft or nothing. Underneath it, `contacted_at()` read
+the first row of an append-only file, so even recording a follow-up would not have
+moved the window — the listing would have resurfaced forever.
+
+**Alternatives rejected:** *a `followed_up_at` column on `contacted.csv`* — the file
+already had the right shape, append-only with a timestamp; only the read was wrong,
+and a second column would need a migration and give two places to look. *Re-publish to
+regenerate the link* — the cut has not changed and the URL is already in `links.csv`,
+which is what `the-recorded-link-is-the-last-field` keeps it for. *Send the follow-up
+automatically* — never; `the-draft-is-automatic-the-send-is-not` is exactly the
+boundary this failure sits next to, and crossing it would have made the duplicate
+sends automatic rather than merely easy.
+
+**Accepted risks:** `contacted.csv` now has rows whose meaning depends on order, so a
+hand-sorted or hand-deduplicated file would change behaviour — acceptable, since
+`record_contacted()` is the only writer and it only appends. The three duplicate sends
+already made are not retro-recorded: doing so would invent send times, and the
+follow-up window is a prompt, not an audit trail.
 
 ---
 

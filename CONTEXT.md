@@ -66,7 +66,8 @@ state and is still measured from `photos/`.
 `tour.py` opens on `status.py`'s roll-up — every listing and its one next action,
 plus the scrape-naming drift report — then offers: **1** build a tour, **2** import
 the dumps that have no listing folder yet, **3** publish a review link, **4** brand
-settings, **5** mark leads as contacted. Which dumps are pending is *derived* from
+settings, **5** mark leads as contacted, **6** open the dashboard. Which dumps
+are pending is *derived* from
 whether `agents/<brand>/<listing>/<agent>` exists; there is no marker file and no
 manifest, for the same reason photo order lives in the filename prefix. `--build`
 skips the screen when you already know the listing.
@@ -77,6 +78,37 @@ already wrote, nothing more. `publish_rung()` asks once, right after a publish
 succeeds, defaulting to No; item **5** walks every published, not-yet-contacted
 listing and asks the same question one at a time. See
 [`the-draft-is-automatic-the-send-is-not`](_rules/the-draft-is-automatic-the-send-is-not.md).
+
+## The dashboard: the same derivation, on one page
+
+`dashboard.py` is the browser view of everything above — read-only, bound to
+`127.0.0.1`, rendered in memory and never written to a file. It re-asks the same
+helpers on every request and stores nothing: `status.survey()` and
+`status.audit()` for the rows and the drift, `tour.stage()`/`tour.sample_cuts()`
+for what is in `out/`, `status.published()`/`contacted()`/`followup_due()` for
+the ledger, `find_gaps.brand_gaps()`/`email_gaps()` for the open gaps. Each
+listing lands on exactly one of seven rungs, tested highest-first:
+
+| # | Rung | Derived from |
+|---|---|---|
+| 7 | Delivered | `tour.stage(d) == "delivered"` — a `tour_` cut exists |
+| 6 | Follow-up due | `status.followup_due(brand, listing, agent)` |
+| 5 | Contacted | `status.contacted(brand, listing, agent)` |
+| 4 | Published | `status.published(brand, listing)` |
+| 3 | Sample built | `tour.sample_cuts(d)` is non-empty |
+| 2 | Ready to build | everything else |
+| 1 | Unimported | `tour.unimported_dumps()` — a dump with no folder |
+
+The order is the point. `followup_due()` already implies contacted, so testing 6
+before 5 is what makes the rungs a partition rather than a double count — the
+same `archived > snoozed > active` ordering `needs_attention/` uses, and the
+same reason. There is no "signed off" rung: it has no derivable signal, and a
+`tour_` cut already stands in for it.
+
+Sample cuts play in the page; `tour_` cuts are refused at the socket with a 403
+before the filesystem is touched. Nothing on this screen writes — every mutation
+is still made from `tour.py`'s menu. See
+[`the-dashboard-reads-it-never-writes`](_rules/the-dashboard-reads-it-never-writes.md).
 
 ## Two runs, and how the tool knows which one it is on
 

@@ -80,6 +80,9 @@ agents.txt
 property_email.txt
 outreach/*
 !outreach/template.txt
+# reason: the follow-up wording is the second committed template, for the
+# same reason as the first -- it holds no lead data, only the sender's name.
+!outreach/followup.txt
 
 # ---------------------------------------------------------------------------
 # IN-FLIGHT SCRATCH AND MACHINE-LOCAL CONFIG — deliberately not pushed.
@@ -96,3 +99,10 @@ spec.md
 .claude/settings.local.json
 .vercel
 .env
+
+# Syncthing. .stfolder is its per-folder marker and .stversions its trash;
+# neither belongs in the repo, and a *.sync-conflict-* copy is a stale duplicate
+# of a file that is already committed -- see PROGRESS.md on the 2026-09-02 pass.
+.stfolder/
+.stversions/
+*.sync-conflict-*

@@ -66,6 +66,12 @@ class TestClearPublishedCuts(unittest.TestCase):
     def _listing_dir(self, root, brand="acme", listing="1_main_st", agent="jane"):
         d = os.path.join(root, "agents", brand, listing, agent)
         os.makedirs(os.path.join(d, "out"))
+        # reason: a real agent folder always holds a config.json --
+        # scaffold() writes one and nothing ever deletes it. That is what
+        # is_agent_dir() keys on, so a fixture without one is not a
+        # listing the walkers would ever see. See
+        # _rules/an-agent-folder-is-one-that-holds-a-config.md.
+        open(os.path.join(d, "config.json"), "w").write("{}")
         return d
 
     def test_deletes_only_the_confirmed_cut(self):
@@ -136,6 +142,12 @@ class TestSweepPublishedSamples(unittest.TestCase):
         listing_dir = os.path.join(root, "acme", "1_main_st", "jane")
         out = os.path.join(listing_dir, "out")
         os.makedirs(out)
+        # reason: a real agent folder always holds a config.json --
+        # scaffold() writes one and nothing ever deletes it. That is what
+        # is_agent_dir() keys on, so a fixture without one is not a
+        # listing the walkers would ever see. See
+        # _rules/an-agent-folder-is-one-that-holds-a-config.md.
+        open(os.path.join(listing_dir, "config.json"), "w").write("{}")
         open(os.path.join(out, "sample_branded.mp4"), "wb").close()
         links = os.path.join(root, "links.csv")
         _write_links(links, [{"uploaded_at": "t", "brand": "acme",
@@ -173,6 +185,12 @@ class TestStageAndNextActionAgreeAfterCleanup(unittest.TestCase):
     def _listing(self, root, brand="acme", listing="1_main_st", agent="jane"):
         d = os.path.join(root, brand, listing, agent)
         os.makedirs(os.path.join(d, "out"))
+        # reason: a real agent folder always holds a config.json --
+        # scaffold() writes one and nothing ever deletes it. That is what
+        # is_agent_dir() keys on, so a fixture without one is not a
+        # listing the walkers would ever see. See
+        # _rules/an-agent-folder-is-one-that-holds-a-config.md.
+        open(os.path.join(d, "config.json"), "w").write("{}")
         for name in ("logo.png", "music.mp3", "wm.png"):
             open(os.path.join(d, name), "wb").close()
         return d

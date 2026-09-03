@@ -32,9 +32,9 @@ actually are, only one is a decision:
   make_tour.py  is the engine                                  -> escape hatch
   unittest      is developer-only                              -> out of the loop
 
-So this opens on status.py's roll-up and five choices: build, import the dumps
+So this opens on status.py's roll-up and six choices: build, import the dumps
 that have no folder yet, publish a review link, edit a brand, mark leads as
-contacted. Nothing behind that screen changed — every rung, prompt, default and
+contacted, open the read-only dashboard. Nothing behind that screen changed — every rung, prompt, default and
 refusal is what it was, and every script named above still runs standalone
 exactly as documented.
 
@@ -83,7 +83,11 @@ records that a human already sent the email, never sends one. A confirmed row
 lands in outreach/contacted.csv (publish.record_contacted()/contacted()).
 mark_contacted_action(), the fifth home-screen item, walks every published,
 not-yet-contacted listing and asks the same question one at a time, for whatever
-was published in an earlier session or skipped at that first prompt.
+was published in an earlier session or skipped at that first prompt. It also walks
+the leads past their follow-up date, drafts outreach_followup.txt for each, and
+records a yes as a second contacted.csv row -- which re-arms the window instead of
+leaving the listing to resurface in needs_attention/ every render. See
+a-follow-up-is-its-own-draft-and-its-own-row.md.
 
 Both runs write the same .last_build.json rung, "delivery", because that key names
 the intermediate lineage and not the cut family. That is what makes run 2 cheap:
@@ -224,6 +228,13 @@ DRAFT_OUT = "draft.mp4"
 # reason: these two reshape the stitched intermediate itself, so changing either
 # invalidates it and rules out the fast --finish-only path.
 PACING_KEYS = ("clip_seconds", "xfade_seconds")
+
+# reason: the outro card burns these four into work_branded.mp4, and
+# --finish-only reuses that stitch whole. Correcting a wrong agent_phone
+# therefore redrew the lower third -- render_lower_third() runs on every pass --
+# but left the old number on the card. One cut, two phone numbers, and nothing in
+# the log saying so. These invalidate the stitch exactly like `card` does.
+CARD_TEXT_KEYS = ("address", "agent_name", "agent_phone", "brokerage")
 PRESETS = {"1080p": (1920, 1080), "720p": (1280, 720)}
 
 DEFAULTS = {
@@ -364,8 +375,29 @@ def listings(brand, root=None):
     return _dirs(os.path.join(LISTINGS_ROOT if root is None else root, brand))
 
 
+def is_agent_dir(path):
+    """Does this subdirectory of a listing folder name an AGENT?
+
+    reason: _dirs() cannot tell agents/<brand>/<listing>/<agent> from the
+    photos/, clips/ and out/ a build writes INSIDE an agent folder. A listing
+    still in the pre-agent-level layout therefore reported "photos" as its
+    agent -- and --auto built agents/<brand>/<listing>/photos/, status.py
+    filed it as unverifiable for having no config.json, and needs_attention/
+    symlinked a raw photos/ directory. All one bug. photos.py's scaffold()
+    always writes both a config.json and a photos/, and no intermediate
+    directory has either, so ask that rather than blocklisting names -- a
+    blocklist drifts the moment a new intermediate is added.
+    See _rules/an-agent-folder-is-one-that-holds-a-config.md.
+    """
+    return (os.path.isfile(os.path.join(path, "config.json"))
+            or os.path.isdir(os.path.join(path, "photos")))
+
+
 def agent_dirs(brand, listing, root=None):
-    return _dirs(os.path.join(LISTINGS_ROOT if root is None else root, brand, listing))
+    listing_dir = os.path.join(LISTINGS_ROOT if root is None else root,
+                               brand, listing)
+    return [d for d in _dirs(listing_dir)
+            if is_agent_dir(os.path.join(listing_dir, d))]
 
 
 def assets(kind):
@@ -764,6 +796,9 @@ def rebuild_reason(listing_dir, cfg, preset, rung, silent_name):
     # length invalidates that intermediate exactly like the pacing keys do.
     if any(last.get("cfg", {}).get(k) != cfg[k] for k in ("card", "card_seconds")):
         return "the card changed"
+    if cfg["card"] != "none" and any(
+            last.get("cfg", {}).get(k) != cfg[k] for k in CARD_TEXT_KEYS):
+        return "the card's text changed"
     if last.get("photos") != photo_state(listing_dir):
         return "photos changed"
     return None
@@ -1110,7 +1145,7 @@ def check_photos(listing_dir):
 # pre-push hook. vercel is one-time setup, so it left the recurring runbook.
 # publish was already a rung. status is "where am I", so it is the screen this
 # opens on. run.py is a real action, but a DETECTABLE one. What is left is
-# one command, a roll-up and five choices. Nothing behind this screen changed:
+# one command, a roll-up and six choices. Nothing behind this screen changed:
 # every rung, prompt, default and refusal in the build flow is what it was, and
 # every script still runs standalone from the CLI.
 
@@ -1375,6 +1410,13 @@ def mark_contacted_action():
     every listing for the same reason publish_rung()'s own prompt does: this
     only records a send that already happened by hand (see
     the-draft-is-automatic-the-send-is-not.md), never triggers one.
+
+    reason: it also walks leads whose follow-up date has passed. It used to skip
+    anything already contacted, so a resurfaced lead had no rung at all -- the
+    operator sent the original outreach_draft.txt again by hand and had nowhere
+    to record it. Those are drafted from outreach/followup.txt into
+    outreach_followup.txt and recorded as a second contacted.csv row, which
+    re-arms the window. See a-follow-up-is-its-own-draft-and-its-own-row.md.
     """
     status, why = load_status()
     if status is None:
@@ -1388,15 +1430,36 @@ def mark_contacted_action():
                 if not status.published(brand, name):
                     continue
                 if status.contacted(brand, name, agent):
+                    if publish.followup_due(brand, name, agent):
+                        candidates.append((brand, name, agent, True))
                     continue
-                candidates.append((brand, name, agent))
+                candidates.append((brand, name, agent, False))
     if not candidates:
-        say("\n  Nothing to mark -- every published lead is already recorded "
-            "as contacted.")
+        say("\n  Nothing to mark -- every published lead is recorded as "
+            "contacted, and none is due a follow-up.")
         return
-    say(f"\n  {len(candidates)} published listing(s) not yet marked contacted:")
-    for brand, name, agent in candidates:
-        if confirm(f"  Mark agents/{brand}/{name}/{agent} as contacted?", False):
+    first = sum(1 for c in candidates if not c[3])
+    due = len(candidates) - first
+    say(f"\n  {first} not yet marked contacted, {due} due a follow-up:")
+    for brand, name, agent, is_followup in candidates:
+        where = f"agents/{brand}/{name}/{agent}"
+        if is_followup:
+            listing_dir = os.path.join(LISTINGS_ROOT, brand, name, agent)
+            url = publish.recorded_link(brand, name, agent)
+            if not url:
+                say(f"  {where}: due a follow-up, but links.csv has no branded "
+                    "URL for it -- skipping rather than drafting a dead link.")
+                continue
+            path, missing = publish.write_followup(listing_dir, url)
+            say(f"\n  {where}: follow-up due "
+                f"{publish.follow_up_date(publish.contacted_at(brand, name, agent))}."
+                f"\n    Draft: {path}")
+            if missing:
+                say(f"    Still blank: {', '.join(missing)}")
+            prompt = f"  Mark {where} as followed up once you've sent that?"
+        else:
+            prompt = f"  Mark {where} as contacted?"
+        if confirm(prompt, False):
             publish.record_contacted(brand, name, agent)
             say("    Recorded.")
 
@@ -1704,8 +1767,29 @@ def reapply_brand(brand, pairs):
     say(f"  Updated {len(planned)} listing(s).")
 
 
+def dashboard_action():
+    """Menu route to dashboard.py: the same rows, in a browser.
+
+    Read-only, and blocking on purpose -- the operator is looking at it.
+    Ctrl-C closes the server and comes back here. The import is inside the
+    function for the same reason load_status() guards status.py: a missing
+    or broken dashboard must not take the home screen down with it.
+    """
+    try:
+        import dashboard
+    except Exception as exc:
+        say(f"  The dashboard is unavailable ({exc}).")
+        return
+    say("\n  Read-only -- every change is still made from this menu.")
+    say("  Ctrl-C closes it and comes back here.")
+    try:
+        dashboard.serve()
+    except OSError as exc:
+        say(f"  Could not start the dashboard ({exc}).")
+
+
 def home(show_all=False):
-    """The one screen: where every listing is, then the five things to do."""
+    """The one screen: where every listing is, then the six things to do."""
     status, why = load_status()
     # reason: the roll-up opens every photo in every listing, the dump scan
     # re-reads scraper/dumps/, and the gate banner spawns check_pii.py over the
@@ -1740,6 +1824,7 @@ def home(show_all=False):
             ("3", "Publish a review link", publish_action),
             ("4", "Brand settings", brand_settings),
             ("5", "Mark leads as contacted", mark_contacted_action),
+            ("6", "Open the dashboard", dashboard_action),
         ]
         say("")
         for key, label, _ in menu:
@@ -1753,7 +1838,7 @@ def home(show_all=False):
             return
         action = next((f for k, _, f in menu if k == choice), None)
         if action is None:
-            say("  Pick 1-5, or q to quit.")
+            say("  Pick 1-6, or q to quit.")
             continue
         action()
         say("")

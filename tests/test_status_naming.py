@@ -194,6 +194,132 @@ class TestThePipelineStatesAreDistinguishable(unittest.TestCase):
         self.assertIn("ready to build", self.action("build.log"))
 
 
+class TestAContactedRowWithNoScrapedName(unittest.TestCase):
+    """orphaned_marks(): a contacted.csv row keyed on a name the scrape does not
+    produce records a real send that leads.html can never find.
+
+    That page derives its key from the leads.csv row, so the CONTACTED and
+    FOLLOW UP columns stay blank and the lead reads "open" forever -- while rung
+    5 offers to mail it again. Three rows sat that way for two weeks and one
+    agent got a duplicate. Ids are short and non-phone-shaped: check_pii.py
+    matches by shape (tests/README.md).
+    """
+
+    def setUp(self):
+        self.d = tempfile.mkdtemp(prefix="orphan_test_")
+        self.addCleanup(shutil.rmtree, self.d, True)
+        self.csv = os.path.join(self.d, "contacted.csv")
+        real = STATUS._publish
+        self.addCleanup(setattr, STATUS, "_publish", real)
+
+        class FakePublish:
+            CONTACTED = self.csv
+        STATUS._publish = FakePublish()
+
+    def write(self, *keys):
+        with open(self.csv, "w", newline="") as f:
+            f.write("marked_at,brand,listing,agent\n")
+            for k in keys:
+                f.write("2026-08-01T00:00:00," + ",".join(k) + "\n")
+
+    def test_a_row_matching_a_scraped_name_is_not_an_orphan(self):
+        key = ("compass", "41_worcester_sq", "mary_smith")
+        self.write(key)
+        self.assertEqual(STATUS.orphaned_marks({key}), [])
+
+    def test_a_row_the_scrape_does_not_name_is_reported(self):
+        self.write(("compass", "41_worcester_sq", "mary_smith_and_team"))
+        self.assertEqual(STATUS.orphaned_marks({("compass", "41_worcester_sq",
+                                                 "mary_smith")}),
+                         [("compass", "41_worcester_sq", "mary_smith_and_team")])
+
+    def test_a_placeholder_keyed_row_is_reported(self):
+        # reason: the two pre-scraper listings were marked contacted as
+        # unknown_brokerage/<listing>/unassigned_agent, then their leads.csv
+        # rows gained a real brokerage and agent. The key moved out from under
+        # the mark and both leads read "open" for two weeks. Synthetic names --
+        # check_pii.py scans fixtures against leads.csv (tests/README.md).
+        self.write(("unknown_brokerage", "1_example_st", "unassigned_agent"))
+        self.assertEqual(len(STATUS.orphaned_marks(
+            {("example_brokerage", "1_example_st", "a_lister")})), 1)
+
+    def test_a_repeated_key_is_reported_once(self):
+        # reason: contacted.csv now carries one row per send, so a followed-up
+        # orphan has several rows. The report names the folder, not the sends.
+        key = ("compass", "41_worcester_sq", "mary_smith_and_team")
+        self.write(key, key, key)
+        self.assertEqual(STATUS.orphaned_marks(set()), [key])
+
+    def test_a_missing_file_is_no_orphans_not_a_crash(self):
+        self.assertEqual(STATUS.orphaned_marks({("a", "b", "c")}), [])
+
+    def test_print_audit_names_the_row_and_says_re_keying_alone_is_not_enough(self):
+        lines = []
+        STATUS.print_audit([], [], [("compass", "41_worcester_sq", "m_smith")],
+                           out=lines.append)
+        text = "\n".join(lines)
+        self.assertIn("compass/41_worcester_sq/m_smith", text)
+        self.assertIn("leads.html", text)
+        self.assertIn("rung 5", text)
+
+
+class TestABlankMusicBedIsNotABlocker(unittest.TestCase):
+    """sample_ cuts ship silent, so `music` is blank on every real listing.
+
+    It used to sit in next_action()'s ladder one rung below the logo and return
+    "music blank/missing -- add it to brand.json". That matched EVERY listing in
+    the ledger -- all eleven already delivered and contacted ones included -- and
+    reported the nag in place of the real next action, so the NEXT column said
+    nothing useful for the whole table. The asymmetry with the logo is the point:
+    a missing logo halts --auto, a missing music bed only adds --no-music.
+    """
+
+    def setUp(self):
+        self.d = tempfile.mkdtemp(prefix="status_test_")
+        self.addCleanup(shutil.rmtree, self.d, True)
+        for name in ("logo.png", "viabolat.png"):
+            open(os.path.join(self.d, name), "wb").close()
+        self.cfg = {"logo": "logo.png", "watermark": "viabolat.png"}
+
+    def action(self, *cuts):
+        out = os.path.join(self.d, "out")
+        os.makedirs(out, exist_ok=True)
+        for c in cuts:
+            open(os.path.join(out, c), "wb").close()
+        real = STATUS.published
+        STATUS.published = lambda b, l: False
+        self.addCleanup(setattr, STATUS, "published", real)
+        return STATUS.next_action(self.d, self.cfg, 17, 2000, 2400)
+
+    def test_no_music_key_still_reads_ready_to_build(self):
+        self.assertEqual("ready to build", self.action())
+
+    def test_no_music_key_still_reaches_the_review_link(self):
+        self.assertIn("publish", self.action("sample_branded.mp4"))
+
+    def test_an_empty_music_value_is_not_a_blocker_either(self):
+        self.cfg["music"] = ""
+        self.assertIn("publish", self.action("sample_branded.mp4"))
+
+    def test_a_missing_logo_is_still_a_blocker(self):
+        """The whole reason music can go is that the logo check is the real gate."""
+        self.cfg.pop("logo")
+        self.assertIn("logo", self.action("sample_branded.mp4"))
+
+    def test_no_state_ever_reports_music_as_the_next_action(self):
+        """A future edit must not reintroduce the nag under a new wording.
+
+        Asserted on what next_action RETURNS, across every state a blank-music
+        listing can be in -- not on the source text, which carries a `# reason:`
+        comment naming music on purpose.
+        """
+        for cuts in ((), ("sample_branded.mp4",),
+                     ("sample_branded.mp4", "tour_branded.mp4")):
+            with self.subTest(cuts=cuts):
+                self.setUp()
+                self.assertNotIn("music", self.action(*cuts).lower())
+
+
 class TestDriftClassification(unittest.TestCase):
     """Three buckets: agrees, drifted, unverifiable. Nothing falls through."""
 
@@ -256,6 +382,61 @@ class TestDriftClassification(unittest.TestCase):
             {"agent_phone": "1001"}), "drift")
 
 
+class TestTheLegacyLayoutIsNamedNotMislabelled(unittest.TestCase):
+    """A listing one level off is a migration, not a missing scrape.
+
+    reason: _dirs() cannot tell agents/<brand>/<listing>/<agent> from the
+    photos/, clips/ and out/ a build writes inside one. survey() therefore read
+    "photos" as the agent slug, looked for a config.json inside photos/, found
+    none, and filed the listing under unverifiable -- while the config sat one
+    level up, carrying the very agent_phone the drift audit keys on. Eight rows
+    read that way. See _rules/an-agent-folder-is-one-that-holds-a-config.md.
+    """
+
+    TRUTH = {"1001": ("brokerage_one", "11_first_st", "agent_a")}
+
+    def listing(self, subs=(), config=None):
+        d = tempfile.mkdtemp(prefix="status_test_")
+        self.addCleanup(shutil.rmtree, d, True)
+        for sub in subs:
+            os.makedirs(os.path.join(d, sub), exist_ok=True)
+        if config is not None:
+            import json
+            with open(os.path.join(d, "config.json"), "w", encoding="utf-8") as f:
+                json.dump(config, f)
+        return d
+
+    def test_build_intermediates_are_not_read_as_agents(self):
+        d = self.listing(("photos", "clips", "out", "clips_draft", "work_text"),
+                         config={"agent_phone": "1001"})
+        self.assertEqual(STATUS._agent_dirs(d), [])
+
+    def test_an_agent_folder_is_one_that_holds_a_config_or_photos(self):
+        d = self.listing(("agent_a/photos", "agent_b", "out"))
+        with open(os.path.join(d, "agent_b", "config.json"), "w") as f:
+            f.write("{}")
+        self.assertEqual(STATUS._agent_dirs(d), ["agent_a", "agent_b"])
+
+    def test_the_destination_slug_comes_out_of_leads_csv(self):
+        """Nothing here names a folder; it reports the name the scrape implies."""
+        d = self.listing(("photos",), config={"agent_phone": "10-01"})
+        self.assertEqual(STATUS.legacy_target(d, self.TRUTH), "agent_a")
+
+    def test_a_legacy_folder_with_no_lead_row_is_not_hand_named(self):
+        d = self.listing(("photos",), config={"agent_phone": "9009"})
+        self.assertIsNone(STATUS.legacy_target(d, self.TRUTH))
+
+    def test_a_config_with_no_photos_beside_it_is_not_the_legacy_shape(self):
+        d = self.listing(config={"agent_phone": "1001"})
+        self.assertIsNone(STATUS.legacy_target(d, self.TRUTH))
+
+    def test_photos_with_no_config_beside_it_is_not_the_legacy_shape(self):
+        """That is a folder the scrape never finished, and the existing
+        "rerun photos.py" advice is the right one."""
+        d = self.listing(("photos",))
+        self.assertIsNone(STATUS.legacy_target(d, self.TRUTH))
+
+
 class TestScrapedNamesReadsTheAuthority(unittest.TestCase):
 
     def test_it_keys_on_digits_only(self):
@@ -270,6 +451,56 @@ class TestScrapedNamesReadsTheAuthority(unittest.TestCase):
     def test_a_missing_leads_csv_is_not_an_error(self):
         """status.py is read-only and must run on a clone with no scrape yet."""
         self.assertIsInstance(STATUS.scraped_names(), dict)
+
+
+class TestLongShowsTheInheritedSettings(unittest.TestCase):
+    """--long says "inherited settings", so it has to show the inherited value.
+
+    reason: print_rows() read cfg.get("logo") -- the listing's own config.json,
+    unlayered -- and printed logo=(blank) for a listing whose build picks up the
+    brand mark perfectly well through load_config()'s brand.json -> config.json
+    layering. It under-reported on precisely the listings where inheritance is
+    working, because scaffold() omits a key rather than freezing a blank that
+    would shadow a path claimed onto the brand later. Every other listing had the
+    key frozen into its own config, so the line looked right by accident.
+    """
+
+    def render(self, bcfg, cfg):
+        rows = [("a_brand", "1_example_st", "a_lister", 6, 2560, 2560,
+                 "next action", bcfg, cfg)]
+        lines = []
+        STATUS.print_rows(rows, long=True, out=lines.append)
+        return "\n".join(lines)
+
+    def test_an_absent_key_shows_the_brand_value(self):
+        out = self.render({"logo": "global_assets/logos/a_brand.png",
+                           "music": "global_assets/music/bed.mp3",
+                           "card": "outro"},
+                          {"agent_phone": "1001"})
+        self.assertIn("logo=global_assets/logos/a_brand.png", out)
+        self.assertIn("music=global_assets/music/bed.mp3", out)
+        self.assertIn("card=outro", out)
+        self.assertNotIn("(blank)", out)
+
+    def test_the_listings_own_value_still_wins(self):
+        """config.json is layered last, so it overrides -- including with a blank.
+
+        An empty string in config.json shadows a brand path; that is the whole
+        reason scaffold() refuses to write one, and the line must show what the
+        build would actually use, not what the brand wishes it used.
+        """
+        out = self.render({"logo": "global_assets/logos/a_brand.png"},
+                          {"logo": "global_assets/logos/override.png"})
+        self.assertIn("logo=global_assets/logos/override.png", out)
+
+        out = self.render({"logo": "global_assets/logos/a_brand.png"},
+                          {"logo": ""})
+        self.assertIn("logo=(blank)", out)
+
+    def test_no_brand_and_no_listing_value_is_still_blank(self):
+        out = self.render({}, {"agent_phone": "1001"})
+        self.assertIn("logo=(blank)", out)
+        self.assertIn("music=(blank)", out)
 
 
 if __name__ == "__main__":
