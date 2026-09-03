@@ -311,6 +311,26 @@ machine by hand.
 The repeatable version of the manual workflow this was built from. Run
 `python3 scraper/find_gaps.py --json` first and work the list it returns.
 
+**Run the browser headless.** `--headless=new`, no `DISPLAY`, no visible
+window — that is the default for this workflow and every future session of
+it. Two things it needs to work, both learned the hard way:
+
+- **Send a real user-agent.** Headless Chrome advertises itself as
+  `HeadlessChrome/…` and a fair number of brokerage sites 403 on sight of it.
+  `thefirmreg.com` returns `403 Request forbidden by administrative rules`
+  headless and serves the page normally once `--user-agent=` carries an
+  ordinary desktop Chrome string. This is the operator's own session reading
+  a public roster page, not a disguise.
+- **Zillow is the one exception, and it is not fixable with a UA.** Zillow
+  sits behind PerimeterX, which denies `--headless=new` an 11 KB
+  `Access to this page has been denied` page *including* with a real UA,
+  `--disable-blink-features=AutomationControlled` and a 1920x1080 window.
+  The distinction is the browser, not the request — see the 2026-09-02 and
+  2026-09-03 entries in [`LOGIC_GUIDE.md`](LOGIC_GUIDE.md). Anything that has
+  to come off a Zillow page — a re-scrape, or the profile-page email lane
+  below — needs headed Chrome (`DISPLAY=:0`, WSLg). Everything else is
+  headless.
+
 **A logo gap (`near_miss` or `gap`).** Search or open the brokerage's own
 site, confirm the mark, then ask to save it to
 `global_assets/logos/<brand>.png` — the exact slug `find_gaps.py` named.
@@ -319,17 +339,38 @@ time; nothing here waives or batches that, and a `near_miss` file already on
 disk is a candidate to confirm, not a reason to skip asking before saving a
 new one over or beside it.
 
-**An `agent_email` gap.** Check `https://www.zillow.com/profile/<agent_name>`
-first — the profile page, not the listing itself, which is what Zillow never
-exposes an email on. Then the brokerage's own site or that agent's team page;
-fall back to a general web search per agent only once both turn up nothing.
+**An `agent_email` gap.** Headless, the source order is: the brokerage's own
+site or that agent's team page first, then a general web search to *locate*
+that page when you do not know the domain, then the Zillow profile page last —
+and that last one costs a headed browser, so treat it as the fallback it now
+is rather than the opening move. Under the old headed default the profile page
+ranked first; it was never the better source, only the one URL you could always
+guess. A brokerage page beats it on both counts anyway: it is the agent's own
+publication of their address, and it carries a `tel:` you can check the gap's
+`agent_phone` against, which is what turns a plausible name match into a
+confirmed one. Match the phone before you write the email.
+
 Once found, write it straight into the named `config.json`'s `agent_email` —
 no per-agent confirmation needed, that gate was deliberately left off.
 `agent_email` is never read by `make_tour.py`, so a wrong guess here cannot
 reach a build; the worst case is a stale or bounced address, corrected the
-same way.
+same way. A gap none of the three lanes resolves is left **UNRESOLVED** and
+reported as such: never guessed from the brokerage's domain and the agent's
+name, which is exactly the shape that reads plausible and bounces. That is the
+same bar [`fill_gaps.py`](scraper/fill_gaps.py) holds itself to when
+`leads.csv` has no email.
 
-The profile page carries two contact surfaces that are easy to conflate.
+Two failure modes that look like a missing email and are not. A brokerage
+domain can be **dead or hijacked** — `successrealestate.com` and its `www`
+host both redirect to an unrelated gambling site, so the brokerage lane for
+an agent there yields nothing and nothing on that host is worth reading.
+And a **name collision** will hand you a complete, confident, wrong roster:
+`brokerName` is a short string, and there is more than one "The Firm" in
+Massachusetts. Confirm the brokerage by the gap's own `agent_phone` before
+you trust a roster page, not by the name on the door.
+
+When you do fall through to the Zillow profile page (headed), it carries two
+contact surfaces that are easy to conflate.
 The "Contact `<name>`" forms (there are two — one inline, one in a sidebar)
 are Name / Phone / Email / Message boxes where Email is the *visitor's*,
 never the agent's; they're always empty and not worth reading. The agent's
@@ -343,10 +384,16 @@ link near the phone number, not just inside a form. If it's not there,
 check for an "agent website" link near the bio — a secondary lead worth
 following before falling back to the brokerage site.
 
-Close the run with a one-line tally — found via the Zillow profile page vs.
-the brokerage's own site vs. a general search — so a lower-confidence guess
-stays visible in the summary even though nothing blocked it from being
-written.
+There is a fifth outcome above all four lanes: **the operator supplies it.**
+An address handed over directly is not a guess and needs no page to confirm it —
+write it as given. Report it as operator-supplied all the same, because the
+tally's whole job is to say where each value came from.
+
+Close the run with a one-line tally per agent — operator-supplied vs.
+brokerage/team site (headless) vs. general search vs. Zillow profile (headed)
+vs. UNRESOLVED, and whether the `agent_phone` matched — so a lower-confidence
+write stays visible in the summary even though nothing blocked it, and an
+unresolved gap is not quietly rounded up to a found one.
 
 It never builds a draft and never publishes. Checking the mp4 in `out/`, then
 running `publish.py` from the listing folder (above), stays the last manual

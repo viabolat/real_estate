@@ -33,10 +33,13 @@ allowed to merge them:
 - **An `agent_email`.** Writing it into an already-gitignored `config.json` is
   a plain file edit, not a download. The documented workflow skips a
   per-agent confirmation for it, on the operator's own instruction — but the
-  source tier (Zillow's own profile page, the brokerage's site/team page, or
-  a general web search, checked in that order) should still read as such in
-  that run's summary, so a lower-confidence guess stays distinguishable even
-  though nothing blocks any of them from being written.
+  source tier (the brokerage's site/team page, a general web search, or
+  Zillow's own profile page, checked in that order) should still read as such
+  in that run's summary, so a lower-confidence guess stays distinguishable even
+  though nothing blocks any of them from being written. That order inverted on
+  2026-09-03 when the workflow went headless-by-default: the profile page is
+  the only lane that still costs a headed browser, and it was never the better
+  source -- see the "Fetching a logo or an agent email" workflow in `STEPS.md`.
 
 **Standing-preference override, stated once, in writing.** `PROGRESS.md` §7
 records *"Logos and music are the operator's to supply; automate the rest."*

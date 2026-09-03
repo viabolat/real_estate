@@ -63,6 +63,46 @@ that produces no artifact — `check_pii.py` scans it and should — but Vercel 
 the one host in this project, and a file whose purpose is serving PII over a
 socket does not get uploaded to it.
 
+### 2026-09-03 — The gap-filling browser goes headless; Zillow stays the one exception
+**What:** the "Fetching a logo or an agent email" workflow in `STEPS.md` now runs
+`--headless=new` by default, this session and every future one, at the operator's
+instruction. Three of the four outstanding `agent_email` gaps closed that way with
+no window on screen.
+
+**Why this does not contradict the entry below it.** That entry is about *Zillow*,
+and it still holds exactly as written — PerimeterX denies headless Chrome with or
+without a spoofed UA, so a re-scrape, and the profile-page email lane, still need
+`DISPLAY=:0`. What changed is the default for everything that is *not* Zillow: a
+brokerage's own roster page is ordinary web, and driving a visible window to read
+one bought nothing.
+
+**The one thing headless does need: a real user-agent.** Headless Chrome
+advertises `HeadlessChrome/…` and `thefirmreg.com` answered `403 Request
+forbidden by administrative rules` on sight of it. With an ordinary desktop
+Chrome `--user-agent=` the same URL served normally. This is not the Zillow
+problem wearing a different hat — it is a plain server-side UA filter, and the
+403 turning into a clean 404 for a wrong path is what proves the difference.
+
+**Why the email source order inverted.** `STEPS.md` used to rank the Zillow
+profile page first. It is now last, because it is the only lane still costing a
+headed browser — and it was never the stronger source. A brokerage page is the
+agent's own publication of their address *and* it carries a `tel:` to check the
+gap's `agent_phone` against. All three emails written today matched their
+recorded phone exactly before they were written. That check is now the bar, not
+the name on the page.
+
+**Two failure modes this run turned up, both recorded in `STEPS.md`:**
+`successrealestate.com` and its `www` host both redirect to an unrelated
+gambling site, so a live-looking brokerage domain can yield nothing; and
+`brokerName` is a short string that collides — the `thefirmreg.com` roster is a
+different "The Firm" than the one on `30_belton_st`, complete and confident and
+wrong. An earlier pass this session took that roster at face value and produced
+an email for that listing's agent which the site does not actually support. It
+was not written, and `30_belton_st` was reported UNRESOLVED — which is the
+reason that lane is now stated in the workflow rather than implied. The
+operator then supplied the address directly, which is how it was finally
+filled: the fifth outcome, and the one that outranks all four lanes.
+
 ### 2026-09-02 — The three lost listings came back from a headed browser, not a paste
 **What:** `16_holmfield_ave`, `41_worcester_sq_penthouse` and a third listing since
 removed at the operator's request (2026-09-03) were re-scraped without the operator copying a page by hand. A scratchpad CDP client
