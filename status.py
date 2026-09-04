@@ -336,7 +336,7 @@ def blocker(listing_dir, cfg, n, best, scraped=True, bcfg=None):
     said nothing at all, so a listing sat there with no way to tell WHY without
     running a build. The ladder now lives here once: next_action() renders the
     first five keys as its one-line verdict, active_view.py renders all six as
-    needs_attention/<brand>/<listing>/flag.txt.
+    needs_attention/<brand>/<listing>/<agent>/flag.txt.
 
     --auto keeps its own phone and logo gates rather than calling this. Those
     run after questions() against the merged config it is about to encode from,

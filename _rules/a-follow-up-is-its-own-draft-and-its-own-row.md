@@ -9,8 +9,8 @@ source: PROGRESS.md@this-change — two agents received a byte-identical duplica
 
 # A follow-up is its own draft and its own row
 
-`needs_attention/` resurfaces a contacted listing once its `FOLLOW_UP_DAYS` window
-passes. That is what the window is **for**
+A contacted listing becomes active again — offered by the build picker — once its
+`FOLLOW_UP_DAYS` window passes. That is what the window is **for**
 ([needs-attention-is-a-view-not-a-move](needs-attention-is-a-view-not-a-move.md)).
 But the folder held one artifact — `outreach_draft.txt`, the first-contact draft — and
 both send-side rungs skipped anything already in `contacted.csv`. So a resurfaced lead

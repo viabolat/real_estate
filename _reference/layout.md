@@ -13,7 +13,7 @@ shape, not the law.
 agents/<brand>/brand.json           per-brand defaults — tour.py ONLY, see below
 agents/<brand>/<listing>/<agent>/   photos/, config.json, out/, outreach_draft.txt, outreach_followup.txt  — cwd for a build
 prospects/<agent>__<phone>/         agents/ viewed by agent instead of brand — symlinks, gitignored
-needs_attention/<brand>/<listing>/  agents/ filtered to what's not archived or snoozed — symlinks, gitignored
+needs_attention/<brand>/<listing>/<agent>/flag.txt  what is blocking this listing, and the fix — gitignored
 global_assets/logos/                shared branding, referenced by config.json
 global_assets/music/
 global_assets/lower_thirds/
@@ -139,39 +139,50 @@ needed. It is gitignored like `agents/` itself — the directory names carry an
 agent's name and phone number, which is exactly the PII `agents/` is already
 gitignored to keep off the repo.
 
-## `needs_attention/` — `agents/`, filtered to what still needs a look
+## `needs_attention/` — the warning light
 
 `agents/` holds every listing forever, active and delivered side by side, which is
-exactly what makes it cluttered as more agents are added. `needs_attention/` is a
-second view over the same tree, filtered by [`needs-attention-is-a-view-not-a-move`](../_rules/needs-attention-is-a-view-not-a-move.md)'s
-three-tier rule, keeping the `agents/` tree shape rather than `prospects/`'s
-flattened agent-keyed one:
+exactly what makes it cluttered as more agents are added. `needs_attention/` names
+the ones that are stuck, keeping the `agents/` tree shape rather than
+`prospects/`'s flattened agent-keyed one:
 
 ```
-needs_attention/<brand>/<listing>/<agent>   -> ../../../agents/<brand>/<listing>/<agent>
-needs_attention/<brand>/<listing>/flag.txt  (only when something blocks a build)
+needs_attention/<brand>/<listing>/<agent>/flag.txt
 ```
 
-A listing that cannot be built as it sits also gets a `flag.txt` beside its
-symlink, naming what is missing and the one command that fixes it — derived from
-`status.blocker()`, written only while the problem is still true, and wiped with
-the rest of the tree on the next rebuild. A listing with nothing blocking it gets
-no file, so the presence of one is the signal. Delete it, the folder, or all of
-`needs_attention/` freely: the next run rewrites whatever is still true. The one
-thing it cannot report is a photo that looks like a floor plan — that costs an
-ffmpeg decode per photo, far too slow for a view rebuilt on every roll-up, so
-`tour.py --auto` hands its own finding in instead.
+That file is the entire contents of the tree — no symlinks, nothing else, ever. A
+folder exists here **only** when a `flag.txt` was written into it, so:
 
-Only **active** listings get a symlink here — not yet contacted, or contacted and
+| in the tree | means |
+|---|---|
+| present | this listing cannot be built; the file says what is missing and the one command that fixes it |
+| absent | nothing is blocking it |
+| tree empty | nothing anywhere is blocking anything |
+
+Fix it in `agents/<brand>/<listing>/<agent>/`, never here — with no symlink there
+is nothing to edit through, which is the point. Then run `tour.py` again: the
+whole tree is wiped and rebuilt, so a fixed listing does not come back and an
+unfixed one does. Delete a file, a folder, or all of `needs_attention/` freely;
+the next run rewrites whatever is still true and nothing reads it in the meantime.
+
+The reasons come from `status.blocker()`, the same ladder `status.py`'s NEXT
+column reads. The one thing it cannot report is a photo that looks like a floor
+plan — that costs an ffmpeg decode per photo, far too slow for a view rebuilt on
+every roll-up, so `tour.py --auto` hands its own finding in instead and the file
+says so in its own header.
+
+Only **active** listings can be flagged — not yet contacted, or contacted and
 past the follow-up window, and with no `tour_` cut yet. A listing just marked
-contacted, or already delivered (a `tour_` cut exists), simply has no entry until
-it becomes active again on its own; nothing is ever moved out of `agents/` to put
-it here or take it away. Built and rebuilt by `active_view.py`, called from the
-same `tour.py` roll-up call site as `prospects.rebuild()`, and read by `tour.py`'s
-own picker by default — `--show-all` reaches `agents/` directly, the only way in
-during a snooze window a client responds early. Gitignored and excluded from
-`.vercelignore` exactly like `prospects/`, for the same reason: it is a second
-path to the PII `agents/` already holds, not a new category of data.
+contacted, or already delivered (a `tour_` cut exists), is never flagged even if
+something is missing; it is not yours to act on today. Nothing is ever moved out
+of `agents/` to put it here or take it away. Built and rebuilt by
+`active_view.py`, called from the same `tour.py` roll-up call site as
+`prospects.rebuild()`. `tour.py`'s build picker does **not** read this tree — it
+lists what is blocked, and a picker needs what is buildable — it takes the active
+set `rebuild()` returns instead; `--show-all` reaches all of `agents/`, the only
+way in during a snooze window a client responds early. Gitignored and excluded
+from `.vercelignore` exactly like `prospects/`, for the same reason: it is a
+second path to the PII `agents/` already holds, not a new category of data.
 
 ## What a build reads
 

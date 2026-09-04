@@ -219,8 +219,9 @@ A hit on any skips just that listing — printed, never guessed at or deleted �
 and the rest of the batch keeps going. The run never stops early: the closing
 summary names every listing it touched, grouped into built, flagged and failed,
 with what each flagged one is missing and the command that fixes it. The same
-two lines are written into `needs_attention/<brand>/<listing>/flag.txt`, so the
-reason is still in front of you tomorrow without re-reading the scrollback.
+two lines are written into `needs_attention/<brand>/<listing>/<agent>/flag.txt`,
+so the reason is still in front of you tomorrow without re-reading the
+scrollback.
 
 That file is the only thing a skip writes anywhere, and it is derived, not
 recorded: it exists while the problem is still true and is wiped with the rest
@@ -600,35 +601,39 @@ Video seeking works — the media route implements RFC 7233 `Range`, answering
 **206** with a `Content-Range`, **416** for a range past the end of the file, and
 **200** with the whole cut when the header is missing or malformed.
 
-### `needs_attention/` — why the build picker stops showing a listing
+### `needs_attention/` — the warning light
 
-Build's picker (**2. Build a tour**, or `--build`) does not list everything under
-`agents/` — it defaults to `needs_attention/`, a filtered view rebuilt fresh every
-time the roll-up runs. A listing drops out of it the moment you mark it contacted
-above, and reappears on its own once the same 5-day follow-up window `leads.html`
-already computes has passed — no separate step, nothing to undo. A listing with a
-`tour_` cut already built (delivered) drops out for good, the same way. Nothing
-in `agents/` moves or is renamed; `needs_attention/` is only symlinks, gitignored,
-regenerated on every roll-up the same way `prospects/` already is.
-
-When a listing is sitting there because something is missing — no logo, no agent
-phone, photos too small to build from — the reason is in the folder with it:
+`needs_attention/` names the listings that are **stuck**, and nothing else. One
+file per blocked listing, regenerated on every roll-up the same way `prospects/`
+already is, gitignored:
 
 ```
-needs_attention/parkway_real_estate/18_thurlow_st/flag.txt
+needs_attention/parkway_real_estate/18_thurlow_st/danielle_m_obrien/flag.txt
 
-  danielle_m_obrien
-    missing: no logo -- brand.json sets none and
-             global_assets/logos/parkway_real_estate.png does not exist
-    fix:     add global_assets/logos/parkway_real_estate.png, then:
-             python3 tour.py --auto parkway_real_estate/18_thurlow_st
+  missing: no logo -- brand.json sets none and
+           global_assets/logos/parkway_real_estate.png does not exist
+  fix:     add global_assets/logos/parkway_real_estate.png, then:
+           python3 tour.py --auto parkway_real_estate/18_thurlow_st
 ```
 
-The file is written only while that is still true. Fix it, run `tour.py` again,
-and it is simply not written back — there is nothing to clear out by hand. A
-listing with nothing blocking it never gets one. Deleting a `flag.txt`, a folder,
-or the whole of `needs_attention/` breaks nothing: the tree is wiped and rebuilt
-from `agents/` on every run.
+A folder appears here only when a `flag.txt` was written into it, so the tree
+reads at a glance: something in it means something is blocked, empty means
+nothing is. Make the fix in `agents/<brand>/<listing>/<agent>/` — there is no
+symlink here and nothing to edit through — then run `tour.py` again. The whole
+tree is wiped and rebuilt, so a fixed listing is not written back and an unfixed
+one is. Deleting a `flag.txt`, a folder, or the whole of `needs_attention/`
+breaks nothing and clears nothing you will miss.
+
+Only listings that are yours to act on today can be flagged: not a delivered one
+(a `tour_` cut exists), and not one you marked contacted that is still inside the
+same 5-day follow-up window `leads.html` computes. Those two simply stay quiet —
+no separate step, nothing to undo — and the contacted one becomes eligible again
+on its own once its date arrives.
+
+The build picker (**2. Build a tour**, or `--build`) does **not** read this tree.
+It lists what is blocked; a picker needs what is buildable. It offers every
+*active* listing instead — everything neither delivered nor snoozed, blocked or
+not — worked out fresh each time it runs.
 
 If a client replies before the follow-up date and you need to rebuild sooner:
 

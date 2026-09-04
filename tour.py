@@ -77,7 +77,8 @@ carries on to the next one, so a batch usually ends with several built and
 several still flagged. The closing summary names all of them -- built, flagged,
 failed -- with what each flagged listing is missing and the one command that
 fixes it, and the same two lines are written into
-needs_attention/<brand>/<listing>/flag.txt so they are still there tomorrow.
+needs_attention/<brand>/<listing>/<agent>/flag.txt so they are still there
+tomorrow.
 Only the floor-plan finding travels that way explicitly (--auto hands it to
 active_view.rebuild(extra=...)); everything else the view re-derives for itself
 through status.blocker().
@@ -101,7 +102,7 @@ not-yet-contacted listing and asks the same question one at a time, for whatever
 was published in an earlier session or skipped at that first prompt. It also walks
 the leads past their follow-up date, drafts outreach_followup.txt for each, and
 records a yes as a second contacted.csv row -- which re-arms the window instead of
-leaving the listing to resurface in needs_attention/ every render. See
+leaving the listing to resurface in the build picker every render. See
 a-follow-up-is-its-own-draft-and-its-own-row.md.
 
 Both runs write the same .last_build.json rung, "delivery", because that key names
@@ -406,6 +407,20 @@ def is_agent_dir(path):
     """
     return (os.path.isfile(os.path.join(path, "config.json"))
             or os.path.isdir(os.path.join(path, "photos")))
+
+
+def active_level(only, *prefix):
+    """The next level down of active_view.rebuild()'s key set, sorted.
+
+    reason: needs_attention/ holds flag.txt files and no symlinks now, so it
+    lists only what is BLOCKED -- the opposite of what a build picker wants to
+    offer. brands()/listings()/agent_dirs() cannot be pointed at it any more.
+    rebuild() hands back the active keys instead, and these read the same three
+    levels straight out of that, so the picker's filtered menu costs no walk at
+    all and depends on no directory the operator is invited to delete.
+    """
+    n = len(prefix)
+    return sorted({k[n] for k in only if k[:n] == prefix})
 
 
 def agent_dirs(brand, listing, root=None):
@@ -2005,35 +2020,41 @@ def listing_actions():
 def choose_listing(show_all=False):
     """(brand, listing_dir), creating either inline.
 
-    show_all=False (the default) offers only what needs_attention/ currently
-    holds -- rebuilt fresh right here so a --build run that skipped the home
-    screen still sees a current view. Falls back to every listing under
-    agents/ whenever the active view can't be built, or is empty while
-    agents/ is not -- picking a listing should never look like "nothing here
-    yet" just because everything is snoozed or archived. --show-all skips
-    straight to that fallback on purpose, to reach one of those on demand.
+    show_all=False (the default) offers only the ACTIVE listings -- neither
+    delivered nor snoozed inside their follow-up window. That set comes back
+    from active_view.rebuild(), called fresh right here so a --build run that
+    skipped the home screen still sees current state; it is not read off
+    needs_attention/, which now lists the blocked subset and would offer
+    exactly the listings that cannot be built. Falls back to every listing
+    under agents/ whenever status.py can't be loaded, or nothing is active
+    while agents/ is not empty -- picking a listing should never look like
+    "nothing here yet" just because everything is snoozed or archived.
+    --show-all skips straight to that fallback on purpose, to reach one of
+    those on demand.
     """
     root = LISTINGS_ROOT
+    only = None
     if not show_all:
         status, _why = load_status()
         if status is not None:
             try:
                 rows, _truth, known = status.survey()
-                active_view.rebuild(rows, status.built_families,
-                                    blocker=getattr(status, "blocker", None),
-                                    scraped_keys=known)
+                active = active_view.rebuild(
+                    rows, status.built_families,
+                    blocker=getattr(status, "blocker", None),
+                    scraped_keys=known)
             except OSError:
                 pass
             else:
-                if brands(active_view.NEEDS_ATTENTION):
-                    root = active_view.NEEDS_ATTENTION
+                if active:
+                    only = set(active)
                 elif brands(LISTINGS_ROOT):
                     say("\n  Nothing needs attention right now -- showing "
                         "everything under agents/. --show-all skips straight "
                         "here next time.")
 
     actions, known = listing_actions()
-    bs = brands(root)
+    bs = active_level(only) if only else brands(root)
     brand = pick("Brand", [(b, b) for b in bs] or [], default=0,
                  extra=("+", "+ New brand")) if bs else "+"
     made_by_hand = False
@@ -2045,7 +2066,7 @@ def choose_listing(show_all=False):
         made_by_hand = True
         os.makedirs(os.path.join(LISTINGS_ROOT, brand), exist_ok=True)
 
-    ls = listings(brand, root)
+    ls = active_level(only, brand) if only else listings(brand, root)
     name = pick("Listing", [(x, x) for x in ls] or [], default=0,
                 extra=("+", "+ New listing")) if ls else "+"
     if name == "+":
@@ -2055,7 +2076,8 @@ def choose_listing(show_all=False):
         name = _new_folder_name(raw, "Listing name")
         made_by_hand = True
 
-    ags = agent_dirs(brand, name, root)
+    ags = (active_level(only, brand, name) if only
+           else agent_dirs(brand, name, root))
     labelled = [(a, f"{a}   -- {actions[(brand, name, a)]}"
                  if (brand, name, a) in actions else a) for a in ags]
     agent = pick("Agent", labelled or [], default=0,

@@ -7,6 +7,53 @@ Do not defer updates to end-of-session.
 
 ## Entries
 
+### 2026-09-04 — `needs_attention/` is a warning light, not a working set
+
+**What:** the tree now holds
+`needs_attention/<brand>/<listing>/<agent>/flag.txt` and nothing else. No
+symlinks. A folder is created only where a `flag.txt` is written, so a folder
+existing and a listing being blocked are the same fact — present means stuck,
+absent means fine, empty tree means nothing anywhere is stuck. `rebuild()`
+returns the ACTIVE keys, and `choose_listing()` takes that set instead of
+walking the tree; `active_level()` reads its three menu levels out of it.
+
+**Why:** the view was answering two questions with one directory — "what is
+blocked?" for the operator, and "what can I pick to build?" for the picker.
+Those are opposite sets. Every active listing was symlinked in whether or not
+anything was wrong, so the operator still had to open each one to find which
+needed them, and the file added in the entry below was a *second* signal layered
+on a folder that carried none. Making membership mean "blocked" collapses the
+two into one: the folder is the signal and the file is the reason.
+
+**Why the symlink had to go, not just the membership:** a symlink is a place you
+can edit *through*. With one, the same listing is reachable at two paths and the
+view looks like somewhere work happens. It is not: the fix is made in
+`agents/<brand>/<listing>/<agent>/` and the view is regenerated from it. Holding
+nothing but text files makes that unmistakable rather than merely documented.
+
+**The coupling this exposed, and the fix:** `choose_listing()` did
+`root = needs_attention/` and walked it for its menu — two lines, the only reader
+of that directory in the codebase. Point the tree at "blocked" without touching
+them and the default build menu becomes exactly the listings that cannot be
+built, while deleting the tree — which `flag.txt` explicitly invites — empties
+the menu entirely. `rebuild()` returning the active set is the decoupling: the
+tree now has no reader but the operator's eyes, which is what makes deleting any
+part of it genuinely inert. It was not inert before; it silently changed the
+picker until the next rebuild.
+
+**Why the return value is not what lands on disk:** it would be a smaller change
+to return what was written. But the two sets differ on purpose — active includes
+the buildable ones, blocked is a subset — and collapsing them is precisely the
+conflation this entry undoes.
+
+**Consequence accepted:** a listing blocked *only* by a suspected floor plan is
+flagged by `--auto` and then dropped by the next home-screen rebuild, which
+cannot afford to re-run the check (~62ms per photo against ~0.03ms for every
+other rung, ~45s across `agents/`). An empty tree therefore means "nothing
+cheaply-derivable is blocked". `FLAG_HEADER` says exactly that in the file
+itself, and `--auto`'s recap is the durable report. Caching the verdict per
+photo would close it and is the obvious next move if it ever bites.
+
 ### 2026-09-04 — A flagged listing says what it is waiting for
 
 **What:** `status.blocker()` is new: one ladder returning `(key, detail)` for the
