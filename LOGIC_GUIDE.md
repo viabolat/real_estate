@@ -168,7 +168,7 @@ holds to one. The dashboard's job ends at showing that something is due.
 subset of rung 5 — the sets are nested, not disjoint. Two filters would list
 every due listing twice: once under a heading meaning "leave it alone" and once
 under one meaning "act". That is the duplicate-send shape from 2026-09-02, where
-two agents received a byte-identical second email. A single first-match ladder
+three agents received a byte-identical second email. A single first-match ladder
 makes the rungs a partition, which is the same reason `needs_attention/` orders
 `archived > snoozed > active`. There is no eighth rung: "signed off" has no
 derivable signal, and inventing a marker for it is what
@@ -746,7 +746,9 @@ walks past-due leads alongside uncontacted ones; `status.next_action()` reports
 2026-08-19) and `55 Lagrange St Unit 1705` (2026-08-26) had each received a **second
 copy of their original email** on 2026-09-02 — same subject, same body. The only
 one that read like a real follow-up, `46 Beacon St. #5`, had been written by hand
-outside the tool. `needs_attention/` was doing its job resurfacing those listings
+outside the tool. *(Corrected 2026-09-04: there were three duplicates, not two —
+`2 Commonwealth Ave` went out at 17:21:42, a minute before 9 W Cedar's 17:22:17, and
+was missing from this account until its thread surfaced two days later.)* `needs_attention/` was doing its job resurfacing those listings
 after the 5-day window, but the folder held exactly one artifact and both send-side
 rungs filtered on `contacted(...)`, so a resurfaced lead had no rung to land on. The
 tool offered the first-contact draft or nothing. Underneath it, `contacted_at()` read
@@ -764,9 +766,58 @@ sends automatic rather than merely easy.
 
 **Accepted risks:** `contacted.csv` now has rows whose meaning depends on order, so a
 hand-sorted or hand-deduplicated file would change behaviour — acceptable, since
-`record_contacted()` is the only writer and it only appends. The three duplicate sends
+`record_contacted()` is the only writer and it only appends. The duplicate sends
 already made are not retro-recorded: doing so would invent send times, and the
-follow-up window is a prompt, not an audit trail.
+follow-up window is a prompt, not an audit trail. *(Superseded 2026-09-04 — the
+send times turned out not to need inventing; see the entry below.)*
+
+---
+
+### 2026-09-04 — A real send time is not an invented one, so the backfill happened
+
+**What:** `contacted.csv` gained six rows for sends made outside the tool, every one
+written through `record_contacted(..., when=...)` at its real send time rather than by
+hand. Three were the unrecorded 2026-09-02 burst — `2_commonwealth_ave` at `17:21:42`,
+`9_w_cedar_st` at `17:22:17`, `46_beacon_st_5` at `17:23:15` — and three were follow-ups
+sent from Thunderbird the same afternoon this entry was written: `20_paragon_rd`
+`15:14:26`, `101_hackensack_rd` `15:16:10`, `29_keystone_st` `15:17:08`. This reverses
+the last clause of the 2026-09-02 entry above, and corrects its count: the burst was
+three duplicates, not two.
+
+**Why:** that clause refused the backfill on one ground: it "would invent send times."
+The operator then produced the Thunderbird Sent headers, which carry the exact times in
+`+0300` — the same zone this machine writes every other row in. Nothing had to be
+invented, so the stated reason for the refusal did not apply. `record_contacted()`'s
+`when` parameter already existed for precisely this case and says so in its docstring:
+a lead sent from a client's own mail app is backfilled with its real send time rather
+than the moment someone got around to recording it. The cost of leaving them out was
+concrete — both read as overdue since August, and the failure mode the 09-02 entry
+exists to prevent is a third copy of an email that has already gone twice.
+
+**Alternatives rejected:** *record only `9_w_cedar_st`* — its date was the one already
+written down here, but the headers covered both equally, so the asymmetry was in this
+file's knowledge, not in the evidence. *Record at `T00:00:00` to flag "date known, time
+not"* — proposed before the headers surfaced; a placeholder clock time is exactly the
+invention the original clause objected to, and it would have been wrong by five hours.
+*Amend the 09-02 stanza in place* — a decision log that edits its own history stops
+being one; the old clause stays, with a pointer.
+
+**Accepted risks:** `contacted.csv` now holds timestamps at three levels of provenance
+and nothing in the file says which is which — rows machine-stamped at the moment of
+recording (`55_lagrange_st_unit_1705`'s duplicate is one, recorded `2026-09-03T00:12:10`
+in the ordinary rung-5 batch, hours after it was sent), rows backfilled to the second
+from mail headers, and the oldest hand-entered rows carrying `:00` seconds, at least one
+of them wrong: `9_w_cedar_st`'s first-contact row reads `2026-08-19T13:48:00` against a
+header of `21:48:43 +0300`, eight hours off. Nothing reads the clock time
+(`_follow_up_date()` adds five days and formats `%Y-%m-%d`), so this is cosmetic rather
+than behavioural — but a future reader should not mistake the file for a uniformly
+sourced audit trail. It is a set of prompts, some with better provenance than others.
+
+The deeper risk is the one `2_commonwealth_ave` exposed: a send made outside the tool is
+invisible until someone happens to open the thread. It went unrecorded and uncounted for
+two days, in the middle of the incident written up to prevent exactly it, and only
+surfaced because its thread was pasted in for an unrelated reason. Nothing here fixes
+that — the ledger still only knows what it is told.
 
 ---
 

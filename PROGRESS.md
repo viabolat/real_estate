@@ -86,7 +86,7 @@ nothing is stored: `status.survey()`/`audit()`, `tour.stage()`/`sample_cuts()`/
 
 The ladder is ordered highest-first, which is what keeps it a partition:
 `followup_due()` already implies contacted, so a due listing is rung 6 and never
-also rung 5. Rendering the nested sets as two independent filters is how two
+also rung 5. Rendering the nested sets as two independent filters is how three
 agents got the same email twice on 2026-09-02.
 
 Three refusals, each with a test: it holds no writer (its only `open()` is

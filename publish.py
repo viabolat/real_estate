@@ -82,7 +82,7 @@ and contacted_at() returns the latest. followup_due() reads that against
 follow_up_date(), so a lead past its window is drafted a SECOND, differently
 worded email (outreach/followup.txt -> outreach_followup.txt, write_followup()),
 pointing at the link recorded_link() recovers from links.csv rather than a fresh
-upload. Sending outreach_draft.txt twice is a byte-identical duplicate, and two
+upload. Sending outreach_draft.txt twice is a byte-identical duplicate, and three
 agents got one before this existed: a-follow-up-is-its-own-draft-and-its-own-row.md.
 """
 
@@ -598,7 +598,7 @@ def contacted_at(brand, listing, agent):
     # follow-up could never re-arm the 5-day window: follow_up_date() kept
     # answering with a date already in the past, the active set kept
     # resurfacing the listing, and the operator kept being handed the same
-    # first-contact draft. That is how two agents received a byte-identical
+    # first-contact draft. That is how three agents received a byte-identical
     # duplicate of an email from two weeks earlier. Latest row wins.
     marks = sorted(r.get("marked_at", "").strip() for r in rows
                    if r.get("brand", "").strip() == brand
@@ -693,7 +693,7 @@ def write_followup(listing_dir, url):
     reason: active_view's window resurfaces a contacted listing in the build
     picker once its follow-up date passes -- that is what the 5 days are FOR. But the only artifact
     in the folder was outreach_draft.txt, the first-contact draft, so following
-    up meant sending that same email a second time. Two agents received a
+    up meant sending that same email a second time. Three agents received a
     byte-identical duplicate on 2026-09-02 before this existed. The follow-up
     is drafted automatically, like the first contact; sending it stays human
     (the-draft-is-automatic-the-send-is-not.md).

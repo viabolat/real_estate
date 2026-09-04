@@ -233,7 +233,7 @@ class AFollowUpIsItsOwnDraftAndItsOwnRow(unittest.TestCase):
     The shipped failure: contacted_at() returned the FIRST matching row, so a
     recorded follow-up could never move the window forward. needs_attention/
     kept resurfacing the listing, the only draft in the folder was the
-    first-contact one, and two agents received a byte-identical duplicate of an
+    first-contact one, and three agents received a byte-identical duplicate of an
     email from two weeks earlier.
     """
 

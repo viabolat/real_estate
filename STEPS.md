@@ -548,7 +548,7 @@ re-published — and asks whether you sent it. Saying yes appends a **second** r
 `contacted.csv`, which re-arms the 5-day window so it snoozes again instead of
 resurfacing every render. Send the follow-up, never the original: sending
 `outreach_draft.txt` twice is a byte-identical duplicate, which is what happened to
-two agents on 2026-09-02. See
+three agents on 2026-09-02. See
 [`a-follow-up-is-its-own-draft-and-its-own-row`](_rules/a-follow-up-is-its-own-draft-and-its-own-row.md). Either way
 the result shows up as a `CONTACTED` column in `status.py`'s roll-up and in
 `leads.html`, which also gets a derived `FOLLOW UP` column — 5 days after
@@ -581,7 +581,7 @@ dashboard disagree about a listing, the dashboard is wrong.
 A listing appears on exactly one rung, tested highest-first. That matters most
 between 5 and 6: a follow-up-due listing is *also* a contacted one, so showing
 both would list it under a heading that means "leave it alone" and one that
-means "act" — which is how two agents got the same email twice on 2026-09-02.
+means "act" — which is how three agents got the same email twice on 2026-09-02.
 
 **Three things it deliberately will not do.**
 
