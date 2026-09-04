@@ -42,7 +42,8 @@ the one thing standing between it and a deliverable — then offers six things:
 | **6** | Open the dashboard | the same rows in a browser, read-only, §the dashboard |
 
 Which dumps are pending is worked out by checking whether
-`agents/<brand>/<listing>/<agent>` exists. There is no marker file and nothing to
+`agents/<brand>/<listing>/<agent>` exists, over every `.txt` and `.json` in
+`scraper/dumps/`. There is no marker file and nothing to
 tidy between runs — delete a listing folder and its dump is offered again.
 
 `python3 tour.py --build` skips the screen when you already know the listing.
@@ -64,11 +65,16 @@ listing, before writing anything.
 Menu item **2** does this for you. The command behind it:
 
 ```bash
-python3 scraper/run.py            # every *.txt in scraper/dumps/
+python3 scraper/run.py            # every *.txt and *.json in scraper/dumps/
 python3 scraper/run.py one.txt    # or just the one
 ```
 
-Paste one listing per file into `scraper/dumps/`. **Never two in one file** — the
+Paste one listing per file into `scraper/dumps/`, saved as `.txt` or `.json`. Both
+are read as raw text by the same regexes — the `__NEXT_DATA__` blob saved on its own
+is the same bytes the full page dump carries inside it — so the extension decides
+only what is picked up, never how it is parsed. `scraper/photos.py`'s `is_dump()` is
+the only place that list lives, so the home screen's pending count and
+`scraper/run.py` cannot disagree about a file. **Never two in one file** — the
 parsers take the first match in the whole text, so a concatenated file puts the first
 listing's agent name and phone on the second listing's photos, with nothing raised.
 A dump that is not a listing page (empty, half-copied, wrong tab) is refused and

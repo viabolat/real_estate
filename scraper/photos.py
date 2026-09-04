@@ -143,6 +143,28 @@ def jpeg_size(path):
 UNASSIGNED_AGENT = "unassigned_agent"
 
 
+DUMP_EXTENSIONS = (".txt", ".json")
+
+
+def is_dump(name: str) -> bool:
+    """True for a filename in dumps/ that is offered to the parsers at all.
+
+    reason: the same answer is needed in two places -- run.py picking a folder's
+    dumps up, and tour.py deciding which have no folder yet -- and a mismatch
+    between the two lists reads as a dump that imports fine but is never
+    offered, or is offered forever after it was imported. One predicate, both
+    callers, exactly as target_for() is one namer for both.
+
+    .json is accepted beside .txt because the parsers are regexes over the whole
+    text and never over parsed HTML: the __NEXT_DATA__ blob saved on its own is
+    the same bytes the page dump carries inside it. Nothing else is guessed at
+    -- the extension only decides what is READ; whether a file is a listing is
+    still target_for()'s refusal.
+    """
+    return (not name.startswith(".")
+            and name.lower().endswith(DUMP_EXTENSIONS))
+
+
 def target_for(text: str):
     """(brand, listing, agent) -- the folder this dump scaffolds -- or None if
     it is not one.

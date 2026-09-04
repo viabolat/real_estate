@@ -91,6 +91,45 @@ class TestUnimportedDumps(unittest.TestCase):
         self.assertEqual([p[0] for p in self.tour.unimported_dumps()],
                          ["paste1.txt"])
 
+    def test_a_json_dump_is_offered_the_same_as_a_txt_one(self):
+        """Both extensions are read as raw text by the same regexes."""
+        with open(os.path.join(self.dumps, "paste3.json"), "w") as f:
+            f.write('{"streetAddress":"9 W Cedar","zpid":"333",'
+                    '"brokerName":"Json Realty","agentName":"A Person"}')
+        pending = {p[0]: p[1:] for p in self.tour.unimported_dumps()}
+        self.assertEqual(pending["paste3.json"],
+                         ("json_realty", "9_w_cedar", "a_person"))
+
+    def test_only_txt_and_json_are_read(self):
+        """A README or a stray screenshot in dumps/ is not a dump."""
+        for name in ("notes.md", "screenshot.png", ".hidden.txt"):
+            with open(os.path.join(self.dumps, name), "w") as f:
+                f.write(DUMP)
+        self.assertEqual([p[0] for p in self.tour.unimported_dumps()],
+                         ["paste1.txt"])
+
+    def test_the_home_screen_and_run_py_pick_up_the_same_files(self):
+        """One predicate, both callers -- photos.is_dump().
+
+        reason: the extension list used to live inline in tour.py AND in
+        run.py's dumps_in(). A file only one of them accepted would either be
+        offered as pending forever -- run.py never imports it, so the folder
+        never appears -- or imported by a batch run and never counted. The
+        naming answer is already shared through target_for(); this is the same
+        argument one level earlier.
+        """
+        with open(os.path.join(self.dumps, "paste3.json"), "w") as f:
+            f.write('{"streetAddress":"9 W Cedar","zpid":"333",'
+                    '"brokerName":"Json Realty","agentName":"A Person"}')
+        with open(os.path.join(self.dumps, "notes.md"), "w") as f:
+            f.write(DUMP)
+        run = helpers.scraper_module("run")
+        self.assertEqual(
+            [os.path.basename(d) for d in run.dumps_in(self.dumps)],
+            [p[0] for p in self.tour.unimported_dumps()],
+            "scraper/run.py and the home screen disagree about which files in "
+            "dumps/ are dumps. Both must go through photos.is_dump().")
+
     def test_no_source_file_records_processed_dumps(self):
         """A guard on the shape, not just on this implementation.
 

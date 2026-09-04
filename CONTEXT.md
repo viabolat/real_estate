@@ -33,7 +33,7 @@ is worth answering on photos that are not yet good enough to build with.
 | Question | Answered by | Never by |
 |---|---|---|
 | Which photos, in what order? | sorting `photos/` filenames | a manifest or an order key |
-| Which dumps are still unimported? | whether `agents/<brand>/<listing>/<agent>` exists | a marker file |
+| Which dumps are still unimported? | whether `agents/<brand>/<listing>/<agent>` exists, for every `.txt`/`.json` in `scraper/dumps/` | a marker file |
 | Which run is this listing on? | what is in `out/` — nothing / `sample_` / `tour_`, falling back to `outreach/links.csv` when `out/` has neither | a stage key in `config.json` |
 | Has it been published? | `outreach/links.csv`, read by header name | a marker file |
 | Can the stitch be reused? | `.last_build.json` vs `photo_state()` | assumption |

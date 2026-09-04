@@ -7,6 +7,41 @@ Do not defer updates to end-of-session.
 
 ## Entries
 
+### 2026-09-04 — A dump is a `.txt` or a `.json`, decided in one place
+
+**What:** `scraper/dumps/` now accepts `.json` beside `.txt`. `scraper/photos.py`
+grew `is_dump(name)` (and `DUMP_EXTENSIONS`), and both readers of that folder --
+`scraper/run.py`'s `dumps_in()` and `tour.py`'s `unimported_dumps()` -- call it
+instead of testing `.endswith(".txt")` inline. No parser changed.
+
+**Why:** the parsers were never HTML parsers -- they are first-match regexes over
+the whole text, and the page dump's value is the `__NEXT_DATA__` blob embedded in
+it. That blob saved on its own, as a `.json`, is the same bytes and parses
+identically (checked: the URLs in an existing dump carry unescaped slashes and the
+inner quotes are already backslash-escaped, so both shapes hit the same regexes).
+The extension was the only thing refusing it.
+
+**Why one predicate rather than two `.endswith` calls:** the two readers answer the
+same question for different reasons -- run.py to pick files up, tour.py to count
+what has no folder yet. A list that drifted between them fails silently in both
+directions: a file only tour.py accepts is offered as pending forever because the
+batch run never imports it, and a file only run.py accepts is imported without ever
+being counted. That is the `target_for()` argument -- one naming authority -- one
+level earlier, so it got the same treatment. `scraper/run.py` had said "no shared
+code, no coupling"; it now imports exactly one predicate, and its docstring says so.
+
+**Alternatives rejected:** *sniff the content instead of the extension* -- the
+content check already exists and is `target_for()`'s `None`; an extension filter is
+about what is worth opening, and reading every file in a folder that may hold a
+README or a screenshot to find out is a different, worse rule. *Accept every
+extension* -- same problem, and `dumps/` is a paste-anything folder. *Convert `.json`
+to `.txt` on import* -- a rename in the one folder the operator owns, to satisfy a
+filter that did not need to exist.
+
+**Accepted risks:** a `.json` that is a config file someone parked in `dumps/` is now
+opened and read. It is refused by `target_for()` exactly as a junk `.txt` is, so the
+cost is one file read.
+
 ### 2026-09-03 — The dashboard is a socket, not a file, and it reads only
 
 **What:** `dashboard.py` — every lead and listing on one page in a browser, on a

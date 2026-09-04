@@ -43,6 +43,12 @@ There is no marker file and no manifest, for the same reason photo order lives i
 the filename prefix: a record kept beside the artifacts drifts out of sync with
 them and is then wrong in a way nothing detects.
 
+A dump is a .txt or a .json file in scraper/dumps/ -- both read as raw text by
+the same regexes, since the __NEXT_DATA__ blob saved on its own is the same
+bytes the full page dump carries inside it. scraper/photos.py's is_dump() is the
+only place that list lives, so this screen and scraper/run.py cannot disagree
+about which files are dumps.
+
 Which RUN a listing is on is derived the same way, from out/:
 
     nothing in out/     -> run 1: build the three watermarked sample_ cuts,
@@ -1212,7 +1218,11 @@ def unimported_dumps():
         return []
     out = []
     for name in sorted(os.listdir(DUMPS)):
-        if not name.lower().endswith(".txt") or name.startswith("."):
+        # reason: which extensions are dumps at all is photos.is_dump()'s
+        # answer, not a second copy here -- run.py picks the same files up, and
+        # a list that drifted would offer an import run.py never makes, or hide
+        # one it does. Same argument as target_for() below.
+        if not status._photos.is_dump(name):
             continue
         try:
             with open(os.path.join(DUMPS, name), encoding="utf-8",
@@ -1338,8 +1348,8 @@ def import_dumps():
     """Rung zero: turn the pending dumps into listings. run.py, as-is."""
     pending = unimported_dumps()
     if not pending:
-        say("\n  Nothing pending. Save a Zillow page dump as a .txt in "
-            "scraper/dumps/ first.")
+        say("\n  Nothing pending. Save a Zillow page dump as a .txt or a "
+            ".json in scraper/dumps/ first.")
         return
     say(f"\n  This downloads photos for {len(pending)} listing(s) and appends "
         f"to leads.csv.\n  It never overwrites an existing brand.json or "
