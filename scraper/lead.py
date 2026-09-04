@@ -44,7 +44,8 @@ CSV_FIELDS = [
 # Keys long/unique enough that inserting a newline before them won't
 # accidentally slice through the middle of an unrelated word.
 SAFE_KEYS = [
-    "agentName", "agentEmail", "agentPhoneNumber", "brokerName", "mlsId", "mlsName",
+    "agentName", "agentEmail", "agentPhoneNumber", "brokerName", "brokerageName",
+    "mlsId", "mlsName",
     "listingAttributionContact", "notMLSSourcedListing", "displayname", "businessname",
     "badgetype", "phoneareacode", "profileurl", "ratingaverage", "recentsales",
     "reviewcount", "streetAddress", "zipcode", "homeType", "homeStatus", "zpid",
@@ -70,6 +71,35 @@ def field(text: str, key: str):
         return None
     val = m.group(1).strip()
     return None if val in ("", "null") else val
+
+
+def broker_name(text: str):
+    """The listing brokerage, from whichever key this dump's listing shape uses.
+
+    reason: the same two-shapes split that hid every Showcase listing's photos
+    also renames its attribution. A regular listing (GraphQL ForSalePriorityQuery)
+    carries `brokerName`; a Showcase listing (ViewShowcasePriorityQuery) carries
+    `brokerageName` and no `brokerName` at all -- so four listings scraped as
+    agents/unknown_brokerage/<address>/unassigned_agent while the payload plainly
+    said "Coldwell Banker Realty - Newton". `unknown_brokerage` is the placeholder
+    for a name that is genuinely absent, not for one filed under a second key.
+
+    Fallback, not replacement, for the same reason CC_FT_PATTERN is: measured on
+    the nine dumps this was built from, the two keys are disjoint -- every regular
+    dump has `brokerName` and no `brokerageName`, every Showcase dump the reverse
+    -- so a regular listing never reaches the second lookup and its broker slug,
+    which is a folder name and therefore load-bearing, cannot move.
+
+    One reader because there are three callers -- the leads.csv row, target_for()'s
+    folder name, and the config.json brokerage -- and _rules/the-scrape-names-the-
+    folders.md makes the scrape the single naming authority. Three copies of this
+    lookup is three chances for the CSV and the folder to disagree.
+
+    agentName has no such second key: on a Showcase dump
+    `listingAgentAttributionContact` is null and no personal name appears
+    anywhere, so UNASSIGNED_AGENT there is correct and not a gap to close.
+    """
+    return field(text, "brokerName") or field(text, "brokerageName")
 
 
 def extract_zip_city_state(text: str):
@@ -114,7 +144,7 @@ def extract_listing_agent(text: str) -> dict:
         "agent_name": field(text, "agentName"),
         "agent_email": field(text, "agentEmail"),
         "agent_phone": field(text, "agentPhoneNumber"),
-        "broker_name": field(text, "brokerName"),
+        "broker_name": broker_name(text),
         "mls_id": field(text, "mlsId"),
         "mls_name": field(text, "mlsName"),
     }

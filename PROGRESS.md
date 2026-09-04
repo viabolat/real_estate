@@ -65,6 +65,49 @@ for whatever is in flight, which expire on ship) and `.claude/settings.local.jso
 
 ## 2. BUILT
 
+### 2026-09-04 — Showcase listings returned zero photos; the warning that knew had been ignored for months
+
+`extract_photo_urls()` matched one Zillow URL family,
+`-uncropped_scaled_within_<w>_<h>.jpg`. Zillow serves two listing shapes and only
+one of them carries it: a **Showcase** listing (GraphQL `ViewShowcasePriorityQuery`)
+has no uncropped variant at all, only `-cc_ft_<w>.jpg` plus the `sc_`/`sr_`
+families. So roughly 40% of dumps parsed cleanly, downloaded nothing, and were
+set aside as failures while their payload held every photo URL.
+
+The fix is a second pass, never a wider regex: `CC_FT_PATTERN` runs after the
+uncropped pass and appends only the hashes it did not find. On all nine dumps on
+hand the cc_ft hash set is exactly equal to the uncropped set on every regular
+listing, in the same order, so regular output is byte-identical — verified
+against a captured before-list, not by eye. `59126324` still returns its same 32
+uncropped URLs; `464857207` went 0 → 33.
+
+`photos.py:370` already detected this and printed
+`WARNING: photoCount says 33 but found 0 photo URLs`, then continued. It had been
+firing on every Showcase listing for as long as they existed. That is now
+`photo_count_verdict()`: zero URLs against a non-zero `photoCount` exits 4 before
+any folder or JSON is written, any other disagreement — including *more* than
+`photoCount`, which is what a too-broad pattern looks like — stays a warning.
+Exit 4 and not 2 so "unknown URL variant" stays tellable from "not a listing".
+`run.py` classifies both as a failed dump and keeps going.
+
+The same split renames attribution, so it is read the same way. A Showcase
+listing carries `brokerageName` and no `brokerName`, so all four slugged to
+`agents/unknown_brokerage/<address>/unassigned_agent` — one such tree had
+already been written to disk with zero photos in it, and was found parked in the
+scrape tooling's `failed/` folder. `lead.broker_name()` now falls back, as one
+reader for all three callers (the `leads.csv` row, `target_for()`'s folder name,
+the `config.json` brokerage), because the scrape is the single naming authority
+and three copies is three chances for the CSV and the folder to disagree. The
+two keys are disjoint on every dump measured, so a regular listing never reaches
+the fallback and no existing folder slug moves. `agentName` has no second key —
+`listingAgentAttributionContact` is null on a Showcase payload — so
+`UNASSIGNED_AGENT` stays correct there.
+
+New: `_rules/a-second-listing-shape-is-a-fallback-never-a-replacement.md`, and
+`tests/test_photo_extraction.py` — 23 tests over two real dumps, one of each
+shape, committed to `tests/fixtures/` with PII redacted after asserting the
+redaction left the URL list unchanged. URL extraction had no test before this.
+
 ### 2026-09-03 — `dashboard.py`: the leads and listings in a browser, read-only
 
 `python3 dashboard.py`, or **6. Open the dashboard** from `tour.py`'s home

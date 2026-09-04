@@ -821,6 +821,65 @@ that — the ledger still only knows what it is told.
 
 ---
 
+### 2026-09-04 — A second photo URL family is a fallback, not a wider regex
+
+**What:** `extract_photo_urls()` keeps `PHOTO_PATTERN` (`-uncropped_scaled_within_`)
+exactly as it was and runs it first; a new `CC_FT_PATTERN` (`-cc_ft_<w>.jpg`) then
+appends only the hashes that pass did not find. `photo_count_verdict()` splits the
+old print into three: zero URLs against a non-zero `photoCount` is now a hard exit 4
+before anything is written, any other disagreement stays the warning, and an absent
+or zero `photoCount` is silent.
+
+**Why:** Zillow serves two listing shapes. A regular listing
+(`ForSalePriorityQuery`) carries both URL families; a **Showcase** listing
+(`ViewShowcasePriorityQuery`) carries no uncropped variant at all. So roughly 40% of
+dumps returned zero photos and were set aside as failures while their payload held
+every URL — four are still parked outside the repo, holding 33, 25, 35 and 27
+photos. The guard that should have caught this existed: `main()` printed
+`WARNING: photoCount says 33 but found 0 photo URLs` and carried on. It had been
+firing on every Showcase listing since Showcase listings existed. A warning that
+fires constantly and changes nothing is not a guard — the run still reported
+success and still scaffolded the folder, so the only visible symptom was an empty
+gallery found later.
+
+**Alternatives rejected:** *One regex over both families, ranked by width* — the
+obvious shape, and the dangerous one. Both families exist at width 1536 on a
+regular listing, so the tie would resolve arbitrarily and could hand back cropped
+variants in place of uncropped originals across the entire existing photo library —
+a silent, repo-wide quality regression to fix a download failure. The two-pass
+version is provably inert on regular listings instead: measured across all nine
+dumps on hand, the cc_ft hash set is exactly equal to the uncropped set on every
+regular listing and in the same first-appearance order, so the fallback appends
+nothing and output is byte-identical. *Widening to every `zillowstatic` variant as
+insurance against the next unknown one* — `sc_`/`sr_` over-collect by 8–15 images
+per Showcase listing, including images that are not gallery photos. That would ship
+junk in a client gallery while still passing a count check. Narrow match plus a
+loud failure covers the same risk without inventing a new one. *Leaving the zero
+case as a warning* — that is what was already there, and it is what let this run
+for months.
+
+**Accepted risks:** The validation sample is one region, one date, for-sale
+listings only — nine dumps, six regular and four Showcase. Sold, pending, auction,
+new-construction and FSBO shapes are untested, as are listings with genuinely zero
+photos. `photo_count_verdict()` is the cover for that: an unknown third variant now
+costs one failed dump in one run instead of a folder of empty galleries discovered
+weeks later. Separately, the fallback's ordering is only correct because the two
+families are equal or disjoint in practice — a listing that genuinely mixed them
+would get its cc_ft photos appended after the uncropped block rather than in true
+gallery position. None exists in the sample, and the docstring says so rather than
+the code pretending to handle it.
+
+The Showcase shape also renames its attribution fields, and the same reasoning
+applies: `lead.broker_name()` reads `brokerName` and falls back to
+`brokerageName`, as one reader for all three callers, because the scrape is the
+single naming authority and a broker slug is a folder name. The two keys are
+disjoint across every dump measured, so a regular listing never reaches the
+fallback. `agentName` has no second key — on a Showcase payload
+`listingAgentAttributionContact` is null and no personal name appears — so
+`UNASSIGNED_AGENT` stays correct there rather than being a gap to close.
+
+---
+
 ### [YYYY-MM-DD] — [Decision Title]
 <!-- Template. Copy this stanza above for the next entry; leave this one empty. -->
 **What:**

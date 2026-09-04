@@ -78,7 +78,14 @@ the only place that list lives, so the home screen's pending count and
 parsers take the first match in the whole text, so a concatenated file puts the first
 listing's agent name and phone on the second listing's photos, with nothing raised.
 A dump that is not a listing page (empty, half-copied, wrong tab) is refused and
-writes nothing; the run names it at the end and exits non-zero. Re-running the folder
+writes nothing; the run names it at the end and exits non-zero. A dump whose
+`photoCount` says it has photos but from which **no** photo URL can be read is
+refused the same way (exit 4 rather than 2, so the two are tellable apart by
+hand) — that combination means Zillow is serving a URL variant the scraper does
+not know, not that the listing is odd, and it is refused before any folder or
+JSON is written so there is nothing half-imported to clean up. Finding *some* but
+not all of them, or more than `photoCount`, is still only a warning; the photos
+that were found are real. Re-running the folder
 is safe — duplicate lead rows are skipped, photos already on disk are skipped, and
 neither JSON is ever overwritten — so there is nothing to move or tidy between runs.
 
@@ -1397,6 +1404,8 @@ back end. See `IDEA.md` §2.
 | `WARNING: watermark upscales N.Nx` | `viabolat.png` too small | Supply >= 864px on the long edge |
 | `sample_` files identical to `tour_` | Watermark file missing | Check the `sample watermark:` line in the run output |
 | `--finish-only` did a full rebuild | No `work_silent.mp4` to reuse | Expected fallback. It says so and continues. |
+| `photoCount says N but no photo URLs matched` | Zillow is serving a photo URL variant `PHOTO_PATTERN`/`CC_FT_PATTERN` do not cover | Exit 4, nothing written. Add the new family as a further **fallback** pass in `scraper/photos.py` — never by widening the existing pattern. See `_rules/a-second-listing-shape-is-a-fallback-never-a-replacement.md` |
+| `WARNING: photoCount says N but found M photo URLs` | Partial or over-broad match | The M found are real and were downloaded. Over-collection (M > N) means a pattern is too broad |
 | `WARNING: N of M filenames do not start with a number` | Photos still carry CDN or camera names | Rename to `01_`, `02_`, ... **before** delivering. The order is alphabetical, not yours. See §2 |
 | Rooms play in the wrong order | Prefixes wrong, or a rename was rebuilt with `--finish-only` | Fix the prefixes, then a full rebuild with `--keep-work` |
 | `WARNING: --finish-only reuses that earlier stitch` | Photos may have changed since `work_silent.mp4` was made | If they did, drop the flag. If they did not, ignore it. |

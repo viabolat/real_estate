@@ -53,12 +53,13 @@ reading *prose only* is a rule nothing enforces. That is the list worth shrinkin
 
 <!-- RULE-TABLE:start -->
 
-46 rules.
+47 rules.
 
 | Area | Rule | Guarded by |
 |---|---|---|
 | interface | [Anything with the same answer on every listing is inherited or derived, and never becomes a control](nothing-invariant-becomes-a-control.md) | *prose only* |
 | interface | [`dashboard.py` renders derived state and writes nothing — not to disk, not to a CSV, not to the network](the-dashboard-reads-it-never-writes.md) | `tests/test_dashboard.py` |
+| photos | [A second listing shape is read as a fallback, never as a replacement](a-second-listing-shape-is-a-fallback-never-a-replacement.md) | `tests/test_photo_extraction.py` |
 | photos | [A soft cut is not MLS-ready, and its name will not tell you](a-soft-cut-is-not-mls-ready.md) | `tests/test_status_naming.py` |
 | photos | [Below-par photos build, and the shortfall is reported, never encoded in a filename](below-par-photos-build-and-are-reported.md) | `tests/test_naming.py` |
 | photos | [A photo set too large for `max_total_seconds` is trimmed by quality, not halted](excess-photos-are-trimmed-by-quality-never-halted.md) | `tests/test_photo_quality.py` |
@@ -104,6 +105,6 @@ reading *prose only* is a rule nothing enforces. That is the list worth shrinkin
 | pii | [The PII gate runs itself, and an unwired gate is reported, never assumed](the-pii-gate-runs-itself.md) | `tests/test_hook_wired.py` |
 | docs | [Docs do not go stale](docs-do-not-go-stale.md) | `tests/test_photo_order.py` |
 
-Unguarded rules: 5 of 46.
+Unguarded rules: 5 of 47.
 
 <!-- RULE-TABLE:end -->
