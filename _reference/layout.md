@@ -149,7 +149,18 @@ flattened agent-keyed one:
 
 ```
 needs_attention/<brand>/<listing>/<agent>   -> ../../../agents/<brand>/<listing>/<agent>
+needs_attention/<brand>/<listing>/flag.txt  (only when something blocks a build)
 ```
+
+A listing that cannot be built as it sits also gets a `flag.txt` beside its
+symlink, naming what is missing and the one command that fixes it — derived from
+`status.blocker()`, written only while the problem is still true, and wiped with
+the rest of the tree on the next rebuild. A listing with nothing blocking it gets
+no file, so the presence of one is the signal. Delete it, the folder, or all of
+`needs_attention/` freely: the next run rewrites whatever is still true. The one
+thing it cannot report is a photo that looks like a floor plan — that costs an
+ffmpeg decode per photo, far too slow for a view rebuilt on every roll-up, so
+`tour.py --auto` hands its own finding in instead.
 
 Only **active** listings get a symlink here — not yet contacted, or contacted and
 past the follow-up window, and with no `tour_` cut yet. A listing just marked

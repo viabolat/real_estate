@@ -72,8 +72,17 @@ a-confirmed-sample-publish-clears-its-own-cuts.md. --sweep-published-samples
 [--yes] applies that same cleanup retroactively, across every listing, dry-run by
 default.
 
---auto's own halts mean a batch run usually ends with several listings built and
-several still flagged. --publish-pending is the matching batch entry for what is
+--auto never stops the batch. A listing it cannot finish is skipped and the run
+carries on to the next one, so a batch usually ends with several built and
+several still flagged. The closing summary names all of them -- built, flagged,
+failed -- with what each flagged listing is missing and the one command that
+fixes it, and the same two lines are written into
+needs_attention/<brand>/<listing>/flag.txt so they are still there tomorrow.
+Only the floor-plan finding travels that way explicitly (--auto hands it to
+active_view.rebuild(extra=...)); everything else the view re-derives for itself
+through status.blocker().
+
+--publish-pending is the matching batch entry for what is
 left once the built ones are ready: it walks every listing with a sample_ cut in
 out/ that links.csv has no record of yet, opens the branded cut for a look (macOS
 `open`; elsewhere it just prints the path) and then runs the exact same
@@ -1338,7 +1347,9 @@ def roll_up(status):
     except OSError as e:
         say(f"\n  prospects/ index did not rebuild ({type(e).__name__}: {e}).")
     try:
-        active_view.rebuild(rows, status.built_families)
+        active_view.rebuild(rows, status.built_families,
+                            blocker=getattr(status, "blocker", None),
+                            scraped_keys=known)
     except OSError as e:
         say(f"\n  needs_attention/ index did not rebuild "
             f"({type(e).__name__}: {e}).")
@@ -1506,6 +1517,29 @@ def auto_targets(scope=None):
             if stage(os.path.join(LISTINGS_ROOT, brand, name, agent)) == "sample"]
 
 
+class Outcome(str):
+    """"built" / "flagged" / "error", carrying why and what to do about it.
+
+    reason: --auto counted its outcomes and named none of them, so a run ending
+    "1 built, 2 flagged for review, 0 failed" left the operator to go and work
+    out which two, and what for. A str subclass rather than a tuple because the
+    outcome IS that string -- every caller and every test in test_auto_flow.py
+    compares it against a bare word, and the reason is provenance hung off it,
+    not a second value to unpack.
+
+    derivable: whether needs_attention/'s own rebuild can work this out on its
+    own. status.blocker() finds a missing logo or phone from the folder alone;
+    a photo that looks like a floor plan costs an ffmpeg decode per photo, so
+    --auto -- which has just paid for that pass -- hands it to the view rather
+    than making every home-screen render re-earn it.
+    """
+
+    def __new__(cls, value, missing="", fix="", derivable=True):
+        out = super().__new__(cls, value)
+        out.missing, out.fix, out.derivable = missing, fix, derivable
+        return out
+
+
 def _auto_build_one(brand, listing_dir, ignore_floorplan, ignore_missing_phone=False,
                      ignore_missing_logo=False):
     """Run one listing through --auto: the logo lookup, the phone check,
@@ -1515,7 +1549,9 @@ def _auto_build_one(brand, listing_dir, ignore_floorplan, ignore_missing_phone=F
     rule(os.path.relpath(listing_dir, ROOT))
     if not photos(listing_dir):
         say("  photos/ is empty -- nothing to build yet.")
-        return "error"
+        return Outcome("error", "photos/ is empty -- nothing was downloaded",
+                       "re-save the dump into scraper/dumps/, then: "
+                       "python3 scraper/run.py")
     offer_prefixes(listing_dir, auto=True)
     cfg = load_config(listing_dir, brand)
 
@@ -1547,7 +1583,8 @@ def _auto_build_one(brand, listing_dir, ignore_floorplan, ignore_missing_phone=F
     # human needs to look at.
     if not ignore_missing_phone and not (cfg.get("agent_phone") or "").strip():
         rel_config = os.path.relpath(os.path.join(listing_dir, "config.json"), ROOT)
-        say(f"\n  Halted -- no agent phone number in {rel_config}.\n"
+        say(f"\n  Skipped this listing -- no agent phone number in "
+            f"{rel_config}.\n"
             f"  The card and lower third would show no way to reach "
             f"{cfg.get('agent_name') or 'this agent'}.\n"
             f"  Add \"agent_phone\" there, then rerun:\n"
@@ -1555,10 +1592,14 @@ def _auto_build_one(brand, listing_dir, ignore_floorplan, ignore_missing_phone=F
             f"{os.path.relpath(listing_dir, LISTINGS_ROOT)}\n"
             "  If the number is genuinely unavailable, force through once "
             "with --ignore-missing-phone-check.")
-        return "flagged"
+        return Outcome(
+            "flagged", f"no agent_phone in {rel_config} -- the card would show "
+            f"no way to reach {cfg.get('agent_name') or 'this agent'}",
+            f'add "agent_phone" there, then: python3 tour.py --auto '
+            f"{os.path.relpath(listing_dir, LISTINGS_ROOT)}")
 
     if not ignore_missing_logo and not resolve(listing_dir, cfg.get("logo")):
-        say(f"\n  Halted -- no logo for {brand} at "
+        say(f"\n  Skipped this listing -- no logo for {brand} at "
             f"global_assets/logos/{brand}.png.\n"
             f"  The card would fall back to the type-only design.\n"
             f"  Add the file there, then rerun:\n"
@@ -1566,16 +1607,25 @@ def _auto_build_one(brand, listing_dir, ignore_floorplan, ignore_missing_phone=F
             f"{os.path.relpath(listing_dir, LISTINGS_ROOT)}\n"
             "  If this brokerage genuinely has no mark, force the "
             "type-only card through once with --ignore-missing-logo-check.")
-        return "flagged"
+        return Outcome(
+            "flagged", f"no logo for {brand} at "
+            f"global_assets/logos/{brand}.png -- the card would fall back to "
+            f"the type-only design",
+            f"add the file, then: python3 tour.py --auto "
+            f"{os.path.relpath(listing_dir, LISTINGS_ROOT)}")
 
     if run_build(listing_dir, ["--contact-sheet"]) != 0:
         say("  The contact sheet failed.")
-        return "error"
+        return Outcome("error", "the contact sheet failed to render",
+                       "run it alone to see ffmpeg's own error: "
+                       f"python3 tour.py --build "
+                       f"{os.path.relpath(listing_dir, LISTINGS_ROOT)}")
 
     if not ignore_floorplan:
         flagged = floorplan.detect(photo_paths(listing_dir))
         if flagged:
-            say(f"\n  Halted -- {len(flagged)} photo(s) look like a floor plan "
+            say(f"\n  Skipped this listing -- {len(flagged)} photo(s) look like "
+                "a floor plan "
                 "or site map:")
             for name, why in flagged:
                 say(f"    {name}  ({why})")
@@ -1584,7 +1634,13 @@ def _auto_build_one(brand, listing_dir, ignore_floorplan, ignore_missing_phone=F
                 f"{os.path.relpath(listing_dir, LISTINGS_ROOT)}\n"
                 "  A false positive can be forced through once with "
                 "--ignore-floorplan-check.")
-            return "flagged"
+            return Outcome(
+                "flagged",
+                f"{len(flagged)} photo(s) look like a floor plan or site map: "
+                + ", ".join(name for name, _why in flagged),
+                "delete the file(s) from photos/, then: python3 tour.py --auto "
+                f"{os.path.relpath(listing_dir, LISTINGS_ROOT)}",
+                derivable=False)
 
     preset = best_preset(report)
     lowres = preset is None
@@ -1595,11 +1651,48 @@ def _auto_build_one(brand, listing_dir, ignore_floorplan, ignore_missing_phone=F
         say(f"  Full rebuild: {reason}.")
     if run_build(listing_dir, flags) != 0:
         say("  The build failed. Intermediates were kept for inspection.")
-        return "error"
+        return Outcome("error", "the encode failed -- intermediates kept",
+                       "run it alone to see ffmpeg's own error: "
+                       f"python3 tour.py --build "
+                       f"{os.path.relpath(listing_dir, LISTINGS_ROOT)}")
     save_state(listing_dir, "delivery", cfg, preset)
     clear_review_artifacts(listing_dir)
     say(f"  Built {len(sample_cuts(listing_dir))} sample cut(s) in out/.")
-    return "built"
+    return Outcome("built",
+                   f"{len(sample_cuts(listing_dir))} sample cut(s) in out/")
+
+
+def _auto_recap(seen):
+    """Name every listing this run touched, grouped by what happened to it.
+
+    reason: the three counts above are the whole report today, so "2 flagged for
+    review" named neither listing nor reason and the operator had to go back
+    through the scrollback to find out which two and why. Only the listings THIS
+    run walked are listed -- the rest of needs_attention/ is not this summary's
+    business, and each flagged listing gets the same two lines written into its
+    own needs_attention/<brand>/<listing>/flag.txt.
+    """
+    groups = (("built", "Built"),
+              ("flagged", "Flagged -- nothing was built for these"),
+              ("error", "Failed"))
+    for kind, heading in groups:
+        rows = [(name, r) for name, r in seen if r == kind]
+        if not rows:
+            continue
+        say(f"\n{heading}")
+        for name, result in rows:
+            missing = getattr(result, "missing", "")
+            fix = getattr(result, "fix", "")
+            if kind == "built":
+                say(f"  {name}" + (f" -- {missing}" if missing else ""))
+                continue
+            say(f"  {name}")
+            if missing:
+                say(f"    missing: {missing}")
+            if fix:
+                say(f"    fix:     {fix}")
+    if any(r != "built" for _n, r in seen):
+        say("\nThe same detail is in needs_attention/<brand>/<listing>/flag.txt.")
 
 
 def auto_flow(args):
@@ -1644,22 +1737,33 @@ def auto_flow(args):
         return
 
     built = flagged = errors = 0
+    seen, extra = [], {}
     for brand, listing_dir in targets:
         result = _auto_build_one(brand, listing_dir, ignore_floorplan,
                                  ignore_missing_phone, ignore_missing_logo)
         built += result == "built"
         flagged += result == "flagged"
         errors += result == "error"
+        seen.append((os.path.relpath(listing_dir, LISTINGS_ROOT), result))
+        if not getattr(result, "derivable", True):
+            key = (brand, os.path.basename(os.path.dirname(listing_dir)),
+                   os.path.basename(listing_dir))
+            extra.setdefault(key, []).append(
+                (result.missing, result.fix))
 
     rule("Done")
     say(f"{built} built, {flagged} flagged for review, {errors} failed.")
+    _auto_recap(seen)
 
     status, _why = load_status()
     if status is not None:
         try:
-            rows, _truth, _known = status.survey()
+            rows, _truth, known = status.survey()
             prospects.rebuild(rows, status.slugify)
-            active_view.rebuild(rows, status.built_families)
+            active_view.rebuild(rows, status.built_families,
+                                blocker=getattr(status, "blocker", None),
+                                scraped_keys=known,
+                                extra=extra)
         except OSError as e:
             say(f"prospects/ or needs_attention/ index did not rebuild "
                 f"({type(e).__name__}: {e}).")
@@ -1914,8 +2018,10 @@ def choose_listing(show_all=False):
         status, _why = load_status()
         if status is not None:
             try:
-                rows, _truth, _known = status.survey()
-                active_view.rebuild(rows, status.built_families)
+                rows, _truth, known = status.survey()
+                active_view.rebuild(rows, status.built_families,
+                                    blocker=getattr(status, "blocker", None),
+                                    scraped_keys=known)
             except OSError:
                 pass
             else:

@@ -215,11 +215,19 @@ resolved anywhere — neither `config.json`/`brand.json`'s own `logo` nor the
 brand-slug lookup above — and would otherwise ship the type-only card without
 anyone deciding that on purpose. Third, whether a photo in `photos/` is a
 floor plan or whole-house layout image, which must never appear in the video.
-A hit on any halts just that listing — printed, never guessed at or deleted —
-and the rest of the batch keeps going. Fix `config.json`, add the logo file,
-or delete the photo by hand and rerun `--auto`, bare or scoped to that
-`brand/listing`; nothing about any halt is written anywhere, so re-running
-from the top is the entire resume mechanism. A false positive or a
+A hit on any skips just that listing — printed, never guessed at or deleted —
+and the rest of the batch keeps going. The run never stops early: the closing
+summary names every listing it touched, grouped into built, flagged and failed,
+with what each flagged one is missing and the command that fixes it. The same
+two lines are written into `needs_attention/<brand>/<listing>/flag.txt`, so the
+reason is still in front of you tomorrow without re-reading the scrollback.
+
+That file is the only thing a skip writes anywhere, and it is derived, not
+recorded: it exists while the problem is still true and is wiped with the rest
+of the view on the next rebuild. Nothing about it needs clearing, and deleting
+it changes nothing. Fix `config.json`, add the logo file, or delete the photo by
+hand and rerun `--auto`, bare or scoped to that `brand/listing` — re-running
+from the top is still the entire resume mechanism. A false positive or a
 genuinely-absent asset can be forced through once, per listing, with
 `--ignore-missing-phone-check`, `--ignore-missing-logo-check`, or
 `--ignore-floorplan-check` — all three need a scope, and none is ever allowed
@@ -602,6 +610,25 @@ already computes has passed — no separate step, nothing to undo. A listing wit
 `tour_` cut already built (delivered) drops out for good, the same way. Nothing
 in `agents/` moves or is renamed; `needs_attention/` is only symlinks, gitignored,
 regenerated on every roll-up the same way `prospects/` already is.
+
+When a listing is sitting there because something is missing — no logo, no agent
+phone, photos too small to build from — the reason is in the folder with it:
+
+```
+needs_attention/parkway_real_estate/18_thurlow_st/flag.txt
+
+  danielle_m_obrien
+    missing: no logo -- brand.json sets none and
+             global_assets/logos/parkway_real_estate.png does not exist
+    fix:     add global_assets/logos/parkway_real_estate.png, then:
+             python3 tour.py --auto parkway_real_estate/18_thurlow_st
+```
+
+The file is written only while that is still true. Fix it, run `tour.py` again,
+and it is simply not written back — there is nothing to clear out by hand. A
+listing with nothing blocking it never gets one. Deleting a `flag.txt`, a folder,
+or the whole of `needs_attention/` breaks nothing: the tree is wiped and rebuilt
+from `agents/` on every run.
 
 If a client replies before the follow-up date and you need to rebuild sooner:
 

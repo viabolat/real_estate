@@ -690,3 +690,81 @@ class AnUnsetBrandValueIsNotFrozenIntoTheListing(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheRunNamesWhatItDid(unittest.TestCase):
+    """--auto's closing summary names every listing it touched, and why.
+
+    reason: the run ended "1 built, 2 flagged for review, 0 failed" and stopped
+    there, so the operator knew three numbers and no names -- which listing was
+    built, which two were flagged, and what for, all had to be recovered from
+    the scrollback. Outcome carries the reason out of _auto_build_one() so the
+    summary can print it. See tour.py's Outcome and _auto_recap().
+    """
+
+    def setUp(self):
+        self.tour = helpers.tour_module()
+        self.said = []
+        self.prev = self.tour.say
+        self.tour.say = lambda msg="": self.said.append(str(msg))
+        self.addCleanup(setattr, self.tour, "say", self.prev)
+
+    def text(self):
+        return "\n".join(self.said)
+
+    def test_an_outcome_is_still_the_bare_word_it_replaced(self):
+        # reason: every caller and most of this file compares the result of
+        # _auto_build_one() against a plain string. Outcome subclasses str so
+        # that stayed true; if it ever stops being true, the counters in
+        # auto_flow() silently count zero of everything.
+        out = self.tour.Outcome("flagged", "no logo", "add it")
+        self.assertEqual(out, "flagged")
+        self.assertTrue(out == "flagged")
+        self.assertEqual(("flagged" == out), True)
+        self.assertEqual(sum(1 for _ in [out] if _ == "flagged"), 1)
+
+    def test_a_bare_string_outcome_still_recaps(self):
+        # reason: Outcome's attributes are read with getattr(..., default), so a
+        # future return path that forgets to wrap its word degrades to a name
+        # with no reason rather than an AttributeError mid-summary.
+        self.tour._auto_recap([("acme/1_main_st/jo_ray", "flagged")])
+        self.assertIn("acme/1_main_st/jo_ray", self.text())
+
+    def test_every_flagged_listing_is_named_with_its_reason_and_fix(self):
+        self.tour._auto_recap([
+            ("acme/1_main_st/jo_ray",
+             self.tour.Outcome("built", "3 sample cut(s) in out/")),
+            ("beta/2_oak_st/sam_poe",
+             self.tour.Outcome("flagged", "no logo for beta",
+                               "add global_assets/logos/beta.png")),
+            ("gamma/3_elm_st/kit_lo",
+             self.tour.Outcome("error", "the encode failed", "run it alone")),
+        ])
+        out = self.text()
+        self.assertIn("Built", out)
+        self.assertIn("acme/1_main_st/jo_ray", out)
+        self.assertIn("Flagged", out)
+        self.assertIn("beta/2_oak_st/sam_poe", out)
+        self.assertIn("no logo for beta", out)
+        self.assertIn("add global_assets/logos/beta.png", out)
+        self.assertIn("Failed", out)
+        self.assertIn("gamma/3_elm_st/kit_lo", out)
+        self.assertIn("the encode failed", out)
+
+    def test_a_clean_run_names_what_was_built_and_points_nowhere_else(self):
+        self.tour._auto_recap([
+            ("acme/1_main_st/jo_ray",
+             self.tour.Outcome("built", "3 sample cut(s) in out/"))])
+        out = self.text()
+        self.assertIn("3 sample cut(s)", out)
+        self.assertNotIn("flag.txt", out)
+
+    def test_a_floor_plan_hit_is_marked_for_the_view_to_carry(self):
+        # reason: the view cannot re-derive this one -- it costs an ffmpeg
+        # decode per photo -- so --auto marks it to be handed to
+        # active_view.rebuild(extra=...) instead. Everything else is derivable
+        # and must NOT be passed, or flag.txt would say it twice.
+        self.assertFalse(
+            self.tour.Outcome("flagged", "floor plan", "delete it",
+                              derivable=False).derivable)
+        self.assertTrue(self.tour.Outcome("flagged", "no logo", "add it").derivable)

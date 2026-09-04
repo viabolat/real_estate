@@ -7,6 +7,57 @@ Do not defer updates to end-of-session.
 
 ## Entries
 
+### 2026-09-04 — A flagged listing says what it is waiting for
+
+**What:** `status.blocker()` is new: one ladder returning `(key, detail)` for the
+first thing that makes a listing unbuildable. `next_action()` now renders its
+first five keys instead of testing them itself, so its output is byte-identical.
+`active_view.rebuild()` renders all six as
+`needs_attention/<brand>/<listing>/flag.txt` — what is missing, and the command
+that fixes it. `tour.py` gained `Outcome` (a `str` subclass carrying `.missing`,
+`.fix`, `.derivable`) and `_auto_recap()`, so `--auto`'s summary names every
+listing it touched instead of only counting them.
+
+**Why:** the run ended `1 built, 2 flagged for review, 0 failed` and stopped
+there. Three numbers, no names — which listing, and what for, had to be
+recovered from the scrollback. `needs_attention/` had the same gap one level
+over: it answered "which listings need you" and nothing else, so a flagged
+listing sat in the folder with no way to tell why short of running a build and
+reading the halt message.
+
+**Why not a second directory:** the ask started as `agents/new/` — new listings
+land there, move up on success. That is a fact stored twice (the folder path and
+`out/`) and they drift the first time a cut is deleted or a move half-fails; it
+is also 4 levels where every walker in the repo assumes 3, so `new/` reads as a
+brokerage named "new" to `status.survey()`, `auto_targets()`, `prospects.py`,
+`active_view.py`, `dashboard.py` and `check_pii.py` alike. See
+`needs-attention-is-a-view-not-a-move.md`. `flag.txt` gets the same glance with
+no second source of truth: derived, wiped with the tree, and a no-op to delete.
+
+**Why `Outcome` subclasses `str`:** every caller and 47 tests compare
+`_auto_build_one()`'s result against a bare word. The outcome *is* that string;
+the reason is provenance hung off it, not a second value to unpack. A tuple
+would have churned 20 assertions to say the same thing.
+
+**Why "no_phone" is invisible to `next_action()`:** it is a real blocker —
+`--auto` refuses to encode a card with no number on it — but that verdict string
+is asserted verbatim across the suite, and adding a sixth rung above the build
+ladder would change the reported state of every listing Zillow gave no phone
+for. `flag.txt` renders it; the table still says what it always said.
+
+**The one thing the view cannot derive:** whether a photo looks like a floor
+plan. Measured at 62ms/photo (`floorplan.extract_rgb` spawns ffmpeg and decodes
+each image) against 0.03ms for `status.photo_stats`'s pure-Python JPEG header
+read — ~45s across the 730 photos in `agents/`, on a rebuild that runs on every
+home-screen render. `--auto` has already paid for that pass, so it hands its
+finding to `rebuild(extra=...)` rather than making the view re-earn it.
+
+**Also corrected:** `--auto`'s three per-listing messages said "Halted", which
+reads as "the run stopped". It never did — `auto_flow`'s loop has no `break`.
+They now say "Skipped this listing". `STEPS.md`'s claim that "nothing about any
+halt is written anywhere" was true until `flag.txt`; it now says what is written
+and why deleting it is a no-op.
+
 ### 2026-09-04 — A dump is a `.txt` or a `.json`, decided in one place
 
 **What:** `scraper/dumps/` now accepts `.json` beside `.txt`. `scraper/photos.py`

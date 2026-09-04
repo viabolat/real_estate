@@ -30,6 +30,19 @@ exist elsewhere:
 - **active** — everything else, including a published listing that has not yet
   been marked contacted. Only active listings get a symlink.
 
+`flag.txt` is part of the view, not an exception to it. A listing that cannot be
+built as it sits gets a `needs_attention/<brand>/<listing>/flag.txt` naming what
+is missing and the command that fixes it, rendered from `status.blocker()` —
+the same ladder `next_action()`'s first rungs read. It records nothing: it is
+written only while the blocker is still true, it is wiped with the tree on every
+rebuild, and no reader ever consults it. Deleting it by hand is a no-op, which
+is the test of whether a file in a view is a view or a record. The one thing it
+carries that is not re-derived on the spot is `--auto`'s floor-plan finding,
+handed in through `rebuild(extra=...)` because that check costs an ffmpeg decode
+per photo — and a rebuild that runs on every home-screen render cannot pay it.
+The value still is not stored anywhere: skip the `--auto` run and the line is
+simply absent, never stale.
+
 Do not add a second directory for "archived" or "snoozed" state, and do not add
 a marker file, a status field in `config.json`, or any other record of which
 tier a listing is in. That is the same failure the folder-naming rule above

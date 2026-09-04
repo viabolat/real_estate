@@ -360,9 +360,9 @@ class ChooseListingPickerScope(unittest.TestCase):
         # the sandbox dirs explicit here instead.
         real_rebuild = self.prev[6]
         self.tour.active_view.rebuild = (
-            lambda rows, built_families, agents_dir=None, dest_dir=None:
+            lambda rows, built_families, agents_dir=None, dest_dir=None, **kw:
             real_rebuild(rows, built_families, agents_dir=self.agents_dir,
-                         dest_dir=self.needs_attention_dir))
+                         dest_dir=self.needs_attention_dir, **kw))
         self.tour.ask = lambda *a, **k: (_ for _ in ()).throw(
             AssertionError("must not prompt for free text in this test"))
         self.addCleanup(self._restore)
@@ -432,3 +432,116 @@ class HomeThreadsShowAllIntoBuildFlow(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FlagFileNamesWhatIsMissing(unittest.TestCase):
+    """needs_attention/<brand>/<listing>/flag.txt -- why this listing is here.
+
+    reason: the view answered "which listings need you" and nothing else, so a
+    flagged listing sat in the folder with no way to tell what it was waiting
+    for short of running a build and reading the halt message. The reason is
+    derived from status.blocker(), written only while it is still true, and
+    wiped with the tree -- see active_view.py's docstring and
+    _rules/needs-attention-is-a-view-not-a-move.md.
+    """
+
+    def setUp(self):
+        self.active_view = helpers.active_view_module()
+        self.status = helpers.status_module()
+        self.publish = self.active_view.publish
+        self.tmp = tempfile.mkdtemp(prefix="active_view_flag_test_")
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.agents_dir = os.path.join(self.tmp, "agents")
+        self.dest_dir = os.path.join(self.tmp, "needs_attention")
+        os.makedirs(self.agents_dir)
+        original = self.publish.CONTACTED
+        self.addCleanup(setattr, self.publish, "CONTACTED", original)
+        self.publish.CONTACTED = os.path.join(self.tmp, "contacted.csv")
+
+    def rebuild(self, rows, extra=None, blocker=True):
+        self.active_view.rebuild(
+            rows, self.status.built_families, agents_dir=self.agents_dir,
+            dest_dir=self.dest_dir,
+            blocker=self.status.blocker if blocker else None,
+            scraped_keys=(), extra=extra)
+
+    def flag_path(self, brand, listing):
+        return os.path.join(self.dest_dir, brand, listing,
+                            self.active_view.FLAG_FILE)
+
+    def make_listing(self, brand, listing, agent, photos=0, cfg=None):
+        d = os.path.join(self.agents_dir, brand, listing, agent)
+        os.makedirs(os.path.join(d, "photos"), exist_ok=True)
+        with open(os.path.join(d, "config.json"), "w") as f:
+            json.dump(cfg or {}, f)
+        return d
+
+    def buildable_row(self, brand, listing, agent):
+        """A row status.blocker() finds nothing wrong with."""
+        cfg = {"logo": "logo.png", "watermark": "logo.png",
+               "agent_phone": "6175551234"}
+        d = self.make_listing(brand, listing, agent, cfg=cfg)
+        open(os.path.join(d, "logo.png"), "wb").write(b"x")
+        return (brand, listing, agent, 12, 1536, 1536, "ready to build", {}, cfg)
+
+    def test_a_blocked_listing_gets_the_reason_and_the_fix(self):
+        self.make_listing("acme", "12_main_st", "jo_ray")
+        self.rebuild([("acme", "12_main_st", "jo_ray", 0, None, None,
+                       "no photos -- scrape it", {}, {})])
+        text = open(self.flag_path("acme", "12_main_st")).read()
+        self.assertIn("jo_ray", text)
+        self.assertIn("missing:", text)
+        self.assertIn("photos/ is empty", text)
+        self.assertIn("fix:", text)
+        self.assertIn("scraper/run.py", text)
+
+    def test_a_listing_with_nothing_blocking_it_gets_no_file(self):
+        r = self.buildable_row("acme", "12_main_st", "jo_ray")
+        self.rebuild([r])
+        self.assertTrue(os.path.islink(
+            os.path.join(self.dest_dir, "acme", "12_main_st", "jo_ray")))
+        self.assertFalse(os.path.exists(self.flag_path("acme", "12_main_st")))
+
+    def test_the_file_is_not_written_back_once_the_listing_is_fixed(self):
+        self.make_listing("acme", "12_main_st", "jo_ray")
+        self.rebuild([("acme", "12_main_st", "jo_ray", 0, None, None,
+                       "no photos -- scrape it", {}, {})])
+        self.assertTrue(os.path.exists(self.flag_path("acme", "12_main_st")))
+        self.rebuild([self.buildable_row("acme", "12_main_st", "jo_ray")])
+        self.assertFalse(os.path.exists(self.flag_path("acme", "12_main_st")))
+
+    def test_deleting_the_whole_view_by_hand_costs_nothing(self):
+        self.make_listing("acme", "12_main_st", "jo_ray")
+        rows = [("acme", "12_main_st", "jo_ray", 0, None, None,
+                 "no photos -- scrape it", {}, {})]
+        self.rebuild(rows)
+        shutil.rmtree(self.dest_dir)
+        self.rebuild(rows)
+        self.assertTrue(os.path.exists(self.flag_path("acme", "12_main_st")))
+
+    def test_a_finding_the_view_cannot_derive_is_carried_in(self):
+        r = self.buildable_row("acme", "12_main_st", "jo_ray")
+        self.rebuild([r], extra={("acme", "12_main_st", "jo_ray"):
+                                 [("2 photo(s) look like a floor plan: 04.jpg",
+                                   "delete them, then rerun --auto")]})
+        text = open(self.flag_path("acme", "12_main_st")).read()
+        self.assertIn("look like a floor plan", text)
+        self.assertIn("delete them", text)
+
+    def test_two_agents_under_one_listing_share_one_file(self):
+        self.make_listing("acme", "12_main_st", "jo_ray")
+        self.make_listing("acme", "12_main_st", "sam_poe")
+        self.rebuild([("acme", "12_main_st", "jo_ray", 0, None, None, "x", {}, {}),
+                      ("acme", "12_main_st", "sam_poe", 0, None, None, "x", {}, {})])
+        text = open(self.flag_path("acme", "12_main_st")).read()
+        self.assertIn("jo_ray", text)
+        self.assertIn("sam_poe", text)
+        self.assertEqual(text.count("Written by tour.py"), 1)
+
+    def test_without_a_blocker_the_view_is_exactly_what_it_was(self):
+        self.make_listing("acme", "12_main_st", "jo_ray")
+        self.rebuild([("acme", "12_main_st", "jo_ray", 0, None, None,
+                       "no photos -- scrape it", {}, {})], blocker=False)
+        self.assertTrue(os.path.islink(
+            os.path.join(self.dest_dir, "acme", "12_main_st", "jo_ray")))
+        self.assertFalse(os.path.exists(self.flag_path("acme", "12_main_st")))
