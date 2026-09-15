@@ -8,6 +8,16 @@ The dump already embeds every photo's full-resolution URL and a photoCount
 field, so there's no need to open a browser, log in, or click through the
 gallery -- just parse the text and download.
 
+Zillow serves two listing shapes and they carry different photo URL families: a
+regular listing has both -uncropped_scaled_within_<w>_<h>.jpg and -cc_ft_<w>.jpg,
+a Showcase listing has only cc_ft (plus sc_/sr_, which over-collect). So the
+uncropped pass runs first and cc_ft is appended only for what it missed --
+never merged, never widened. A dump whose photoCount says it has photos but
+yields no URLs at all exits 4 without writing anything, because that means the
+patterns no longer describe what Zillow serves. The same shape split renames attribution, so the brokerage is read the same
+way -- see lead.broker_name() and
+_rules/a-second-listing-shape-is-a-fallback-never-a-replacement.md.
+
 Photos land in the build tree, not beside this script:
 
     agents/<broker_name>/<street_address>/<agent_name>/photos/
@@ -48,15 +58,49 @@ PHOTO_PATTERN = re.compile(
     r'photos\.zillowstatic\.com/fp/([a-f0-9]+)-uncropped_scaled_within_(\d+)_(\d+)\.jpg'
 )
 
+# reason: Zillow serves two listing shapes and they do not carry the same photo
+# URL families. A regular listing (GraphQL ForSalePriorityQuery) has both
+# -uncropped_scaled_within_<w>_<h> and -cc_ft_<w>; a Showcase listing
+# (ViewShowcasePriorityQuery) has NO uncropped variant at all, only cc_ft plus
+# the sc_/sr_ families. PHOTO_PATTERN alone therefore returned [] for every
+# Showcase listing -- the dump held all 33 URLs and the download saved none.
+#
+# This is a SECOND pass, never a merge of the two into one width-ranked regex.
+# On a regular listing both families exist at width 1536, so a widest-wins tie
+# would silently hand back cropped variants in place of the uncropped originals
+# across the entire existing photo library. Measured on all 9 dumps on hand
+# (5 regular, 4 Showcase): the cc_ft hash set is exactly equal to the uncropped
+# set on every regular listing and in the same first-appearance order, so this
+# fallback appends nothing there -- byte-identical output is structural, not
+# luck. On Showcase it supplies the whole gallery, matching photoCount exactly.
+#
+# Not widened to sc_/sr_ as a general defence against the next variant: those
+# over-collect by 8-15 non-gallery images per Showcase listing. A narrow match
+# plus photo_count_verdict()'s loud failure is the correct shape.
+CC_FT_PATTERN = re.compile(
+    r'photos\.zillowstatic\.com/fp/([a-f0-9]+)-cc_ft_(\d+)\.jpg'
+)
+
 
 # reason: field() was a byte-identical second copy of lead.py's. Two copies of a
 # regex that has already been tightened twice (the (?![A-Za-z0-9_]) guard) is a drift
 # hazard, and both scripts run from the same folder off the same dump. One copy.
-from lead import field, extract_zip_city_state
+from lead import field, broker_name, extract_zip_city_state
 
 
 def extract_photo_urls(text: str) -> list:
-    """All full-res photo URLs, in gallery order, deduped by hash (largest variant wins)."""
+    """All full-res photo URLs, in gallery order, deduped by hash (largest variant wins).
+
+    The uncropped pass runs first and unchanged; cc_ft is only consulted for
+    hashes it did not find, so a regular listing's output is exactly what it was
+    before Showcase support existed. See CC_FT_PATTERN for why the two families
+    are two passes and not one regex.
+
+    Known limitation: on a listing that mixed the two -- some photos uncropped,
+    some cc_ft-only -- the cc_ft tail would land after the uncropped block rather
+    than in its true gallery position. No such listing exists in the nine
+    measured; the two sets are either equal or disjoint.
+    """
     best = {}
     order = []
     for hash_, w, h in PHOTO_PATTERN.findall(text):
@@ -65,7 +109,57 @@ def extract_photo_urls(text: str) -> list:
             order.append(hash_)
         if hash_ not in best or width > best[hash_][0]:
             best[hash_] = (width, f"https://photos.zillowstatic.com/fp/{hash_}-uncropped_scaled_within_{w}_{h}.jpg")
+    # Snapshot before the second pass mutates `best`: only hashes the uncropped
+    # pass never saw may be appended. An uncropped URL already chosen is never
+    # replaced by a cc_ft one, whatever its width.
+    uncropped = set(best)
+    for hash_, w in CC_FT_PATTERN.findall(text):
+        if hash_ in uncropped:
+            continue
+        width = int(w)
+        if hash_ not in best:
+            order.append(hash_)
+        if hash_ not in best or width > best[hash_][0]:
+            best[hash_] = (width, f"https://photos.zillowstatic.com/fp/{hash_}-cc_ft_{w}.jpg")
     return [best[h][1] for h in order]
+
+
+def photo_count_verdict(found: int, expected):
+    """None, "warn" or "fail" -- whether the URL count contradicts photoCount.
+
+    reason: main() printed "WARNING: photoCount says 33 but found 0 photo URLs"
+    and carried straight on. That line had been firing on roughly 40% of dumps
+    -- every Showcase listing -- for as long as Showcase listings existed, and
+    a warning nobody acts on is not a guard: the run reported success, the
+    folder was scaffolded, and the gallery was empty. Finding zero URLs in a
+    dump that says it has photos means the regexes above no longer describe
+    what Zillow serves, which is a fact about the scraper, not about the
+    listing. It has to stop the dump.
+
+    Split three ways rather than two because the three cases are not the same
+    failure. Zero-of-many is an unknown URL variant. Any other disagreement --
+    fewer than photoCount, or MORE than it -- stays the warning it has always
+    been: the photos that were found are real and downloading them is right,
+    and over-collection is what a too-broad pattern looks like (the sc_/sr_
+    families run 8-15 images over on a Showcase listing), so it must not go
+    quiet just because the zero case now shouts. A dump whose photoCount is
+    absent or 0 is not this bug at all -- a listing may legitimately have no
+    photos, and target_for() still refuses it when it has no address either.
+
+    `expected` arrives as field()'s string or None, so it is normalised here
+    rather than at each call site.
+    """
+    try:
+        expected = int(expected)
+    except (TypeError, ValueError):
+        return None
+    if expected <= 0:
+        return None
+    if found == 0:
+        return "fail"
+    if found != expected:
+        return "warn"
+    return None
 
 
 def slugify(text: str, default: str = "listing") -> str:
@@ -143,6 +237,28 @@ def jpeg_size(path):
 UNASSIGNED_AGENT = "unassigned_agent"
 
 
+DUMP_EXTENSIONS = (".txt", ".json")
+
+
+def is_dump(name: str) -> bool:
+    """True for a filename in dumps/ that is offered to the parsers at all.
+
+    reason: the same answer is needed in two places -- run.py picking a folder's
+    dumps up, and tour.py deciding which have no folder yet -- and a mismatch
+    between the two lists reads as a dump that imports fine but is never
+    offered, or is offered forever after it was imported. One predicate, both
+    callers, exactly as target_for() is one namer for both.
+
+    .json is accepted beside .txt because the parsers are regexes over the whole
+    text and never over parsed HTML: the __NEXT_DATA__ blob saved on its own is
+    the same bytes the page dump carries inside it. Nothing else is guessed at
+    -- the extension only decides what is READ; whether a file is a listing is
+    still target_for()'s refusal.
+    """
+    return (not name.startswith(".")
+            and name.lower().endswith(DUMP_EXTENSIONS))
+
+
 def target_for(text: str):
     """(brand, listing, agent) -- the folder this dump scaffolds -- or None if
     it is not one.
@@ -162,7 +278,7 @@ def target_for(text: str):
     address = field(text, "streetAddress")
     if not extract_photo_urls(text) and not address:
         return None
-    return (slugify(field(text, "brokerName"), "unknown_brokerage"),
+    return (slugify(broker_name(text), "unknown_brokerage"),
             slugify(address),
             slugify(field(text, "agentName"), UNASSIGNED_AGENT))
 
@@ -301,7 +417,7 @@ def main():
         text = f.read()
 
     address = field(text, "streetAddress")
-    broker = field(text, "brokerName")
+    broker = broker_name(text)
     agent = field(text, "agentName")
     phone = field(text, "agentPhoneNumber")
     zip_, city, state = extract_zip_city_state(text)
@@ -321,6 +437,18 @@ def main():
               f"Zillow listing dump. Nothing written.")
         sys.exit(2)
     out_dir = args.out_dir or os.path.join(repo_root, "agents", *target, "photos")
+
+    # reason: refuse before makedirs and before scaffold() -- a dump whose photo
+    # URLs we cannot read must leave nothing behind, not an empty photos/ folder
+    # with a brand.json and config.json beside it that read as a finished import.
+    # Exit 4, not 2: run.py treats everything outside (0, 3) as a failed dump and
+    # keeps going either way, but 2 already means "not a listing dump" and an
+    # operator running photos.py by hand has to be able to tell the two apart.
+    if photo_count_verdict(len(urls), expected) == "fail":
+        print(f"{args.file}: photoCount says {expected} but no photo URLs matched. "
+              f"Zillow is serving a URL variant this scraper does not know -- see "
+              f"PHOTO_PATTERN / CC_FT_PATTERN. Nothing written.")
+        sys.exit(4)
 
     if not args.out_dir:
         dup_count = already_scraped(out_dir, urls)
@@ -345,7 +473,7 @@ def main():
         downloaded += 1
 
     print(f"{address or 'unknown address'} -- {broker or 'unknown brokerage'}")
-    if expected is not None and str(len(urls)) != str(expected):
+    if photo_count_verdict(len(urls), expected) == "warn":
         print(f"  WARNING: photoCount says {expected} but found {len(urls)} photo URLs in the dump")
     print(f"  {len(urls)} photo(s) found, {downloaded} newly downloaded, saved to {out_dir}")
 

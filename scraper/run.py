@@ -4,14 +4,20 @@ run.py
 
 Convenience wrapper: runs lead.py then photos.py against the
 same dump, one command instead of two. Just calls each script as its own
-subprocess -- no shared code, no coupling, each one still works fine run on
-its own.
+subprocess -- no shared parsing state, no coupling beyond one imported
+predicate (is_dump, below), each one still works fine run on its own.
 
 Point it at a single dump, or at a folder of them:
 
     python3 run.py paste.txt          # one listing
-    python3 run.py dumps/             # every *.txt in the folder
+    python3 run.py dumps/             # every *.txt and *.json in the folder
     python3 run.py                    # same, defaults to scraper/dumps/
+
+A dump is a .txt or a .json file. Both are read as raw text and handed to the
+same regexes -- the __NEXT_DATA__ blob saved on its own is the same bytes the
+full page dump carries inside it -- so the extension decides only what is picked
+up, never how it is parsed. photos.is_dump() is the one predicate for that, so
+this and tour.py's pending-dump count can never disagree about a file.
 
 One dump per file, always. The parsers use a first-match regex over the whole
 text, so two dumps concatenated into one file would read the first listing's
@@ -42,6 +48,12 @@ import os
 import subprocess
 import sys
 
+# reason: the "what counts as a dump" answer is shared with tour.py through
+# photos.py, the same way target_for() shares the folder-naming answer. The one
+# import into an otherwise subprocess-only wrapper buys a predicate that cannot
+# drift; the parsing itself is still two subprocesses and no shared state.
+from photos import is_dump
+
 
 def dumps_in(path):
     """The dump files to process, in a stable order."""
@@ -50,7 +62,7 @@ def dumps_in(path):
     if not os.path.isdir(path):
         return None
     return sorted(os.path.join(path, n) for n in os.listdir(path)
-                  if n.lower().endswith(".txt") and not n.startswith("."))
+                  if is_dump(n))
 
 
 def run_one(dump, lead_script, photos_script):
@@ -78,8 +90,9 @@ def main():
     parser = argparse.ArgumentParser(
         description="Run lead.py and photos.py on one dump or a folder of them.")
     parser.add_argument("path", nargs="?",
-                        help="A dump file, or a folder of *.txt dumps "
-                             "(default: the dumps/ folder beside this script)")
+                        help="A dump file, or a folder of *.txt / *.json "
+                             "dumps (default: the dumps/ folder beside this "
+                             "script)")
     args = parser.parse_args()
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -94,7 +107,7 @@ def main():
         print(f"Not a file or folder: {path}")
         sys.exit(1)
     if not dumps:
-        print(f"No *.txt dumps in {path}")
+        print(f"No *.txt or *.json dumps in {path}")
         print("Paste one Zillow page dump per file into that folder, then run this again.")
         sys.exit(1)
 

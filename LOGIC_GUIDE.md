@@ -7,6 +7,139 @@ Do not defer updates to end-of-session.
 
 ## Entries
 
+### 2026-09-04 — `needs_attention/` is a warning light, not a working set
+
+**What:** the tree now holds
+`needs_attention/<brand>/<listing>/<agent>/flag.txt` and nothing else. No
+symlinks. A folder is created only where a `flag.txt` is written, so a folder
+existing and a listing being blocked are the same fact — present means stuck,
+absent means fine, empty tree means nothing anywhere is stuck. `rebuild()`
+returns the ACTIVE keys, and `choose_listing()` takes that set instead of
+walking the tree; `active_level()` reads its three menu levels out of it.
+
+**Why:** the view was answering two questions with one directory — "what is
+blocked?" for the operator, and "what can I pick to build?" for the picker.
+Those are opposite sets. Every active listing was symlinked in whether or not
+anything was wrong, so the operator still had to open each one to find which
+needed them, and the file added in the entry below was a *second* signal layered
+on a folder that carried none. Making membership mean "blocked" collapses the
+two into one: the folder is the signal and the file is the reason.
+
+**Why the symlink had to go, not just the membership:** a symlink is a place you
+can edit *through*. With one, the same listing is reachable at two paths and the
+view looks like somewhere work happens. It is not: the fix is made in
+`agents/<brand>/<listing>/<agent>/` and the view is regenerated from it. Holding
+nothing but text files makes that unmistakable rather than merely documented.
+
+**The coupling this exposed, and the fix:** `choose_listing()` did
+`root = needs_attention/` and walked it for its menu — two lines, the only reader
+of that directory in the codebase. Point the tree at "blocked" without touching
+them and the default build menu becomes exactly the listings that cannot be
+built, while deleting the tree — which `flag.txt` explicitly invites — empties
+the menu entirely. `rebuild()` returning the active set is the decoupling: the
+tree now has no reader but the operator's eyes, which is what makes deleting any
+part of it genuinely inert. It was not inert before; it silently changed the
+picker until the next rebuild.
+
+**Why the return value is not what lands on disk:** it would be a smaller change
+to return what was written. But the two sets differ on purpose — active includes
+the buildable ones, blocked is a subset — and collapsing them is precisely the
+conflation this entry undoes.
+
+**Consequence accepted:** a listing blocked *only* by a suspected floor plan is
+flagged by `--auto` and then dropped by the next home-screen rebuild, which
+cannot afford to re-run the check (~62ms per photo against ~0.03ms for every
+other rung, ~45s across `agents/`). An empty tree therefore means "nothing
+cheaply-derivable is blocked". `FLAG_HEADER` says exactly that in the file
+itself, and `--auto`'s recap is the durable report. Caching the verdict per
+photo would close it and is the obvious next move if it ever bites.
+
+### 2026-09-04 — A flagged listing says what it is waiting for
+
+**What:** `status.blocker()` is new: one ladder returning `(key, detail)` for the
+first thing that makes a listing unbuildable. `next_action()` now renders its
+first five keys instead of testing them itself, so its output is byte-identical.
+`active_view.rebuild()` renders all six as
+`needs_attention/<brand>/<listing>/flag.txt` — what is missing, and the command
+that fixes it. `tour.py` gained `Outcome` (a `str` subclass carrying `.missing`,
+`.fix`, `.derivable`) and `_auto_recap()`, so `--auto`'s summary names every
+listing it touched instead of only counting them.
+
+**Why:** the run ended `1 built, 2 flagged for review, 0 failed` and stopped
+there. Three numbers, no names — which listing, and what for, had to be
+recovered from the scrollback. `needs_attention/` had the same gap one level
+over: it answered "which listings need you" and nothing else, so a flagged
+listing sat in the folder with no way to tell why short of running a build and
+reading the halt message.
+
+**Why not a second directory:** the ask started as `agents/new/` — new listings
+land there, move up on success. That is a fact stored twice (the folder path and
+`out/`) and they drift the first time a cut is deleted or a move half-fails; it
+is also 4 levels where every walker in the repo assumes 3, so `new/` reads as a
+brokerage named "new" to `status.survey()`, `auto_targets()`, `prospects.py`,
+`active_view.py`, `dashboard.py` and `check_pii.py` alike. See
+`needs-attention-is-a-view-not-a-move.md`. `flag.txt` gets the same glance with
+no second source of truth: derived, wiped with the tree, and a no-op to delete.
+
+**Why `Outcome` subclasses `str`:** every caller and 47 tests compare
+`_auto_build_one()`'s result against a bare word. The outcome *is* that string;
+the reason is provenance hung off it, not a second value to unpack. A tuple
+would have churned 20 assertions to say the same thing.
+
+**Why "no_phone" is invisible to `next_action()`:** it is a real blocker —
+`--auto` refuses to encode a card with no number on it — but that verdict string
+is asserted verbatim across the suite, and adding a sixth rung above the build
+ladder would change the reported state of every listing Zillow gave no phone
+for. `flag.txt` renders it; the table still says what it always said.
+
+**The one thing the view cannot derive:** whether a photo looks like a floor
+plan. Measured at 62ms/photo (`floorplan.extract_rgb` spawns ffmpeg and decodes
+each image) against 0.03ms for `status.photo_stats`'s pure-Python JPEG header
+read — ~45s across the 730 photos in `agents/`, on a rebuild that runs on every
+home-screen render. `--auto` has already paid for that pass, so it hands its
+finding to `rebuild(extra=...)` rather than making the view re-earn it.
+
+**Also corrected:** `--auto`'s three per-listing messages said "Halted", which
+reads as "the run stopped". It never did — `auto_flow`'s loop has no `break`.
+They now say "Skipped this listing". `STEPS.md`'s claim that "nothing about any
+halt is written anywhere" was true until `flag.txt`; it now says what is written
+and why deleting it is a no-op.
+
+### 2026-09-04 — A dump is a `.txt` or a `.json`, decided in one place
+
+**What:** `scraper/dumps/` now accepts `.json` beside `.txt`. `scraper/photos.py`
+grew `is_dump(name)` (and `DUMP_EXTENSIONS`), and both readers of that folder --
+`scraper/run.py`'s `dumps_in()` and `tour.py`'s `unimported_dumps()` -- call it
+instead of testing `.endswith(".txt")` inline. No parser changed.
+
+**Why:** the parsers were never HTML parsers -- they are first-match regexes over
+the whole text, and the page dump's value is the `__NEXT_DATA__` blob embedded in
+it. That blob saved on its own, as a `.json`, is the same bytes and parses
+identically (checked: the URLs in an existing dump carry unescaped slashes and the
+inner quotes are already backslash-escaped, so both shapes hit the same regexes).
+The extension was the only thing refusing it.
+
+**Why one predicate rather than two `.endswith` calls:** the two readers answer the
+same question for different reasons -- run.py to pick files up, tour.py to count
+what has no folder yet. A list that drifted between them fails silently in both
+directions: a file only tour.py accepts is offered as pending forever because the
+batch run never imports it, and a file only run.py accepts is imported without ever
+being counted. That is the `target_for()` argument -- one naming authority -- one
+level earlier, so it got the same treatment. `scraper/run.py` had said "no shared
+code, no coupling"; it now imports exactly one predicate, and its docstring says so.
+
+**Alternatives rejected:** *sniff the content instead of the extension* -- the
+content check already exists and is `target_for()`'s `None`; an extension filter is
+about what is worth opening, and reading every file in a folder that may hold a
+README or a screenshot to find out is a different, worse rule. *Accept every
+extension* -- same problem, and `dumps/` is a paste-anything folder. *Convert `.json`
+to `.txt` on import* -- a rename in the one folder the operator owns, to satisfy a
+filter that did not need to exist.
+
+**Accepted risks:** a `.json` that is a config file someone parked in `dumps/` is now
+opened and read. It is refused by `target_for()` exactly as a junk `.txt` is, so the
+cost is one file read.
+
 ### 2026-09-03 — The dashboard is a socket, not a file, and it reads only
 
 **What:** `dashboard.py` — every lead and listing on one page in a browser, on a
@@ -35,7 +168,7 @@ holds to one. The dashboard's job ends at showing that something is due.
 subset of rung 5 — the sets are nested, not disjoint. Two filters would list
 every due listing twice: once under a heading meaning "leave it alone" and once
 under one meaning "act". That is the duplicate-send shape from 2026-09-02, where
-two agents received a byte-identical second email. A single first-match ladder
+three agents received a byte-identical second email. A single first-match ladder
 makes the rungs a partition, which is the same reason `needs_attention/` orders
 `archived > snoozed > active`. There is no eighth rung: "signed off" has no
 derivable signal, and inventing a marker for it is what
@@ -613,7 +746,9 @@ walks past-due leads alongside uncontacted ones; `status.next_action()` reports
 2026-08-19) and `55 Lagrange St Unit 1705` (2026-08-26) had each received a **second
 copy of their original email** on 2026-09-02 — same subject, same body. The only
 one that read like a real follow-up, `46 Beacon St. #5`, had been written by hand
-outside the tool. `needs_attention/` was doing its job resurfacing those listings
+outside the tool. *(Corrected 2026-09-04: there were three duplicates, not two —
+`2 Commonwealth Ave` went out at 17:21:42, a minute before 9 W Cedar's 17:22:17, and
+was missing from this account until its thread surfaced two days later.)* `needs_attention/` was doing its job resurfacing those listings
 after the 5-day window, but the folder held exactly one artifact and both send-side
 rungs filtered on `contacted(...)`, so a resurfaced lead had no rung to land on. The
 tool offered the first-contact draft or nothing. Underneath it, `contacted_at()` read
@@ -631,9 +766,117 @@ sends automatic rather than merely easy.
 
 **Accepted risks:** `contacted.csv` now has rows whose meaning depends on order, so a
 hand-sorted or hand-deduplicated file would change behaviour — acceptable, since
-`record_contacted()` is the only writer and it only appends. The three duplicate sends
+`record_contacted()` is the only writer and it only appends. The duplicate sends
 already made are not retro-recorded: doing so would invent send times, and the
-follow-up window is a prompt, not an audit trail.
+follow-up window is a prompt, not an audit trail. *(Superseded 2026-09-04 — the
+send times turned out not to need inventing; see the entry below.)*
+
+---
+
+### 2026-09-04 — A real send time is not an invented one, so the backfill happened
+
+**What:** `contacted.csv` gained six rows for sends made outside the tool, every one
+written through `record_contacted(..., when=...)` at its real send time rather than by
+hand. Three were the unrecorded 2026-09-02 burst — `2_commonwealth_ave` at `17:21:42`,
+`9_w_cedar_st` at `17:22:17`, `46_beacon_st_5` at `17:23:15` — and three were follow-ups
+sent from Thunderbird the same afternoon this entry was written: `20_paragon_rd`
+`15:14:26`, `101_hackensack_rd` `15:16:10`, `29_keystone_st` `15:17:08`. This reverses
+the last clause of the 2026-09-02 entry above, and corrects its count: the burst was
+three duplicates, not two.
+
+**Why:** that clause refused the backfill on one ground: it "would invent send times."
+The operator then produced the Thunderbird Sent headers, which carry the exact times in
+`+0300` — the same zone this machine writes every other row in. Nothing had to be
+invented, so the stated reason for the refusal did not apply. `record_contacted()`'s
+`when` parameter already existed for precisely this case and says so in its docstring:
+a lead sent from a client's own mail app is backfilled with its real send time rather
+than the moment someone got around to recording it. The cost of leaving them out was
+concrete — both read as overdue since August, and the failure mode the 09-02 entry
+exists to prevent is a third copy of an email that has already gone twice.
+
+**Alternatives rejected:** *record only `9_w_cedar_st`* — its date was the one already
+written down here, but the headers covered both equally, so the asymmetry was in this
+file's knowledge, not in the evidence. *Record at `T00:00:00` to flag "date known, time
+not"* — proposed before the headers surfaced; a placeholder clock time is exactly the
+invention the original clause objected to, and it would have been wrong by five hours.
+*Amend the 09-02 stanza in place* — a decision log that edits its own history stops
+being one; the old clause stays, with a pointer.
+
+**Accepted risks:** `contacted.csv` now holds timestamps at three levels of provenance
+and nothing in the file says which is which — rows machine-stamped at the moment of
+recording (`55_lagrange_st_unit_1705`'s duplicate is one, recorded `2026-09-03T00:12:10`
+in the ordinary rung-5 batch, hours after it was sent), rows backfilled to the second
+from mail headers, and the oldest hand-entered rows carrying `:00` seconds, at least one
+of them wrong: `9_w_cedar_st`'s first-contact row reads `2026-08-19T13:48:00` against a
+header of `21:48:43 +0300`, eight hours off. Nothing reads the clock time
+(`_follow_up_date()` adds five days and formats `%Y-%m-%d`), so this is cosmetic rather
+than behavioural — but a future reader should not mistake the file for a uniformly
+sourced audit trail. It is a set of prompts, some with better provenance than others.
+
+The deeper risk is the one `2_commonwealth_ave` exposed: a send made outside the tool is
+invisible until someone happens to open the thread. It went unrecorded and uncounted for
+two days, in the middle of the incident written up to prevent exactly it, and only
+surfaced because its thread was pasted in for an unrelated reason. Nothing here fixes
+that — the ledger still only knows what it is told.
+
+---
+
+### 2026-09-04 — A second photo URL family is a fallback, not a wider regex
+
+**What:** `extract_photo_urls()` keeps `PHOTO_PATTERN` (`-uncropped_scaled_within_`)
+exactly as it was and runs it first; a new `CC_FT_PATTERN` (`-cc_ft_<w>.jpg`) then
+appends only the hashes that pass did not find. `photo_count_verdict()` splits the
+old print into three: zero URLs against a non-zero `photoCount` is now a hard exit 4
+before anything is written, any other disagreement stays the warning, and an absent
+or zero `photoCount` is silent.
+
+**Why:** Zillow serves two listing shapes. A regular listing
+(`ForSalePriorityQuery`) carries both URL families; a **Showcase** listing
+(`ViewShowcasePriorityQuery`) carries no uncropped variant at all. So roughly 40% of
+dumps returned zero photos and were set aside as failures while their payload held
+every URL — four are still parked outside the repo, holding 33, 25, 35 and 27
+photos. The guard that should have caught this existed: `main()` printed
+`WARNING: photoCount says 33 but found 0 photo URLs` and carried on. It had been
+firing on every Showcase listing since Showcase listings existed. A warning that
+fires constantly and changes nothing is not a guard — the run still reported
+success and still scaffolded the folder, so the only visible symptom was an empty
+gallery found later.
+
+**Alternatives rejected:** *One regex over both families, ranked by width* — the
+obvious shape, and the dangerous one. Both families exist at width 1536 on a
+regular listing, so the tie would resolve arbitrarily and could hand back cropped
+variants in place of uncropped originals across the entire existing photo library —
+a silent, repo-wide quality regression to fix a download failure. The two-pass
+version is provably inert on regular listings instead: measured across all nine
+dumps on hand, the cc_ft hash set is exactly equal to the uncropped set on every
+regular listing and in the same first-appearance order, so the fallback appends
+nothing and output is byte-identical. *Widening to every `zillowstatic` variant as
+insurance against the next unknown one* — `sc_`/`sr_` over-collect by 8–15 images
+per Showcase listing, including images that are not gallery photos. That would ship
+junk in a client gallery while still passing a count check. Narrow match plus a
+loud failure covers the same risk without inventing a new one. *Leaving the zero
+case as a warning* — that is what was already there, and it is what let this run
+for months.
+
+**Accepted risks:** The validation sample is one region, one date, for-sale
+listings only — nine dumps, six regular and four Showcase. Sold, pending, auction,
+new-construction and FSBO shapes are untested, as are listings with genuinely zero
+photos. `photo_count_verdict()` is the cover for that: an unknown third variant now
+costs one failed dump in one run instead of a folder of empty galleries discovered
+weeks later. Separately, the fallback's ordering is only correct because the two
+families are equal or disjoint in practice — a listing that genuinely mixed them
+would get its cc_ft photos appended after the uncropped block rather than in true
+gallery position. None exists in the sample, and the docstring says so rather than
+the code pretending to handle it.
+
+The Showcase shape also renames its attribution fields, and the same reasoning
+applies: `lead.broker_name()` reads `brokerName` and falls back to
+`brokerageName`, as one reader for all three callers, because the scrape is the
+single naming authority and a broker slug is a folder name. The two keys are
+disjoint across every dump measured, so a regular listing never reaches the
+fallback. `agentName` has no second key — on a Showcase payload
+`listingAgentAttributionContact` is null and no personal name appears — so
+`UNASSIGNED_AGENT` stays correct there rather than being a gap to close.
 
 ---
 

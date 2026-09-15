@@ -10,7 +10,9 @@ around that escaping.
 ## Workflow
 
 1. Open a Zillow listing page, select all, copy, and paste the full page
-   text into `paste.txt` (overwriting whatever was there before).
+   text into `paste.txt` (overwriting whatever was there before). A dump saved
+   as `.json` — the `__NEXT_DATA__` blob on its own — works exactly the same:
+   both are read as raw text by the same regexes.
 2. Run `run.py paste.txt` to record the listing/agent info *and*
    save its photos in one command. The photos land in
    `agents/<broker_name>/<address>/photos/`, ready for `make_tour.py`.
@@ -25,13 +27,14 @@ listings). Overwrite `paste.txt` fully before each run.
 ## `run.py`
 
 Convenience wrapper — runs `lead.py` then `photos.py` against
-the same dump as two subprocesses. No shared code, no coupling; it's just a
+the same dump as two subprocesses. No shared parsing state and no coupling
+beyond one imported predicate (`photos.is_dump()`, below); it's just a
 shortcut for the two commands so you don't have to run them separately.
 
 Takes one dump, or a whole folder of them:
 
 ```
-python3 run.py                 # every *.txt in dumps/  (the default)
+python3 run.py                 # every *.txt and *.json in dumps/  (the default)
 python3 run.py dumps/          # same thing, said explicitly
 python3 run.py paste.txt       # just the one
 ```
@@ -49,6 +52,12 @@ python3 run.py paste.txt       # just the one
 - **One bad dump does not stop the batch.** Failures are named in a summary at
   the end and the run exits non-zero, so a batch that half-worked cannot look
   like a clean one.
+- **A dump is a `.txt` or a `.json`.** `photos.is_dump()` is the only place
+  that list lives — `tour.py`'s home screen counts pending dumps through the
+  same predicate, so the two can never disagree about which files in `dumps/`
+  are dumps and offer an import that never runs (or hide one that did). The
+  extension decides only what is picked up; whether a file is a *listing* is
+  still `target_for()`'s refusal.
 - `dumps/` is **gitignored** — raw dumps carry the agent's name, phone, email
   and the property address. Only `dumps/.gitkeep` is tracked.
 - For the roll-up across every listing afterwards, run `python3 status.py` from

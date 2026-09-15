@@ -4,22 +4,30 @@ area: outreach
 type: non-negotiable
 guarded_by:
   - tests/test_active_view.py
-source: PROGRESS.md@this-change — two agents received a byte-identical duplicate of an email from two weeks earlier, 2026-09-02
+source: PROGRESS.md@this-change — three agents received a byte-identical duplicate of an email from two weeks earlier, 2026-09-02
 ---
 
 # A follow-up is its own draft and its own row
 
-`needs_attention/` resurfaces a contacted listing once its `FOLLOW_UP_DAYS` window
-passes. That is what the window is **for**
+A contacted listing becomes active again — offered by the build picker — once its
+`FOLLOW_UP_DAYS` window passes. That is what the window is **for**
 ([needs-attention-is-a-view-not-a-move](needs-attention-is-a-view-not-a-move.md)).
 But the folder held one artifact — `outreach_draft.txt`, the first-contact draft — and
 both send-side rungs skipped anything already in `contacted.csv`. So a resurfaced lead
 had no rung at all. Following up meant sending the first email again.
 
-That is exactly what happened on 2026-09-02. `9 W Cedar St` (first contacted
-2026-08-19) and `55 Lagrange St Unit 1705` (2026-08-26) each received a second copy of
-their original email, same subject, same body. The one follow-up that read correctly —
-`46 Beacon St. #5` — was written by hand outside the tool.
+That is exactly what happened on 2026-09-02. `2 Commonwealth Ave` (first contacted
+2026-08-21) at 17:21:42, `9 W Cedar St` (2026-08-19) at 17:22:17 — one minute apart —
+and `55 Lagrange St Unit 1705` (2026-08-26) each received a second copy of their
+original email, same subject, same body. The one follow-up that read correctly —
+`46 Beacon St. #5`, 17:23:15 — was written by hand outside the tool.
+
+`2 Commonwealth Ave` was not in the first account of this failure, which named two
+agents. It surfaced on 2026-09-04, from the same Sent folder, when its thread was
+pasted in for an unrelated reason: one more send, of the same email, in the same
+two-minute burst, that nobody had counted. A failure whose own record undercounts it
+is the argument for `contacted.csv` carrying one row per send rather than one row per
+lead — the ledger is the only place a duplicate can be seen after the fact.
 
 A second, quieter bug made it permanent: `contacted_at()` returned the **first**
 matching row of an append-only file, so even a recorded follow-up left

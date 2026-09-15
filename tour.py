@@ -43,6 +43,12 @@ There is no marker file and no manifest, for the same reason photo order lives i
 the filename prefix: a record kept beside the artifacts drifts out of sync with
 them and is then wrong in a way nothing detects.
 
+A dump is a .txt or a .json file in scraper/dumps/ -- both read as raw text by
+the same regexes, since the __NEXT_DATA__ blob saved on its own is the same
+bytes the full page dump carries inside it. scraper/photos.py's is_dump() is the
+only place that list lives, so this screen and scraper/run.py cannot disagree
+about which files are dumps.
+
 Which RUN a listing is on is derived the same way, from out/:
 
     nothing in out/     -> run 1: build the three watermarked sample_ cuts,
@@ -66,8 +72,25 @@ a-confirmed-sample-publish-clears-its-own-cuts.md. --sweep-published-samples
 [--yes] applies that same cleanup retroactively, across every listing, dry-run by
 default.
 
---auto's own halts mean a batch run usually ends with several listings built and
-several still flagged. --publish-pending is the matching batch entry for what is
+--auto never stops the batch. A listing it cannot finish is skipped and the run
+carries on to the next one, so a batch usually ends with several built and
+several still flagged. The closing summary names all of them -- built, flagged,
+failed -- with what each flagged listing is missing and the one command that
+fixes it, and the same two lines are written into
+needs_attention/<brand>/<listing>/<agent>/flag.txt so they are still there
+tomorrow.
+Only the floor-plan finding travels that way explicitly (--auto hands it to
+active_view.rebuild(extra=...)); everything else the view re-derives for itself
+through status.blocker().
+
+The home screen's third item narrows the picker to listings that HAVE a sample_
+cut, through choose_listing(keep=...). The picker's default set is the active
+one, which keeps a published, contacted listing in it while its follow-up is due
+-- correct for building, wrong for publishing, since a confirmed publish already
+cleared that listing's cuts. Derived from out/ on the spot like every other set
+here, and the rung says what is missing rather than opening an empty picker.
+
+--publish-pending is the matching batch entry for what is
 left once the built ones are ready: it walks every listing with a sample_ cut in
 out/ that links.csv has no record of yet, opens the branded cut for a look (macOS
 `open`; elsewhere it just prints the path) and then runs the exact same
@@ -86,7 +109,7 @@ not-yet-contacted listing and asks the same question one at a time, for whatever
 was published in an earlier session or skipped at that first prompt. It also walks
 the leads past their follow-up date, drafts outreach_followup.txt for each, and
 records a yes as a second contacted.csv row -- which re-arms the window instead of
-leaving the listing to resurface in needs_attention/ every render. See
+leaving the listing to resurface in the build picker every render. See
 a-follow-up-is-its-own-draft-and-its-own-row.md.
 
 Both runs write the same .last_build.json rung, "delivery", because that key names
@@ -391,6 +414,20 @@ def is_agent_dir(path):
     """
     return (os.path.isfile(os.path.join(path, "config.json"))
             or os.path.isdir(os.path.join(path, "photos")))
+
+
+def active_level(only, *prefix):
+    """The next level down of active_view.rebuild()'s key set, sorted.
+
+    reason: needs_attention/ holds flag.txt files and no symlinks now, so it
+    lists only what is BLOCKED -- the opposite of what a build picker wants to
+    offer. brands()/listings()/agent_dirs() cannot be pointed at it any more.
+    rebuild() hands back the active keys instead, and these read the same three
+    levels straight out of that, so the picker's filtered menu costs no walk at
+    all and depends on no directory the operator is invited to delete.
+    """
+    n = len(prefix)
+    return sorted({k[n] for k in only if k[:n] == prefix})
 
 
 def agent_dirs(brand, listing, root=None):
@@ -1212,7 +1249,11 @@ def unimported_dumps():
         return []
     out = []
     for name in sorted(os.listdir(DUMPS)):
-        if not name.lower().endswith(".txt") or name.startswith("."):
+        # reason: which extensions are dumps at all is photos.is_dump()'s
+        # answer, not a second copy here -- run.py picks the same files up, and
+        # a list that drifted would offer an import run.py never makes, or hide
+        # one it does. Same argument as target_for() below.
+        if not status._photos.is_dump(name):
             continue
         try:
             with open(os.path.join(DUMPS, name), encoding="utf-8",
@@ -1328,7 +1369,9 @@ def roll_up(status):
     except OSError as e:
         say(f"\n  prospects/ index did not rebuild ({type(e).__name__}: {e}).")
     try:
-        active_view.rebuild(rows, status.built_families)
+        active_view.rebuild(rows, status.built_families,
+                            blocker=getattr(status, "blocker", None),
+                            scraped_keys=known)
     except OSError as e:
         say(f"\n  needs_attention/ index did not rebuild "
             f"({type(e).__name__}: {e}).")
@@ -1338,8 +1381,8 @@ def import_dumps():
     """Rung zero: turn the pending dumps into listings. run.py, as-is."""
     pending = unimported_dumps()
     if not pending:
-        say("\n  Nothing pending. Save a Zillow page dump as a .txt in "
-            "scraper/dumps/ first.")
+        say("\n  Nothing pending. Save a Zillow page dump as a .txt or a "
+            ".json in scraper/dumps/ first.")
         return
     say(f"\n  This downloads photos for {len(pending)} listing(s) and appends "
         f"to leads.csv.\n  It never overwrites an existing brand.json or "
@@ -1350,8 +1393,25 @@ def import_dumps():
 
 
 def publish_action():
-    """Menu route to rung 4, for a listing that is already built."""
-    _brand, listing_dir = choose_listing()
+    """Menu route to rung 4, for a listing that is already built.
+
+    reason: the picker is narrowed to listings that HAVE a sample_ cut, not
+    just active ones. A confirmed publish clears its own cuts
+    (a-confirmed-sample-publish-clears-its-own-cuts.md), so a published,
+    contacted listing has an empty out/ and nothing here can act on it -- yet
+    it stays active while its follow-up is due, and the menu offered all eight
+    of them. The check below still stands for the "+ New listing" path, which
+    reaches a folder no filter saw.
+    """
+    picked = choose_listing(keep=lambda k: bool(
+        sample_cuts(os.path.join(LISTINGS_ROOT, *k))))
+    if picked is None:
+        say("\n  Nothing to publish -- no listing has a sample_ cut in out/.\n"
+            "  A confirmed publish clears its own cuts, so the ones already on "
+            "the bucket\n  are not offered here. Build one first (1), or use 5 "
+            "to mark a lead contacted.")
+        return
+    _brand, listing_dir = picked
     if not sample_cuts(listing_dir):
         say(f"\n  No sample_ cuts in "
             f"{os.path.relpath(listing_dir, ROOT)}/out/ -- build it first.\n"
@@ -1496,6 +1556,29 @@ def auto_targets(scope=None):
             if stage(os.path.join(LISTINGS_ROOT, brand, name, agent)) == "sample"]
 
 
+class Outcome(str):
+    """"built" / "flagged" / "error", carrying why and what to do about it.
+
+    reason: --auto counted its outcomes and named none of them, so a run ending
+    "1 built, 2 flagged for review, 0 failed" left the operator to go and work
+    out which two, and what for. A str subclass rather than a tuple because the
+    outcome IS that string -- every caller and every test in test_auto_flow.py
+    compares it against a bare word, and the reason is provenance hung off it,
+    not a second value to unpack.
+
+    derivable: whether needs_attention/'s own rebuild can work this out on its
+    own. status.blocker() finds a missing logo or phone from the folder alone;
+    a photo that looks like a floor plan costs an ffmpeg decode per photo, so
+    --auto -- which has just paid for that pass -- hands it to the view rather
+    than making every home-screen render re-earn it.
+    """
+
+    def __new__(cls, value, missing="", fix="", derivable=True):
+        out = super().__new__(cls, value)
+        out.missing, out.fix, out.derivable = missing, fix, derivable
+        return out
+
+
 def _auto_build_one(brand, listing_dir, ignore_floorplan, ignore_missing_phone=False,
                      ignore_missing_logo=False):
     """Run one listing through --auto: the logo lookup, the phone check,
@@ -1505,7 +1588,9 @@ def _auto_build_one(brand, listing_dir, ignore_floorplan, ignore_missing_phone=F
     rule(os.path.relpath(listing_dir, ROOT))
     if not photos(listing_dir):
         say("  photos/ is empty -- nothing to build yet.")
-        return "error"
+        return Outcome("error", "photos/ is empty -- nothing was downloaded",
+                       "re-save the dump into scraper/dumps/, then: "
+                       "python3 scraper/run.py")
     offer_prefixes(listing_dir, auto=True)
     cfg = load_config(listing_dir, brand)
 
@@ -1537,7 +1622,8 @@ def _auto_build_one(brand, listing_dir, ignore_floorplan, ignore_missing_phone=F
     # human needs to look at.
     if not ignore_missing_phone and not (cfg.get("agent_phone") or "").strip():
         rel_config = os.path.relpath(os.path.join(listing_dir, "config.json"), ROOT)
-        say(f"\n  Halted -- no agent phone number in {rel_config}.\n"
+        say(f"\n  Skipped this listing -- no agent phone number in "
+            f"{rel_config}.\n"
             f"  The card and lower third would show no way to reach "
             f"{cfg.get('agent_name') or 'this agent'}.\n"
             f"  Add \"agent_phone\" there, then rerun:\n"
@@ -1545,10 +1631,14 @@ def _auto_build_one(brand, listing_dir, ignore_floorplan, ignore_missing_phone=F
             f"{os.path.relpath(listing_dir, LISTINGS_ROOT)}\n"
             "  If the number is genuinely unavailable, force through once "
             "with --ignore-missing-phone-check.")
-        return "flagged"
+        return Outcome(
+            "flagged", f"no agent_phone in {rel_config} -- the card would show "
+            f"no way to reach {cfg.get('agent_name') or 'this agent'}",
+            f'add "agent_phone" there, then: python3 tour.py --auto '
+            f"{os.path.relpath(listing_dir, LISTINGS_ROOT)}")
 
     if not ignore_missing_logo and not resolve(listing_dir, cfg.get("logo")):
-        say(f"\n  Halted -- no logo for {brand} at "
+        say(f"\n  Skipped this listing -- no logo for {brand} at "
             f"global_assets/logos/{brand}.png.\n"
             f"  The card would fall back to the type-only design.\n"
             f"  Add the file there, then rerun:\n"
@@ -1556,16 +1646,25 @@ def _auto_build_one(brand, listing_dir, ignore_floorplan, ignore_missing_phone=F
             f"{os.path.relpath(listing_dir, LISTINGS_ROOT)}\n"
             "  If this brokerage genuinely has no mark, force the "
             "type-only card through once with --ignore-missing-logo-check.")
-        return "flagged"
+        return Outcome(
+            "flagged", f"no logo for {brand} at "
+            f"global_assets/logos/{brand}.png -- the card would fall back to "
+            f"the type-only design",
+            f"add the file, then: python3 tour.py --auto "
+            f"{os.path.relpath(listing_dir, LISTINGS_ROOT)}")
 
     if run_build(listing_dir, ["--contact-sheet"]) != 0:
         say("  The contact sheet failed.")
-        return "error"
+        return Outcome("error", "the contact sheet failed to render",
+                       "run it alone to see ffmpeg's own error: "
+                       f"python3 tour.py --build "
+                       f"{os.path.relpath(listing_dir, LISTINGS_ROOT)}")
 
     if not ignore_floorplan:
         flagged = floorplan.detect(photo_paths(listing_dir))
         if flagged:
-            say(f"\n  Halted -- {len(flagged)} photo(s) look like a floor plan "
+            say(f"\n  Skipped this listing -- {len(flagged)} photo(s) look like "
+                "a floor plan "
                 "or site map:")
             for name, why in flagged:
                 say(f"    {name}  ({why})")
@@ -1574,7 +1673,13 @@ def _auto_build_one(brand, listing_dir, ignore_floorplan, ignore_missing_phone=F
                 f"{os.path.relpath(listing_dir, LISTINGS_ROOT)}\n"
                 "  A false positive can be forced through once with "
                 "--ignore-floorplan-check.")
-            return "flagged"
+            return Outcome(
+                "flagged",
+                f"{len(flagged)} photo(s) look like a floor plan or site map: "
+                + ", ".join(name for name, _why in flagged),
+                "delete the file(s) from photos/, then: python3 tour.py --auto "
+                f"{os.path.relpath(listing_dir, LISTINGS_ROOT)}",
+                derivable=False)
 
     preset = best_preset(report)
     lowres = preset is None
@@ -1585,11 +1690,48 @@ def _auto_build_one(brand, listing_dir, ignore_floorplan, ignore_missing_phone=F
         say(f"  Full rebuild: {reason}.")
     if run_build(listing_dir, flags) != 0:
         say("  The build failed. Intermediates were kept for inspection.")
-        return "error"
+        return Outcome("error", "the encode failed -- intermediates kept",
+                       "run it alone to see ffmpeg's own error: "
+                       f"python3 tour.py --build "
+                       f"{os.path.relpath(listing_dir, LISTINGS_ROOT)}")
     save_state(listing_dir, "delivery", cfg, preset)
     clear_review_artifacts(listing_dir)
     say(f"  Built {len(sample_cuts(listing_dir))} sample cut(s) in out/.")
-    return "built"
+    return Outcome("built",
+                   f"{len(sample_cuts(listing_dir))} sample cut(s) in out/")
+
+
+def _auto_recap(seen):
+    """Name every listing this run touched, grouped by what happened to it.
+
+    reason: the three counts above are the whole report today, so "2 flagged for
+    review" named neither listing nor reason and the operator had to go back
+    through the scrollback to find out which two and why. Only the listings THIS
+    run walked are listed -- the rest of needs_attention/ is not this summary's
+    business, and each flagged listing gets the same two lines written into its
+    own needs_attention/<brand>/<listing>/flag.txt.
+    """
+    groups = (("built", "Built"),
+              ("flagged", "Flagged -- nothing was built for these"),
+              ("error", "Failed"))
+    for kind, heading in groups:
+        rows = [(name, r) for name, r in seen if r == kind]
+        if not rows:
+            continue
+        say(f"\n{heading}")
+        for name, result in rows:
+            missing = getattr(result, "missing", "")
+            fix = getattr(result, "fix", "")
+            if kind == "built":
+                say(f"  {name}" + (f" -- {missing}" if missing else ""))
+                continue
+            say(f"  {name}")
+            if missing:
+                say(f"    missing: {missing}")
+            if fix:
+                say(f"    fix:     {fix}")
+    if any(r != "built" for _n, r in seen):
+        say("\nThe same detail is in needs_attention/<brand>/<listing>/flag.txt.")
 
 
 def auto_flow(args):
@@ -1634,22 +1776,33 @@ def auto_flow(args):
         return
 
     built = flagged = errors = 0
+    seen, extra = [], {}
     for brand, listing_dir in targets:
         result = _auto_build_one(brand, listing_dir, ignore_floorplan,
                                  ignore_missing_phone, ignore_missing_logo)
         built += result == "built"
         flagged += result == "flagged"
         errors += result == "error"
+        seen.append((os.path.relpath(listing_dir, LISTINGS_ROOT), result))
+        if not getattr(result, "derivable", True):
+            key = (brand, os.path.basename(os.path.dirname(listing_dir)),
+                   os.path.basename(listing_dir))
+            extra.setdefault(key, []).append(
+                (result.missing, result.fix))
 
     rule("Done")
     say(f"{built} built, {flagged} flagged for review, {errors} failed.")
+    _auto_recap(seen)
 
     status, _why = load_status()
     if status is not None:
         try:
-            rows, _truth, _known = status.survey()
+            rows, _truth, known = status.survey()
             prospects.rebuild(rows, status.slugify)
-            active_view.rebuild(rows, status.built_families)
+            active_view.rebuild(rows, status.built_families,
+                                blocker=getattr(status, "blocker", None),
+                                scraped_keys=known,
+                                extra=extra)
         except OSError as e:
             say(f"prospects/ or needs_attention/ index did not rebuild "
                 f"({type(e).__name__}: {e}).")
@@ -1888,36 +2041,65 @@ def listing_actions():
             known)
 
 
-def choose_listing(show_all=False):
-    """(brand, listing_dir), creating either inline.
+def choose_listing(show_all=False, keep=None):
+    """(brand, listing_dir), creating either inline -- or None when `keep`
+    leaves nothing to pick.
 
-    show_all=False (the default) offers only what needs_attention/ currently
-    holds -- rebuilt fresh right here so a --build run that skipped the home
-    screen still sees a current view. Falls back to every listing under
-    agents/ whenever the active view can't be built, or is empty while
-    agents/ is not -- picking a listing should never look like "nothing here
-    yet" just because everything is snoozed or archived. --show-all skips
-    straight to that fallback on purpose, to reach one of those on demand.
+    show_all=False (the default) offers only the ACTIVE listings -- neither
+    delivered nor snoozed inside their follow-up window. That set comes back
+    from active_view.rebuild(), called fresh right here so a --build run that
+    skipped the home screen still sees current state; it is not read off
+    needs_attention/, which now lists the blocked subset and would offer
+    exactly the listings that cannot be built. Falls back to every listing
+    under agents/ whenever status.py can't be loaded, or nothing is active
+    while agents/ is not empty -- picking a listing should never look like
+    "nothing here yet" just because everything is snoozed or archived.
+    --show-all skips straight to that fallback on purpose, to reach one of
+    those on demand.
+
+    reason: active is the general set -- "this listing still wants something
+    from you" -- and a follow-up that is due is exactly that, so a published,
+    contacted listing stays in it on purpose. That is right for the build
+    picker and wrong for every action that can only touch a narrower set:
+    picking one of those eight from "Publish a preview link" dead-ended on
+    "No sample_ cuts -- build it first", because the publish rung was offered
+    every active listing rather than the ones it can actually publish. `keep`
+    is that narrowing, a predicate on the (brand, listing, agent) key applied
+    to whichever set was chosen above. Still derived on the spot from what is
+    in out/, so it cannot go stale -- and returning None rather than an empty
+    picker lets the caller say what is missing in its own words.
     """
     root = LISTINGS_ROOT
+    only = None
     if not show_all:
         status, _why = load_status()
         if status is not None:
             try:
-                rows, _truth, _known = status.survey()
-                active_view.rebuild(rows, status.built_families)
+                rows, _truth, known = status.survey()
+                active = active_view.rebuild(
+                    rows, status.built_families,
+                    blocker=getattr(status, "blocker", None),
+                    scraped_keys=known)
             except OSError:
                 pass
             else:
-                if brands(active_view.NEEDS_ATTENTION):
-                    root = active_view.NEEDS_ATTENTION
+                if active:
+                    only = set(active)
                 elif brands(LISTINGS_ROOT):
                     say("\n  Nothing needs attention right now -- showing "
                         "everything under agents/. --show-all skips straight "
                         "here next time.")
 
+    if keep is not None:
+        if only is None:
+            only = {(b, n, a) for b in brands(root) for n in listings(b, root)
+                    for a in agent_dirs(b, n, root)}
+        only = {k for k in only if keep(k)}
+        if not only:
+            return None
+
     actions, known = listing_actions()
-    bs = brands(root)
+    bs = active_level(only) if only else brands(root)
     brand = pick("Brand", [(b, b) for b in bs] or [], default=0,
                  extra=("+", "+ New brand")) if bs else "+"
     made_by_hand = False
@@ -1929,7 +2111,7 @@ def choose_listing(show_all=False):
         made_by_hand = True
         os.makedirs(os.path.join(LISTINGS_ROOT, brand), exist_ok=True)
 
-    ls = listings(brand, root)
+    ls = active_level(only, brand) if only else listings(brand, root)
     name = pick("Listing", [(x, x) for x in ls] or [], default=0,
                 extra=("+", "+ New listing")) if ls else "+"
     if name == "+":
@@ -1939,7 +2121,8 @@ def choose_listing(show_all=False):
         name = _new_folder_name(raw, "Listing name")
         made_by_hand = True
 
-    ags = agent_dirs(brand, name, root)
+    ags = (active_level(only, brand, name) if only
+           else agent_dirs(brand, name, root))
     labelled = [(a, f"{a}   -- {actions[(brand, name, a)]}"
                  if (brand, name, a) in actions else a) for a in ags]
     agent = pick("Agent", labelled or [], default=0,

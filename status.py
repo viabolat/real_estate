@@ -327,6 +327,54 @@ def followup_due(brand, listing, agent):
         return False
 
 
+def blocker(listing_dir, cfg, n, best, scraped=True, bcfg=None):
+    """(key, detail) for the first thing that makes a build impossible, else None.
+
+    reason: "what is missing" had three renderings and one of them was silence.
+    next_action() said it in a table column, --auto said it in a halt message,
+    and needs_attention/ -- the folder whose whole job is "these need you" --
+    said nothing at all, so a listing sat there with no way to tell WHY without
+    running a build. The ladder now lives here once: next_action() renders the
+    first five keys as its one-line verdict, active_view.py renders all six as
+    needs_attention/<brand>/<listing>/<agent>/flag.txt.
+
+    --auto keeps its own phone and logo gates rather than calling this. Those
+    run after questions() against the merged config it is about to encode from,
+    which is a different question than "is this folder buildable as it sits" --
+    and they are rule-guarded in their own right. See
+    _rules/auto-halts-on-a-blank-agent-phone.md.
+    """
+    if n == 0:
+        return "no_photos", {}
+    if best and 1920.0 / best > HOPELESS_UPSCALE:
+        return "too_small", {"best": best}
+    if not cfg and scraped:
+        return "no_config", {}
+    merged = dict(bcfg or {})
+    merged.update(cfg or {})
+    if not resolves(listing_dir, merged.get("logo")):
+        return "no_logo", {"brand": os.path.basename(
+            os.path.dirname(os.path.dirname(listing_dir)))}
+    # reason: music was a blocker here, one rung below the logo. It never was one:
+    # a missing logo halts --auto (auto-picks-up-the-brand-logo-by-slug), a missing
+    # music bed only adds --no-music and builds silent. Since sample_ cuts ship
+    # silent by standing instruction, music is never set, so this line matched on
+    # EVERY listing -- including all eleven already delivered and contacted -- and
+    # reported "add it to brand.json" in place of the real next action. The ladder
+    # now falls straight through to the build state.
+    if not resolves(listing_dir, merged.get("watermark") or "viabolat.png"):
+        return "no_watermark", {}
+    # reason: last, and deliberately invisible to next_action(). It is a real
+    # blocker -- --auto refuses to encode a card with no number on it -- but that
+    # verdict string is asserted verbatim across the suite and read by an operator
+    # who already knows the listing is not built. Adding a sixth rung above the
+    # build ladder would change the reported state of every listing Zillow gave
+    # no phone for, which is a different change than the one this file is making.
+    if not (merged.get("agent_phone") or "").strip():
+        return "no_phone", {"agent": merged.get("agent_name") or "this agent"}
+    return None
+
+
 def next_action(listing_dir, cfg, n, worst, best, scraped=True, bcfg=None):
     """The one thing standing between this listing and a deliverable.
 
@@ -348,25 +396,24 @@ def next_action(listing_dir, cfg, n, worst, best, scraped=True, bcfg=None):
     # properly, which beats retyping them. The folder name is never touched
     # either way, and audit() still reports the folder as unverifiable.
     origin = "" if cfg or scraped else "   [no leads.csv row]"
-    if n == 0:
-        return "no photos -- scrape it" + origin
-    if best and 1920.0 / best > HOPELESS_UPSCALE:
-        return f"photos only {best}px -- get the originals, do not build{origin}"
-    if not cfg and scraped:
-        return "no config.json -- rerun photos.py"
-    merged = dict(bcfg or {})
-    merged.update(cfg or {})
-    if not resolves(listing_dir, merged.get("logo")):
-        return "logo blank/missing -- add it to brand.json" + origin
-    # reason: music was a blocker here, one rung below the logo. It never was one:
-    # a missing logo halts --auto (auto-picks-up-the-brand-logo-by-slug), a missing
-    # music bed only adds --no-music and builds silent. Since sample_ cuts ship
-    # silent by standing instruction, music is never set, so this line matched on
-    # EVERY listing -- including all eleven already delivered and contacted -- and
-    # reported "add it to brand.json" in place of the real next action. The ladder
-    # now falls straight through to the build state.
-    if not resolves(listing_dir, merged.get("watermark") or "viabolat.png"):
-        return "watermark will not resolve -- the sample build will refuse" + origin
+    stuck = blocker(listing_dir, cfg, n, best, scraped, bcfg)
+    if stuck:
+        key, detail = stuck
+        if key == "no_photos":
+            return "no photos -- scrape it" + origin
+        if key == "too_small":
+            return (f"photos only {detail['best']}px -- get the originals, "
+                    f"do not build{origin}")
+        if key == "no_config":
+            return "no config.json -- rerun photos.py"
+        if key == "no_logo":
+            return "logo blank/missing -- add it to brand.json" + origin
+        if key == "no_watermark":
+            return ("watermark will not resolve -- the sample build will "
+                    "refuse" + origin)
+        # reason: "no_phone" falls through on purpose -- see blocker(). It is a
+        # real blocker, but only flag.txt renders it; this verdict line has to
+        # keep saying what it has always said.
     counts, total = built_families(listing_dir)
     # reason: the output filenames used to carry a _lowres suffix and this read it
     # back off them. They no longer say anything about resolution, so the verdict

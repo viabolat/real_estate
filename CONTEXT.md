@@ -33,7 +33,7 @@ is worth answering on photos that are not yet good enough to build with.
 | Question | Answered by | Never by |
 |---|---|---|
 | Which photos, in what order? | sorting `photos/` filenames | a manifest or an order key |
-| Which dumps are still unimported? | whether `agents/<brand>/<listing>/<agent>` exists | a marker file |
+| Which dumps are still unimported? | whether `agents/<brand>/<listing>/<agent>` exists, for every `.txt`/`.json` in `scraper/dumps/` | a marker file |
 | Which run is this listing on? | what is in `out/` — nothing / `sample_` / `tour_`, falling back to `outreach/links.csv` when `out/` has neither | a stage key in `config.json` |
 | Has it been published? | `outreach/links.csv`, read by header name | a marker file |
 | Can the stitch be reused? | `.last_build.json` vs `photo_state()` | assumption |
@@ -71,6 +71,14 @@ are pending is *derived* from
 whether `agents/<brand>/<listing>/<agent>` exists; there is no marker file and no
 manifest, for the same reason photo order lives in the filename prefix. `--build`
 skips the screen when you already know the listing.
+
+Each item picks from the *active* set — neither delivered nor snoozed inside its
+follow-up window — except **3**, which narrows that to listings holding a
+`sample_` cut in `out/` right now (`choose_listing(keep=…)`). A published,
+contacted listing is active again the day its follow-up comes due, and its cuts
+were cleared by the publish that confirmed, so the publish rung would have offered
+listings it could do nothing with. See
+[`needs-attention-is-a-view-not-a-move`](_rules/needs-attention-is-a-view-not-a-move.md).
 
 `outreach/contacted.csv` (`marked_at,brand,listing,agent`) is a manual annotation,
 never a pipeline gate: it records that a human sent the draft `publish_rung()`

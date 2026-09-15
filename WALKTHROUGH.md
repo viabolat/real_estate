@@ -29,7 +29,8 @@ npx vercel --prod
 ## Per listing
 
 **Step 4.** Open the Zillow listing page, select all, copy, and paste it into a new
-file in `scraper/dumps/`. One listing per file.
+file in `scraper/dumps/`. One listing per file. Save it as `.txt`, or as `.json` if
+what you have is the `__NEXT_DATA__` blob on its own — both are read the same way.
 
 > Already have a folder of photos that never came from a scrape? Drop it in as
 > `agents/<brand>/<listing>/<agent>/photos/` and skip to **Step 8** — `tour.py`
@@ -118,7 +119,7 @@ Everything above, plus the commands you'll reach for outside the happy path.
 | `python3 tour.py --publish-pending` | Loops rung 4's publish prompt over every listing with an unpublished sample cut — still asks per listing, still defaults to no. |
 | `python3 status.py` | One line per listing: photo count, smallest photo, next action. |
 | `python3 status.py --long` | Same, plus what each listing inherits from its brand. |
-| `python3 scraper/run.py` | Import every `*.txt` in `scraper/dumps/`. |
+| `python3 scraper/run.py` | Import every `*.txt` and `*.json` in `scraper/dumps/`. |
 | `python3 scraper/run.py one.txt` | Import just that one dump. |
 | `python3 scraper/find_gaps.py` | Report missing brand logos / blank `agent_email`s. Reports only — never fetches or writes. |
 | `python3 scraper/find_gaps.py --json` | Same data, machine-readable — what a live Claude + Chrome session consumes. |

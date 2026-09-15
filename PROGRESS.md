@@ -65,6 +65,49 @@ for whatever is in flight, which expire on ship) and `.claude/settings.local.jso
 
 ## 2. BUILT
 
+### 2026-09-04 — Showcase listings returned zero photos; the warning that knew had been ignored for months
+
+`extract_photo_urls()` matched one Zillow URL family,
+`-uncropped_scaled_within_<w>_<h>.jpg`. Zillow serves two listing shapes and only
+one of them carries it: a **Showcase** listing (GraphQL `ViewShowcasePriorityQuery`)
+has no uncropped variant at all, only `-cc_ft_<w>.jpg` plus the `sc_`/`sr_`
+families. So roughly 40% of dumps parsed cleanly, downloaded nothing, and were
+set aside as failures while their payload held every photo URL.
+
+The fix is a second pass, never a wider regex: `CC_FT_PATTERN` runs after the
+uncropped pass and appends only the hashes it did not find. On all nine dumps on
+hand the cc_ft hash set is exactly equal to the uncropped set on every regular
+listing, in the same order, so regular output is byte-identical — verified
+against a captured before-list, not by eye. `59126324` still returns its same 32
+uncropped URLs; `464857207` went 0 → 33.
+
+`photos.py:370` already detected this and printed
+`WARNING: photoCount says 33 but found 0 photo URLs`, then continued. It had been
+firing on every Showcase listing for as long as they existed. That is now
+`photo_count_verdict()`: zero URLs against a non-zero `photoCount` exits 4 before
+any folder or JSON is written, any other disagreement — including *more* than
+`photoCount`, which is what a too-broad pattern looks like — stays a warning.
+Exit 4 and not 2 so "unknown URL variant" stays tellable from "not a listing".
+`run.py` classifies both as a failed dump and keeps going.
+
+The same split renames attribution, so it is read the same way. A Showcase
+listing carries `brokerageName` and no `brokerName`, so all four slugged to
+`agents/unknown_brokerage/<address>/unassigned_agent` — one such tree had
+already been written to disk with zero photos in it, and was found parked in the
+scrape tooling's `failed/` folder. `lead.broker_name()` now falls back, as one
+reader for all three callers (the `leads.csv` row, `target_for()`'s folder name,
+the `config.json` brokerage), because the scrape is the single naming authority
+and three copies is three chances for the CSV and the folder to disagree. The
+two keys are disjoint on every dump measured, so a regular listing never reaches
+the fallback and no existing folder slug moves. `agentName` has no second key —
+`listingAgentAttributionContact` is null on a Showcase payload — so
+`UNASSIGNED_AGENT` stays correct there.
+
+New: `_rules/a-second-listing-shape-is-a-fallback-never-a-replacement.md`, and
+`tests/test_photo_extraction.py` — 23 tests over two real dumps, one of each
+shape, committed to `tests/fixtures/` with PII redacted after asserting the
+redaction left the URL list unchanged. URL extraction had no test before this.
+
 ### 2026-09-03 — `dashboard.py`: the leads and listings in a browser, read-only
 
 `python3 dashboard.py`, or **6. Open the dashboard** from `tour.py`'s home
@@ -86,7 +129,7 @@ nothing is stored: `status.survey()`/`audit()`, `tour.stage()`/`sample_cuts()`/
 
 The ladder is ordered highest-first, which is what keeps it a partition:
 `followup_due()` already implies contacted, so a due listing is rung 6 and never
-also rung 5. Rendering the nested sets as two independent filters is how two
+also rung 5. Rendering the nested sets as two independent filters is how three
 agents got the same email twice on 2026-09-02.
 
 Three refusals, each with a test: it holds no writer (its only `open()` is
@@ -1612,6 +1655,17 @@ once volume justifies it, and is not a reason to delay.
   and would cost minutes rather than milliseconds. Open: add it behind an opt-in flag
   with generated (not listing) imagery, or accept that the gap is covered by the
   operator running `--draft` before every delivery.
+
+- **A dump can already have its own listing video on Zillow, and nothing checks for
+  that.** Found 2026-09-15: `16_clarkwood_st_floor_3`, `9_hawthorne_pl_apt_7h` and
+  `59_monadnock_st_apt_1` were scraped, built out with photos and a logo, and only
+  then noticed (by the operator, not the tooling) to already have a Zillow-hosted
+  walkthrough video — building a second tour for those is wasted work, so all three
+  were deleted from `agents/`. The dump (`__NEXT_DATA__`) may carry a video URL or
+  flag `lead.py`/`photos.py` could check at parse time and print a warning, the same
+  shape as the floor-plan check in `floorplan.py`. Not designed: unconfirmed whether
+  the field is reliably present in the dump, and whether "has a video" should block
+  the scrape, just the build, or only warn.
 
 ---
 

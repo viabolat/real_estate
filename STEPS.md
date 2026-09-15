@@ -42,7 +42,8 @@ the one thing standing between it and a deliverable — then offers six things:
 | **6** | Open the dashboard | the same rows in a browser, read-only, §the dashboard |
 
 Which dumps are pending is worked out by checking whether
-`agents/<brand>/<listing>/<agent>` exists. There is no marker file and nothing to
+`agents/<brand>/<listing>/<agent>` exists, over every `.txt` and `.json` in
+`scraper/dumps/`. There is no marker file and nothing to
 tidy between runs — delete a listing folder and its dump is offered again.
 
 `python3 tour.py --build` skips the screen when you already know the listing.
@@ -64,15 +65,27 @@ listing, before writing anything.
 Menu item **2** does this for you. The command behind it:
 
 ```bash
-python3 scraper/run.py            # every *.txt in scraper/dumps/
+python3 scraper/run.py            # every *.txt and *.json in scraper/dumps/
 python3 scraper/run.py one.txt    # or just the one
 ```
 
-Paste one listing per file into `scraper/dumps/`. **Never two in one file** — the
+Paste one listing per file into `scraper/dumps/`, saved as `.txt` or `.json`. Both
+are read as raw text by the same regexes — the `__NEXT_DATA__` blob saved on its own
+is the same bytes the full page dump carries inside it — so the extension decides
+only what is picked up, never how it is parsed. `scraper/photos.py`'s `is_dump()` is
+the only place that list lives, so the home screen's pending count and
+`scraper/run.py` cannot disagree about a file. **Never two in one file** — the
 parsers take the first match in the whole text, so a concatenated file puts the first
 listing's agent name and phone on the second listing's photos, with nothing raised.
 A dump that is not a listing page (empty, half-copied, wrong tab) is refused and
-writes nothing; the run names it at the end and exits non-zero. Re-running the folder
+writes nothing; the run names it at the end and exits non-zero. A dump whose
+`photoCount` says it has photos but from which **no** photo URL can be read is
+refused the same way (exit 4 rather than 2, so the two are tellable apart by
+hand) — that combination means Zillow is serving a URL variant the scraper does
+not know, not that the listing is odd, and it is refused before any folder or
+JSON is written so there is nothing half-imported to clean up. Finding *some* but
+not all of them, or more than `photoCount`, is still only a warning; the photos
+that were found are real. Re-running the folder
 is safe — duplicate lead rows are skipped, photos already on disk are skipped, and
 neither JSON is ever overwritten — so there is nothing to move or tidy between runs.
 
@@ -209,11 +222,20 @@ resolved anywhere — neither `config.json`/`brand.json`'s own `logo` nor the
 brand-slug lookup above — and would otherwise ship the type-only card without
 anyone deciding that on purpose. Third, whether a photo in `photos/` is a
 floor plan or whole-house layout image, which must never appear in the video.
-A hit on any halts just that listing — printed, never guessed at or deleted —
-and the rest of the batch keeps going. Fix `config.json`, add the logo file,
-or delete the photo by hand and rerun `--auto`, bare or scoped to that
-`brand/listing`; nothing about any halt is written anywhere, so re-running
-from the top is the entire resume mechanism. A false positive or a
+A hit on any skips just that listing — printed, never guessed at or deleted —
+and the rest of the batch keeps going. The run never stops early: the closing
+summary names every listing it touched, grouped into built, flagged and failed,
+with what each flagged one is missing and the command that fixes it. The same
+two lines are written into `needs_attention/<brand>/<listing>/<agent>/flag.txt`,
+so the reason is still in front of you tomorrow without re-reading the
+scrollback.
+
+That file is the only thing a skip writes anywhere, and it is derived, not
+recorded: it exists while the problem is still true and is wiped with the rest
+of the view on the next rebuild. Nothing about it needs clearing, and deleting
+it changes nothing. Fix `config.json`, add the logo file, or delete the photo by
+hand and rerun `--auto`, bare or scoped to that `brand/listing` — re-running
+from the top is still the entire resume mechanism. A false positive or a
 genuinely-absent asset can be forced through once, per listing, with
 `--ignore-missing-phone-check`, `--ignore-missing-logo-check`, or
 `--ignore-floorplan-check` — all three need a scope, and none is ever allowed
@@ -496,7 +518,15 @@ See [`a-confirmed-sample-publish-clears-its-own-cuts`](_rules/a-confirmed-sample
 python3 tour.py --publish-pending
 ```
 
-The home screen's **3. Publish a review link** takes one listing per trip. This
+The home screen's **3. Publish a review link** takes one listing per trip, and it
+offers **only listings that have a `sample_` cut in `out/` right now** — the same
+`sample_cuts()` check, applied to the picker rather than only to the listing you
+already chose. The picker's default set is the *active* one, which by design keeps
+a published, contacted listing in it while its follow-up is due; that is right for
+building and wrong here, because a confirmed publish already cleared that
+listing's cuts. Before this narrowing, eight already-contacted listings sat in the
+menu and picking one dead-ended on `No sample_ cuts -- build it first`. When
+nothing has a cut, the rung says so instead of opening an empty picker. This
 is the same rung — the exact same `publish_rung()`, the exact same **"Publish the
 sample cuts?"** prompt, defaulting to **no** — looped over every listing that has
 an unpublished `sample_` cut sitting in `out/` right now, so a run that built five
@@ -533,7 +563,7 @@ re-published — and asks whether you sent it. Saying yes appends a **second** r
 `contacted.csv`, which re-arms the 5-day window so it snoozes again instead of
 resurfacing every render. Send the follow-up, never the original: sending
 `outreach_draft.txt` twice is a byte-identical duplicate, which is what happened to
-two agents on 2026-09-02. See
+three agents on 2026-09-02. See
 [`a-follow-up-is-its-own-draft-and-its-own-row`](_rules/a-follow-up-is-its-own-draft-and-its-own-row.md). Either way
 the result shows up as a `CONTACTED` column in `status.py`'s roll-up and in
 `leads.html`, which also gets a derived `FOLLOW UP` column — 5 days after
@@ -566,7 +596,7 @@ dashboard disagree about a listing, the dashboard is wrong.
 A listing appears on exactly one rung, tested highest-first. That matters most
 between 5 and 6: a follow-up-due listing is *also* a contacted one, so showing
 both would list it under a heading that means "leave it alone" and one that
-means "act" — which is how two agents got the same email twice on 2026-09-02.
+means "act" — which is how three agents got the same email twice on 2026-09-02.
 
 **Three things it deliberately will not do.**
 
@@ -586,16 +616,39 @@ Video seeking works — the media route implements RFC 7233 `Range`, answering
 **206** with a `Content-Range`, **416** for a range past the end of the file, and
 **200** with the whole cut when the header is missing or malformed.
 
-### `needs_attention/` — why the build picker stops showing a listing
+### `needs_attention/` — the warning light
 
-Build's picker (**2. Build a tour**, or `--build`) does not list everything under
-`agents/` — it defaults to `needs_attention/`, a filtered view rebuilt fresh every
-time the roll-up runs. A listing drops out of it the moment you mark it contacted
-above, and reappears on its own once the same 5-day follow-up window `leads.html`
-already computes has passed — no separate step, nothing to undo. A listing with a
-`tour_` cut already built (delivered) drops out for good, the same way. Nothing
-in `agents/` moves or is renamed; `needs_attention/` is only symlinks, gitignored,
-regenerated on every roll-up the same way `prospects/` already is.
+`needs_attention/` names the listings that are **stuck**, and nothing else. One
+file per blocked listing, regenerated on every roll-up the same way `prospects/`
+already is, gitignored:
+
+```
+needs_attention/parkway_real_estate/18_thurlow_st/danielle_m_obrien/flag.txt
+
+  missing: no logo -- brand.json sets none and
+           global_assets/logos/parkway_real_estate.png does not exist
+  fix:     add global_assets/logos/parkway_real_estate.png, then:
+           python3 tour.py --auto parkway_real_estate/18_thurlow_st
+```
+
+A folder appears here only when a `flag.txt` was written into it, so the tree
+reads at a glance: something in it means something is blocked, empty means
+nothing is. Make the fix in `agents/<brand>/<listing>/<agent>/` — there is no
+symlink here and nothing to edit through — then run `tour.py` again. The whole
+tree is wiped and rebuilt, so a fixed listing is not written back and an unfixed
+one is. Deleting a `flag.txt`, a folder, or the whole of `needs_attention/`
+breaks nothing and clears nothing you will miss.
+
+Only listings that are yours to act on today can be flagged: not a delivered one
+(a `tour_` cut exists), and not one you marked contacted that is still inside the
+same 5-day follow-up window `leads.html` computes. Those two simply stay quiet —
+no separate step, nothing to undo — and the contacted one becomes eligible again
+on its own once its date arrives.
+
+The build picker (**2. Build a tour**, or `--build`) does **not** read this tree.
+It lists what is blocked; a picker needs what is buildable. It offers every
+*active* listing instead — everything neither delivered nor snoozed, blocked or
+not — worked out fresh each time it runs.
 
 If a client replies before the follow-up date and you need to rebuild sooner:
 
@@ -1359,6 +1412,8 @@ back end. See `IDEA.md` §2.
 | `WARNING: watermark upscales N.Nx` | `viabolat.png` too small | Supply >= 864px on the long edge |
 | `sample_` files identical to `tour_` | Watermark file missing | Check the `sample watermark:` line in the run output |
 | `--finish-only` did a full rebuild | No `work_silent.mp4` to reuse | Expected fallback. It says so and continues. |
+| `photoCount says N but no photo URLs matched` | Zillow is serving a photo URL variant `PHOTO_PATTERN`/`CC_FT_PATTERN` do not cover | Exit 4, nothing written. Add the new family as a further **fallback** pass in `scraper/photos.py` — never by widening the existing pattern. See `_rules/a-second-listing-shape-is-a-fallback-never-a-replacement.md` |
+| `WARNING: photoCount says N but found M photo URLs` | Partial or over-broad match | The M found are real and were downloaded. Over-collection (M > N) means a pattern is too broad |
 | `WARNING: N of M filenames do not start with a number` | Photos still carry CDN or camera names | Rename to `01_`, `02_`, ... **before** delivering. The order is alphabetical, not yours. See §2 |
 | Rooms play in the wrong order | Prefixes wrong, or a rename was rebuilt with `--finish-only` | Fix the prefixes, then a full rebuild with `--keep-work` |
 | `WARNING: --finish-only reuses that earlier stitch` | Photos may have changed since `work_silent.mp4` was made | If they did, drop the flag. If they did not, ignore it. |

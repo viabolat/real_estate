@@ -6,6 +6,11 @@ needs me right now": not archived (no tour_ cut yet) and not snoozed (contacted
 and its follow-up date has not arrived). See active_view.py's own module
 docstring for the three-tier rule and why built_families is injected rather
 than imported.
+
+The tiering tests below inject a blocker that always fires, so that "is this
+listing active?" -- their actual subject -- is the only thing deciding whether
+a flag.txt appears. Whether a REAL blocker fires is FlagFileNamesWhatIsMissing's
+subject, further down.
 """
 import datetime
 import json
@@ -84,20 +89,54 @@ class ActiveViewIsARegeneratedView(unittest.TestCase):
                                        when=datetime.datetime.fromisoformat(marked_at))
 
     def rebuild(self, rows):
-        self.active_view.rebuild(rows, self.status.built_families,
-                                  agents_dir=self.agents_dir, dest_dir=self.dest_dir)
+        return self.active_view.rebuild(
+            rows, self.status.built_families, agents_dir=self.agents_dir,
+            dest_dir=self.dest_dir,
+            blocker=lambda *a, **kw: ("no_photos", {}))
 
     def link_for(self, brand, listing, agent):
-        return os.path.join(self.dest_dir, brand, listing, agent)
+        return os.path.join(self.dest_dir, brand, listing, agent,
+                            self.active_view.FLAG_FILE)
 
     def test_untouched_listing_is_active(self):
         self.make_listing("compass", "41_worcester_sq", "mary_smith")
+        active = self.rebuild([row("compass", "41_worcester_sq", "mary_smith")])
+        self.assertTrue(os.path.isfile(
+            self.link_for("compass", "41_worcester_sq", "mary_smith")))
+        self.assertEqual(active,
+                         [("compass", "41_worcester_sq", "mary_smith")])
+
+    def test_the_tree_holds_the_file_and_nothing_else(self):
+        """No symlink, no folder to work in -- the fix happens in agents/.
+
+        reason: it used to symlink the agent folder, which meant the view was
+        also somewhere you could edit FROM. Two places to do the work is one
+        too many. See _rules/needs-attention-is-a-view-not-a-move.md.
+        """
+        self.make_listing("compass", "41_worcester_sq", "mary_smith")
         self.rebuild([row("compass", "41_worcester_sq", "mary_smith")])
-        link = self.link_for("compass", "41_worcester_sq", "mary_smith")
-        self.assertTrue(os.path.islink(link))
-        self.assertTrue(os.path.samefile(
-            link, os.path.join(self.agents_dir, "compass", "41_worcester_sq",
-                                "mary_smith")))
+        found = []
+        for here, dirs, files in os.walk(self.dest_dir):
+            found += [os.path.join(here, f) for f in files]
+            self.assertEqual([d for d in dirs
+                              if os.path.islink(os.path.join(here, d))], [])
+        self.assertEqual(
+            found, [self.link_for("compass", "41_worcester_sq", "mary_smith")])
+
+    def test_an_active_listing_is_returned_even_when_nothing_blocks_it(self):
+        """The picker's set and the tree are deliberately different sets.
+
+        reason: the tree lists what is BLOCKED. A build picker fed from that
+        would offer exactly the listings that cannot be built.
+        """
+        self.make_listing("compass", "41_worcester_sq", "mary_smith")
+        rows = [row("compass", "41_worcester_sq", "mary_smith")]
+        active = self.active_view.rebuild(
+            rows, self.status.built_families, agents_dir=self.agents_dir,
+            dest_dir=self.dest_dir, blocker=lambda *a, **kw: None)
+        self.assertEqual(active,
+                         [("compass", "41_worcester_sq", "mary_smith")])
+        self.assertFalse(os.path.isdir(self.dest_dir))
 
     def test_contacted_one_day_ago_is_snoozed(self):
         self.make_listing("compass", "41_worcester_sq", "mary_smith")
@@ -112,7 +151,7 @@ class ActiveViewIsARegeneratedView(unittest.TestCase):
         self.mark_contacted("compass", "41_worcester_sq", "mary_smith",
                              _days_ago(6))
         self.rebuild([row("compass", "41_worcester_sq", "mary_smith")])
-        self.assertTrue(os.path.islink(
+        self.assertTrue(os.path.isfile(
             self.link_for("compass", "41_worcester_sq", "mary_smith")))
 
     def test_a_tour_cut_is_archived_even_if_recently_contacted(self):
@@ -124,10 +163,10 @@ class ActiveViewIsARegeneratedView(unittest.TestCase):
         self.assertFalse(os.path.exists(
             self.link_for("compass", "41_worcester_sq", "mary_smith")))
 
-    def test_a_listing_that_becomes_archived_drops_its_stale_link(self):
+    def test_a_listing_that_becomes_archived_drops_its_stale_flag(self):
         d = self.make_listing("compass", "41_worcester_sq", "mary_smith")
         self.rebuild([row("compass", "41_worcester_sq", "mary_smith")])
-        self.assertTrue(os.path.islink(
+        self.assertTrue(os.path.isfile(
             self.link_for("compass", "41_worcester_sq", "mary_smith")))
         out = os.path.join(d, "out")
         os.makedirs(out, exist_ok=True)
@@ -152,7 +191,7 @@ class ActiveViewIsARegeneratedView(unittest.TestCase):
         rows = [row("compass", "41_worcester_sq", "mary_smith")]
         self.rebuild(rows)
         self.rebuild(rows)
-        self.assertTrue(os.path.islink(
+        self.assertTrue(os.path.isfile(
             self.link_for("compass", "41_worcester_sq", "mary_smith")))
 
 
@@ -194,7 +233,7 @@ class AFollowUpIsItsOwnDraftAndItsOwnRow(unittest.TestCase):
     The shipped failure: contacted_at() returned the FIRST matching row, so a
     recorded follow-up could never move the window forward. needs_attention/
     kept resurfacing the listing, the only draft in the folder was the
-    first-contact one, and two agents received a byte-identical duplicate of an
+    first-contact one, and three agents received a byte-identical duplicate of an
     email from two weeks earlier.
     """
 
@@ -339,8 +378,21 @@ class ChooseListingPickerScope(unittest.TestCase):
         with open(os.path.join(out, "tour_branded.mp4"), "wb") as f:
             f.write(b"x")
 
+        # reason: the publish rung narrows the same picker to listings that
+        # HAVE a sample_ cut. Sorted after both names above, so every default
+        # pick in this class still lands on active_listing.
+        self.sample_built = os.path.join(self.agents_dir, "compass",
+                                         "sample_built_listing", "mary_smith")
+        sample_out = os.path.join(self.sample_built, "out")
+        os.makedirs(sample_out, exist_ok=True)
+        open(os.path.join(self.sample_built, "config.json"), "w").write("{}")
+        with open(os.path.join(sample_out, "mary_smith_sample_branded.mp4"),
+                  "wb") as f:
+            f.write(b"x")
+
         rows = [row("compass", "active_listing", "mary_smith"),
-                row("compass", "archived_listing", "mary_smith")]
+                row("compass", "archived_listing", "mary_smith"),
+                row("compass", "sample_built_listing", "mary_smith")]
         fake_status = FakeStatus(rows, self.status.built_families)
 
         self.prev = (self.tour.LISTINGS_ROOT, self.tour._STATUS, self.tour.pick,
@@ -360,9 +412,9 @@ class ChooseListingPickerScope(unittest.TestCase):
         # the sandbox dirs explicit here instead.
         real_rebuild = self.prev[6]
         self.tour.active_view.rebuild = (
-            lambda rows, built_families, agents_dir=None, dest_dir=None:
+            lambda rows, built_families, agents_dir=None, dest_dir=None, **kw:
             real_rebuild(rows, built_families, agents_dir=self.agents_dir,
-                         dest_dir=self.needs_attention_dir))
+                         dest_dir=self.needs_attention_dir, **kw))
         self.tour.ask = lambda *a, **k: (_ for _ in ()).throw(
             AssertionError("must not prompt for free text in this test"))
         self.addCleanup(self._restore)
@@ -388,10 +440,47 @@ class ChooseListingPickerScope(unittest.TestCase):
         _brand, listing_dir = self.tour.choose_listing(show_all=False)
         self.assertEqual(listing_dir, self.active)
 
+    def test_the_picker_does_not_read_needs_attention(self):
+        """The menu survives an empty -- or deleted -- warning tree.
+
+        reason: choose_listing() used to set root = NEEDS_ATTENTION and walk
+        it. That directory lists only BLOCKED listings now, so walking it
+        would offer exactly the ones that cannot be built -- and deleting it,
+        which the flag.txt invites, would empty the menu. It takes
+        rebuild()'s returned active set instead.
+        """
+        self._pick_by_value(None)
+        _brand, listing_dir = self.tour.choose_listing(show_all=False)
+        self.assertEqual(listing_dir, self.active)
+        self.assertFalse(os.path.isdir(self.needs_attention_dir))
+
     def test_show_all_true_still_reaches_the_archived_listing(self):
         self._pick_by_value("archived_listing")
         _brand, listing_dir = self.tour.choose_listing(show_all=True)
         self.assertEqual(listing_dir, self.archived)
+
+    def test_keep_narrows_the_picker_to_what_the_action_can_touch(self):
+        """The publish rung's narrowing: active is the wrong set for it.
+
+        reason: a published, contacted listing stays active while its
+        follow-up is due, and its out/ was cleared by the publish that
+        confirmed. Offering it from "Publish a preview link" dead-ended on
+        "No sample_ cuts -- build it first". keep= filters the same set by
+        what is on disk now, so only the built one is reachable.
+        """
+        self._pick_by_value(None)
+        listing_dir = self.tour.choose_listing(
+            keep=lambda k: bool(self.tour.sample_cuts(
+                os.path.join(self.agents_dir, *k))))[1]
+        self.assertEqual(listing_dir, self.sample_built)
+
+    def test_keep_matching_nothing_returns_none_instead_of_an_empty_picker(self):
+        """reason: the caller says what is missing in its own words -- an
+        empty Brand list would offer only "+ New brand", which for the publish
+        rung means scaffolding a folder that by definition has no cut."""
+        self.tour.pick = lambda *a, **k: self.fail(
+            "must not open a picker when nothing survives keep=")
+        self.assertIsNone(self.tour.choose_listing(keep=lambda k: False))
 
 
 class HomeThreadsShowAllIntoBuildFlow(unittest.TestCase):
@@ -432,3 +521,153 @@ class HomeThreadsShowAllIntoBuildFlow(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FlagFileNamesWhatIsMissing(unittest.TestCase):
+    """needs_attention/<brand>/<listing>/<agent>/flag.txt -- and nothing else.
+
+    reason: the view answered "which listings need you" and nothing else, so a
+    flagged listing sat in the folder with no way to tell what it was waiting
+    for short of running a build and reading the halt message. It then answered
+    two questions at once -- what is blocked, and what can be picked to build --
+    which are opposite sets. It answers only the first now: a warning light,
+    lit while something is wrong, out when it is fixed, back on if it is not.
+    See active_view.py's docstring and
+    _rules/needs-attention-is-a-view-not-a-move.md.
+    """
+
+    def setUp(self):
+        self.active_view = helpers.active_view_module()
+        self.status = helpers.status_module()
+        self.publish = self.active_view.publish
+        self.tmp = tempfile.mkdtemp(prefix="active_view_flag_test_")
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.agents_dir = os.path.join(self.tmp, "agents")
+        self.dest_dir = os.path.join(self.tmp, "needs_attention")
+        os.makedirs(self.agents_dir)
+        original = self.publish.CONTACTED
+        self.addCleanup(setattr, self.publish, "CONTACTED", original)
+        self.publish.CONTACTED = os.path.join(self.tmp, "contacted.csv")
+
+    def rebuild(self, rows, extra=None, blocker=True):
+        return self.active_view.rebuild(
+            rows, self.status.built_families, agents_dir=self.agents_dir,
+            dest_dir=self.dest_dir,
+            blocker=self.status.blocker if blocker else None,
+            scraped_keys=(), extra=extra)
+
+    def flag_path(self, brand, listing, agent):
+        return os.path.join(self.dest_dir, brand, listing, agent,
+                            self.active_view.FLAG_FILE)
+
+    def make_listing(self, brand, listing, agent, photos=0, cfg=None):
+        d = os.path.join(self.agents_dir, brand, listing, agent)
+        os.makedirs(os.path.join(d, "photos"), exist_ok=True)
+        with open(os.path.join(d, "config.json"), "w") as f:
+            json.dump(cfg or {}, f)
+        return d
+
+    def buildable_row(self, brand, listing, agent):
+        """A row status.blocker() finds nothing wrong with."""
+        cfg = {"logo": "logo.png", "watermark": "logo.png",
+               "agent_phone": "6175551234"}
+        d = self.make_listing(brand, listing, agent, cfg=cfg)
+        open(os.path.join(d, "logo.png"), "wb").write(b"x")
+        return (brand, listing, agent, 12, 1536, 1536, "ready to build", {}, cfg)
+
+    def blocked_row(self, brand, listing, agent):
+        """A row with no photos -- the first rung of the blocker ladder."""
+        self.make_listing(brand, listing, agent)
+        return (brand, listing, agent, 0, None, None, "no photos -- scrape it",
+                {}, {})
+
+    def test_a_blocked_listing_gets_the_reason_and_the_fix(self):
+        self.rebuild([self.blocked_row("acme", "12_main_st", "jo_ray")])
+        text = open(self.flag_path("acme", "12_main_st", "jo_ray")).read()
+        self.assertIn("missing:", text)
+        self.assertIn("photos/ is empty", text)
+        self.assertIn("fix:", text)
+        self.assertIn("scraper/run.py", text)
+
+    def test_the_fix_is_pointed_at_agents_not_at_the_view(self):
+        """The file says where the work happens, because it is not here."""
+        self.rebuild([self.blocked_row("acme", "12_main_st", "jo_ray")])
+        text = open(self.flag_path("acme", "12_main_st", "jo_ray")).read()
+        self.assertIn("agents/", text)
+        self.assertNotIn("edit this", text.lower())
+
+    def test_a_listing_with_nothing_blocking_it_is_absent_entirely(self):
+        """Not "present without a file" -- absent. That is the whole signal.
+
+        reason: it used to be symlinked in whether or not anything was wrong,
+        so the folder listed everything active and the operator still had to
+        open each one to find out which needed them.
+        """
+        active = self.rebuild([self.buildable_row("acme", "12_main_st", "jo_ray")])
+        self.assertFalse(os.path.exists(
+            os.path.join(self.dest_dir, "acme")))
+        self.assertEqual(active, [("acme", "12_main_st", "jo_ray")])
+
+    def test_the_file_is_not_written_back_once_the_listing_is_fixed(self):
+        self.rebuild([self.blocked_row("acme", "12_main_st", "jo_ray")])
+        self.assertTrue(os.path.exists(
+            self.flag_path("acme", "12_main_st", "jo_ray")))
+        self.rebuild([self.buildable_row("acme", "12_main_st", "jo_ray")])
+        self.assertFalse(os.path.exists(
+            self.flag_path("acme", "12_main_st", "jo_ray")))
+
+    def test_an_unfixed_listing_is_flagged_again_on_the_next_run(self):
+        rows = [self.blocked_row("acme", "12_main_st", "jo_ray")]
+        self.rebuild(rows)
+        self.rebuild(rows)
+        self.assertTrue(os.path.exists(
+            self.flag_path("acme", "12_main_st", "jo_ray")))
+
+    def test_deleting_the_whole_view_by_hand_costs_nothing(self):
+        rows = [self.blocked_row("acme", "12_main_st", "jo_ray")]
+        self.rebuild(rows)
+        shutil.rmtree(self.dest_dir)
+        self.rebuild(rows)
+        self.assertTrue(os.path.exists(
+            self.flag_path("acme", "12_main_st", "jo_ray")))
+
+    def test_a_finding_the_view_cannot_derive_is_carried_in(self):
+        r = self.buildable_row("acme", "12_main_st", "jo_ray")
+        self.rebuild([r], extra={("acme", "12_main_st", "jo_ray"):
+                                 [("2 photo(s) look like a floor plan: 04.jpg",
+                                   "delete them, then rerun --auto")]})
+        text = open(self.flag_path("acme", "12_main_st", "jo_ray")).read()
+        self.assertIn("look like a floor plan", text)
+        self.assertIn("delete them", text)
+
+    def test_two_agents_under_one_listing_get_a_file_each(self):
+        """reason: they shared one appended-to file when they shared one
+        folder. They have a folder each now, so neither can erase the other
+        and neither has to be read to find the other's problem."""
+        self.rebuild([self.blocked_row("acme", "12_main_st", "jo_ray"),
+                      self.blocked_row("acme", "12_main_st", "sam_poe")])
+        for agent in ("jo_ray", "sam_poe"):
+            text = open(self.flag_path("acme", "12_main_st", agent)).read()
+            self.assertEqual(text.count("Written by tour.py"), 1)
+            self.assertIn("photos/ is empty", text)
+
+    def test_one_agent_blocked_does_not_flag_the_other(self):
+        self.rebuild([self.blocked_row("acme", "12_main_st", "jo_ray"),
+                      self.buildable_row("acme", "12_main_st", "sam_poe")])
+        self.assertTrue(os.path.exists(
+            self.flag_path("acme", "12_main_st", "jo_ray")))
+        self.assertFalse(os.path.exists(
+            os.path.join(self.dest_dir, "acme", "12_main_st", "sam_poe")))
+
+    def test_without_a_blocker_nothing_is_written_and_the_set_still_stands(self):
+        """Omitting the injection empties the tree, it does not corrupt it.
+
+        reason: tour.py reads status.blocker through getattr() -- a guarded
+        load that can come back without it. An empty warning tree understates
+        the problem; a picker with no listings in it would stop the operator
+        working entirely.
+        """
+        active = self.rebuild([self.blocked_row("acme", "12_main_st", "jo_ray")],
+                              blocker=False)
+        self.assertFalse(os.path.isdir(self.dest_dir))
+        self.assertEqual(active, [("acme", "12_main_st", "jo_ray")])
