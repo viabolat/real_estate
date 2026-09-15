@@ -1656,6 +1656,17 @@ once volume justifies it, and is not a reason to delay.
   with generated (not listing) imagery, or accept that the gap is covered by the
   operator running `--draft` before every delivery.
 
+- **A dump can already have its own listing video on Zillow, and nothing checks for
+  that.** Found 2026-09-15: `16_clarkwood_st_floor_3`, `9_hawthorne_pl_apt_7h` and
+  `59_monadnock_st_apt_1` were scraped, built out with photos and a logo, and only
+  then noticed (by the operator, not the tooling) to already have a Zillow-hosted
+  walkthrough video — building a second tour for those is wasted work, so all three
+  were deleted from `agents/`. The dump (`__NEXT_DATA__`) may carry a video URL or
+  flag `lead.py`/`photos.py` could check at parse time and print a warning, the same
+  shape as the floor-plan check in `floorplan.py`. Not designed: unconfirmed whether
+  the field is reliably present in the dump, and whether "has a video" should block
+  the scrape, just the build, or only warn.
+
 ---
 
 ## 7. STANDING OPERATOR PREFERENCES
