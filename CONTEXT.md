@@ -72,6 +72,14 @@ whether `agents/<brand>/<listing>/<agent>` exists; there is no marker file and n
 manifest, for the same reason photo order lives in the filename prefix. `--build`
 skips the screen when you already know the listing.
 
+Each item picks from the *active* set — neither delivered nor snoozed inside its
+follow-up window — except **3**, which narrows that to listings holding a
+`sample_` cut in `out/` right now (`choose_listing(keep=…)`). A published,
+contacted listing is active again the day its follow-up comes due, and its cuts
+were cleared by the publish that confirmed, so the publish rung would have offered
+listings it could do nothing with. See
+[`needs-attention-is-a-view-not-a-move`](_rules/needs-attention-is-a-view-not-a-move.md).
+
 `outreach/contacted.csv` (`marked_at,brand,listing,agent`) is a manual annotation,
 never a pipeline gate: it records that a human sent the draft `publish_rung()`
 already wrote, nothing more. `publish_rung()` asks once, right after a publish

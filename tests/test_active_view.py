@@ -378,8 +378,21 @@ class ChooseListingPickerScope(unittest.TestCase):
         with open(os.path.join(out, "tour_branded.mp4"), "wb") as f:
             f.write(b"x")
 
+        # reason: the publish rung narrows the same picker to listings that
+        # HAVE a sample_ cut. Sorted after both names above, so every default
+        # pick in this class still lands on active_listing.
+        self.sample_built = os.path.join(self.agents_dir, "compass",
+                                         "sample_built_listing", "mary_smith")
+        sample_out = os.path.join(self.sample_built, "out")
+        os.makedirs(sample_out, exist_ok=True)
+        open(os.path.join(self.sample_built, "config.json"), "w").write("{}")
+        with open(os.path.join(sample_out, "mary_smith_sample_branded.mp4"),
+                  "wb") as f:
+            f.write(b"x")
+
         rows = [row("compass", "active_listing", "mary_smith"),
-                row("compass", "archived_listing", "mary_smith")]
+                row("compass", "archived_listing", "mary_smith"),
+                row("compass", "sample_built_listing", "mary_smith")]
         fake_status = FakeStatus(rows, self.status.built_families)
 
         self.prev = (self.tour.LISTINGS_ROOT, self.tour._STATUS, self.tour.pick,
@@ -445,6 +458,29 @@ class ChooseListingPickerScope(unittest.TestCase):
         self._pick_by_value("archived_listing")
         _brand, listing_dir = self.tour.choose_listing(show_all=True)
         self.assertEqual(listing_dir, self.archived)
+
+    def test_keep_narrows_the_picker_to_what_the_action_can_touch(self):
+        """The publish rung's narrowing: active is the wrong set for it.
+
+        reason: a published, contacted listing stays active while its
+        follow-up is due, and its out/ was cleared by the publish that
+        confirmed. Offering it from "Publish a preview link" dead-ended on
+        "No sample_ cuts -- build it first". keep= filters the same set by
+        what is on disk now, so only the built one is reachable.
+        """
+        self._pick_by_value(None)
+        listing_dir = self.tour.choose_listing(
+            keep=lambda k: bool(self.tour.sample_cuts(
+                os.path.join(self.agents_dir, *k))))[1]
+        self.assertEqual(listing_dir, self.sample_built)
+
+    def test_keep_matching_nothing_returns_none_instead_of_an_empty_picker(self):
+        """reason: the caller says what is missing in its own words -- an
+        empty Brand list would offer only "+ New brand", which for the publish
+        rung means scaffolding a folder that by definition has no cut."""
+        self.tour.pick = lambda *a, **k: self.fail(
+            "must not open a picker when nothing survives keep=")
+        self.assertIsNone(self.tour.choose_listing(keep=lambda k: False))
 
 
 class HomeThreadsShowAllIntoBuildFlow(unittest.TestCase):

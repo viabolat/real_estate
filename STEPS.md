@@ -518,7 +518,15 @@ See [`a-confirmed-sample-publish-clears-its-own-cuts`](_rules/a-confirmed-sample
 python3 tour.py --publish-pending
 ```
 
-The home screen's **3. Publish a review link** takes one listing per trip. This
+The home screen's **3. Publish a review link** takes one listing per trip, and it
+offers **only listings that have a `sample_` cut in `out/` right now** — the same
+`sample_cuts()` check, applied to the picker rather than only to the listing you
+already chose. The picker's default set is the *active* one, which by design keeps
+a published, contacted listing in it while its follow-up is due; that is right for
+building and wrong here, because a confirmed publish already cleared that
+listing's cuts. Before this narrowing, eight already-contacted listings sat in the
+menu and picking one dead-ended on `No sample_ cuts -- build it first`. When
+nothing has a cut, the rung says so instead of opening an empty picker. This
 is the same rung — the exact same `publish_rung()`, the exact same **"Publish the
 sample cuts?"** prompt, defaulting to **no** — looped over every listing that has
 an unpublished `sample_` cut sitting in `out/` right now, so a run that built five

@@ -83,6 +83,13 @@ Only the floor-plan finding travels that way explicitly (--auto hands it to
 active_view.rebuild(extra=...)); everything else the view re-derives for itself
 through status.blocker().
 
+The home screen's third item narrows the picker to listings that HAVE a sample_
+cut, through choose_listing(keep=...). The picker's default set is the active
+one, which keeps a published, contacted listing in it while its follow-up is due
+-- correct for building, wrong for publishing, since a confirmed publish already
+cleared that listing's cuts. Derived from out/ on the spot like every other set
+here, and the rung says what is missing rather than opening an empty picker.
+
 --publish-pending is the matching batch entry for what is
 left once the built ones are ready: it walks every listing with a sample_ cut in
 out/ that links.csv has no record of yet, opens the branded cut for a look (macOS
@@ -1386,8 +1393,25 @@ def import_dumps():
 
 
 def publish_action():
-    """Menu route to rung 4, for a listing that is already built."""
-    _brand, listing_dir = choose_listing()
+    """Menu route to rung 4, for a listing that is already built.
+
+    reason: the picker is narrowed to listings that HAVE a sample_ cut, not
+    just active ones. A confirmed publish clears its own cuts
+    (a-confirmed-sample-publish-clears-its-own-cuts.md), so a published,
+    contacted listing has an empty out/ and nothing here can act on it -- yet
+    it stays active while its follow-up is due, and the menu offered all eight
+    of them. The check below still stands for the "+ New listing" path, which
+    reaches a folder no filter saw.
+    """
+    picked = choose_listing(keep=lambda k: bool(
+        sample_cuts(os.path.join(LISTINGS_ROOT, *k))))
+    if picked is None:
+        say("\n  Nothing to publish -- no listing has a sample_ cut in out/.\n"
+            "  A confirmed publish clears its own cuts, so the ones already on "
+            "the bucket\n  are not offered here. Build one first (1), or use 5 "
+            "to mark a lead contacted.")
+        return
+    _brand, listing_dir = picked
     if not sample_cuts(listing_dir):
         say(f"\n  No sample_ cuts in "
             f"{os.path.relpath(listing_dir, ROOT)}/out/ -- build it first.\n"
@@ -2017,8 +2041,9 @@ def listing_actions():
             known)
 
 
-def choose_listing(show_all=False):
-    """(brand, listing_dir), creating either inline.
+def choose_listing(show_all=False, keep=None):
+    """(brand, listing_dir), creating either inline -- or None when `keep`
+    leaves nothing to pick.
 
     show_all=False (the default) offers only the ACTIVE listings -- neither
     delivered nor snoozed inside their follow-up window. That set comes back
@@ -2031,6 +2056,18 @@ def choose_listing(show_all=False):
     "nothing here yet" just because everything is snoozed or archived.
     --show-all skips straight to that fallback on purpose, to reach one of
     those on demand.
+
+    reason: active is the general set -- "this listing still wants something
+    from you" -- and a follow-up that is due is exactly that, so a published,
+    contacted listing stays in it on purpose. That is right for the build
+    picker and wrong for every action that can only touch a narrower set:
+    picking one of those eight from "Publish a preview link" dead-ended on
+    "No sample_ cuts -- build it first", because the publish rung was offered
+    every active listing rather than the ones it can actually publish. `keep`
+    is that narrowing, a predicate on the (brand, listing, agent) key applied
+    to whichever set was chosen above. Still derived on the spot from what is
+    in out/, so it cannot go stale -- and returning None rather than an empty
+    picker lets the caller say what is missing in its own words.
     """
     root = LISTINGS_ROOT
     only = None
@@ -2052,6 +2089,14 @@ def choose_listing(show_all=False):
                     say("\n  Nothing needs attention right now -- showing "
                         "everything under agents/. --show-all skips straight "
                         "here next time.")
+
+    if keep is not None:
+        if only is None:
+            only = {(b, n, a) for b in brands(root) for n in listings(b, root)
+                    for a in agent_dirs(b, n, root)}
+        only = {k for k in only if keep(k)}
+        if not only:
+            return None
 
     actions, known = listing_actions()
     bs = active_level(only) if only else brands(root)

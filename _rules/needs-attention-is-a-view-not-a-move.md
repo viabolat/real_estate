@@ -74,6 +74,27 @@ and need a rebuild *during* the snooze window, and the default picker still
 will not offer that listing again until its follow-up date arrives on its own
 or `--show-all` is used to reach it early — see `STEPS.md`.
 
+## Active is the general set; an action narrows it for itself
+
+`active` answers "does this listing still want something from you", and a
+follow-up that has come due is exactly that — so a published, contacted listing
+belongs in it. That makes it the right default for the build picker and the wrong
+set for any rung that can only touch a subset. The publish rung could act on none
+of the eight already-contacted listings the menu offered it: a confirmed publish
+clears its own cuts (see
+[`a-confirmed-sample-publish-clears-its-own-cuts`](a-confirmed-sample-publish-clears-its-own-cuts.md)),
+so their `out/` is empty and picking one only ever printed `No sample_ cuts --
+build it first`.
+
+`choose_listing(keep=...)` is that narrowing — a predicate on the
+`(brand, listing, agent)` key, applied to whichever set was chosen, and returning
+`None` when nothing survives so the caller can say what is missing in its own
+words. It is **not** a second tier and records nothing: `publish_action()` passes
+`sample_cuts()`, re-derived from `out/` on the spot, the same check rung 4 already
+makes one line later for the `+ New listing` path no filter sees. Do not add a
+"publishable" flag, a fourth tier, or a filtered set that is computed anywhere but
+at the moment the picker opens.
+
 `needs_attention/` is gitignored and excluded from `.vercelignore` exactly like
 `prospects/` — it is a second path to the same PII agents/ already holds, not a
 new category of data.
